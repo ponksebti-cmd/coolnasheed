@@ -74,6 +74,9 @@ class FakeParam {
   }
 }
 
+/** Every node the engine builds, kept so tests can inspect the graph itself. */
+const liveNodes: FakeNode[] = [];
+
 class FakeNode {
   context: FakeAudioContext;
   numberOfInputs = 1;
@@ -81,6 +84,7 @@ class FakeNode {
   constructor(ctx: FakeAudioContext) {
     this.context = ctx;
     nodeCount++;
+    liveNodes.push(this);
   }
   connect(dest: unknown) {
     if (!dest) throw new Error("connect() called with no destination");
@@ -152,6 +156,9 @@ class FakeBuffer {
     this.length = length;
     this.sampleRate = sampleRate;
     this.data = Array.from({ length: channels }, () => new Float32Array(length));
+  }
+  get duration() {
+    return this.length / this.sampleRate;
   }
   getChannelData(i: number) {
     return this.data[i]!;
@@ -454,11 +461,70 @@ async function main() {
   assert("analyser spectrum is readable", spectrum.length > 0 && spectrum[0] !== undefined);
   assert("level meter reads", engine.readLevel() >= 0 && engine.readLevel() <= 1);
 
-  engine.setDuff(false);
+  /* The intro is one long hum drone, so jump into a sung verse and let the
+     scheduler run through a few phrases before inspecting what it built. */
+  await engine.seek(song.lines[2]!.t + 0.05);
+  await sleep(1600);
+
+  /* ---- white-box: inspect the graph the engine actually built ---- */
+  const { FORMANTS } = await import("../src/lib/voice-types");
+  const gains = liveNodes.filter((n): n is FakeGain => n instanceof FakeGain);
+  const saws = liveNodes.filter((n): n is FakeOsc => n instanceof FakeOsc && n.type === "sawtooth");
+  const bandpass = liveNodes.filter((n): n is FakeFilter => n instanceof FakeFilter && n.type === "bandpass");
+  const convs = liveNodes.filter((n): n is FakeConvolver => n instanceof FakeConvolver);
+
+  assert("voices are sawtooth sources, not sine beeps", saws.length >= 12, `${saws.length} sawtooth oscillators`);
+  assert(
+    "every voice is shaped by three formant resonators",
+    bandpass.length >= saws.length,
+    `${bandpass.length} band-passes for ${saws.length} saws`,
+  );
+
+  const bpFreqs = new Set(bandpass.map((b) => Math.round(b.frequency.value)));
+  const vowelsUsed = Object.entries(FORMANTS)
+    .map(([v, cfg]) => ({ v, hits: cfg.f.filter((f) => bpFreqs.has(Math.round(f))).length }))
+    .filter((x) => x.hits >= 2);
+  assert(
+    "their frequencies come from the vowel table",
+    vowelsUsed.length >= 2,
+    vowelsUsed.map((x) => `${x.v} ${x.hits}/3`).join(", "),
+  );
+
+  assert("one convolver carries the whole mix", convs.length === 1, `${convs.length} convolvers`);
+  const irBefore = convs[0]?.buffer?.duration ?? 0;
   engine.setSpace("masjid");
+  const irAfter = convs[0]?.buffer?.duration ?? 0;
+  assert(
+    "changing space rebuilds a longer impulse response",
+    irAfter > irBefore + 1,
+    `${irBefore.toFixed(2)}s → ${irAfter.toFixed(2)}s`,
+  );
+  assert("and the engine reports the new space", engine.currentSpace === "masjid");
+
+  /* Identify buses by what moves, not by guessing values. */
+  const beforeVolume = gains.map((g) => g.gain.value);
+  engine.setVolume(4);
+  const master = gains.filter((g, i) => g.gain.value !== beforeVolume[i]);
+  assert(
+    "out-of-range volume is clamped onto exactly one bus",
+    master.length === 1 && master[0]!.gain.value === 1,
+    `${master.length} bus(es) moved, value ${master[0]?.gain.value}`,
+  );
   engine.setVolume(0.4);
-  await sleep(120);
-  assert("space + duff + volume changes are safe", true);
+  assert("0.4 reaches the same master bus", Math.abs(master[0]!.gain.value - 0.4) < 1e-9);
+
+  const beforeDuff = gains.map((g) => g.gain.value);
+  engine.setDuff(false);
+  const drumBus = gains.filter((g, i) => g.gain.value !== beforeDuff[i]);
+  assert(
+    "duff off silences one bus and leaves the voices alone",
+    drumBus.length === 1 && drumBus[0]!.gain.value === 0 && Math.abs(master[0]!.gain.value - 0.4) < 1e-9,
+    `${drumBus.length} bus(es) moved`,
+  );
+  assert("the engine remembers the choice", engine.duffEnabled === false);
+  engine.setDuff(true);
+  assert("duff on restores that bus to 0.5", Math.abs(drumBus[0]!.gain.value - 0.5) < 1e-9);
+  assert("and reports it", engine.duffEnabled === true);
 
   await engine.seek(2);
   assert("seek lands near the target", Math.abs(engine.getTime() - 2) < 0.4, engine.getTime().toFixed(2));

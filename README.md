@@ -53,17 +53,19 @@ motif bank and lyric lines, syllabifies every line, and walks a clock forward �
 That is why the lyrics are frame-accurate: they are not aligned to audio afterwards, they
 are the audio's own schedule.
 
-- **Voices.** Each syllable gets a vowel (extracted by the syllabifier) and a saw oscillator
-  pushed through three formant band-passes (`a: 700/1220/2600`, `i: 270/2290/3010`, …) with
-  a soft attack and a breath noise layer. Lead, harmony and hum drone are separate buses.
+- **Voices.** Each syllable gets a vowel (extracted by the syllabifier) and three slightly
+  detuned saw oscillators, one per formant resonator: `a 760/1200/2600`, `e 520/1820/2500`,
+  `i 300/2200/3000`, `o 520/900/2450`, `u 330/860/2300`, plus a closed-lip `m 260/900/1900`
+  for humming. Lead, harmony and hum are separate buses with their own gains and sends.
 - **Maqāmāt.** Ten scales with real quarter tones — Rāst `[0, 2, 3.5, 5, 7, 9, 10.5]`,
   Bayātī, Ḥijāz, Nahāwand, Kurd, ʿAjam, Sabā, Nikrīz, Ḥijāzkār, ʿUsshāq. Frequency is
   `root × 2^(degree/12)`, so a 3.5 step is an actual neutral third, not a detuned major.
 - **Duff.** A synthesized frame drum (membrane sine drop + noise slap + rim), patterned per
   track and always toggleable — plenty of listeners want vocals only, and the app treats
   that as a first-class preference rather than a mix setting.
-- **Space.** An impulse response is generated from decaying noise and used as a convolution
-  reverb; wet/dry follows the track's mood.
+- **Space.** The reverb is a convolution of a generated impulse response (decaying noise,
+  per-preset length and decay). You pick the room — Studio 0.5s, Room 1.5s, Hall 3.1s,
+  Masjid 4.6s — and the choice is persisted and applied on boot.
 - **Scheduler.** A 25 ms timer walks a rolling horizon 0.55 s ahead of the audio clock,
   which keeps note placement sample-accurate while staying cheap on the main thread. Seek,
   pause and stop rebuild the graph from the scheduler position rather than fighting it.
@@ -128,7 +130,12 @@ bounds, durations between 40s and 5m), maqām arithmetic including quarter tones
 syllabifier across Arabic/transliteration/English, search, Nūr's determinism, the audio
 engine lifecycle, all 18 routes, the lyric view (line count, karaoke spans, repetition
 labels, rail seeking), and UI interactions such as loving a track and counting tasbīḥ.
-Current run: **5,810 notes, 2,363 drum hits, 377 audio nodes, 0 failures.**
+The audio checks are white-box: the fake context keeps every node it hands out, so the
+suite asserts that voices really are sawtooth through three band-passes at the vowel
+table's frequencies, that changing space swaps in a longer impulse response, that muting
+the duff silences exactly one bus and leaves the voices alone, and that an out-of-range
+volume is clamped onto the master.
+Current run: **5,810 notes and 2,363 drum hits scheduled, every audio node inspected, 0 failures.**
 
 ---
 
