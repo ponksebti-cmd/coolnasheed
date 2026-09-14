@@ -657,6 +657,79 @@ async function main() {
     host.remove();
   }
 
+  section("Persistence (a reload from localStorage)");
+  {
+    const { useLibrary } = await import("../src/store/library");
+    const key = "coolnasheed:library:v1";
+    const payload = {
+      state: {
+        liked: ["sakina", "a-track-that-no-longer-exists"],
+        likedCollections: ["nur"],
+        followedArtists: ["yusuf"],
+        playlists: [
+          {
+            id: "pl-seeded",
+            name: "Fajr set",
+            blurb: "Seeded by the test.",
+            seed: "playlist-seeded",
+            accent: "jade",
+            trackIds: ["city-of-fajr", "also-gone"],
+            createdAt: 1700000000000,
+          },
+        ],
+        history: [{ id: "laylat-al-qadr", at: Date.now(), count: 3 }],
+        tasbih: { id: "istighfar", count: 41 },
+        // deliberately missing reduceMotion + showTranslation: an older save
+        settings: { theme: "dawn", space: "masjid", duff: false, volume: 0.6, lyricScript: "ar", showArabic: false },
+      },
+      version: 0,
+    };
+    w.localStorage.setItem(key, JSON.stringify(payload));
+    await React.act(async () => {
+      useLibrary.persist.rehydrate();
+    });
+    const st = useLibrary.getState();
+
+    assert("loved nasheeds come back", st.liked.includes("sakina"));
+    assert("playlists come back with their tracks", st.playlists.some((p) => p.id === "pl-seeded" && p.trackIds.includes("city-of-fajr")));
+    assert("followed reciters come back", st.followedArtists.includes("yusuf"));
+    assert("the tasbīḥ keeps its count and phrase", st.tasbih.count === 41 && st.tasbih.id === "istighfar");
+    assert("play history comes back", st.history.some((h) => h.id === "laylat-al-qadr" && h.count === 3));
+    assert(
+      "preferences come back — theme, room, duff, script",
+      st.settings.theme === "dawn" && st.settings.space === "masjid" && st.settings.duff === false && st.settings.lyricScript === "ar",
+    );
+    assert(
+      "keys an older save never had fall back to defaults",
+      st.settings.reduceMotion === false && st.settings.showTranslation === true,
+      `reduceMotion=${String(st.settings.reduceMotion)} showTranslation=${String(st.settings.showTranslation)}`,
+    );
+
+    /* stale ids must degrade, not crash */
+    w.history.pushState({}, "", "/library");
+    const host = w.document.createElement("div");
+    w.document.body.appendChild(host);
+    const libRoot = createRoot(host);
+    await React.act(async () => {
+      libRoot.render(React.createElement(App));
+    });
+    await sleep(80);
+    const text = host.textContent ?? "";
+    assert("the library still renders around a stale id", text.includes("Fajr set"), "playlist shown");
+    assert("and the dead id is never rendered", !text.includes("a-track-that-no-longer-exists"));
+    await React.act(async () => {
+      libRoot.unmount();
+    });
+    host.remove();
+
+    /* put the store back to defaults so later sections test the normal path */
+    w.localStorage.removeItem(key);
+    await React.act(async () => {
+      useLibrary.persist.rehydrate();
+      useLibrary.setState({ liked: [], playlists: [], history: [], tasbih: { id: "subhanallah", count: 0 } });
+    });
+  }
+
   section("Interaction");
   w.history.pushState({}, "", "/");
   const root = createRoot(container);

@@ -129,7 +129,11 @@ every generated song (finite frequencies, monotonic word timings, duff inside th
 bounds, durations between 40s and 5m), maqām arithmetic including quarter tones, the
 syllabifier across Arabic/transliteration/English, search, Nūr's determinism, the audio
 engine lifecycle, all 18 routes, the lyric view (line count, karaoke spans, repetition
-labels, rail seeking), and UI interactions such as loving a track and counting tasbīḥ.
+labels, rail seeking), UI interactions such as loving a track and counting tasbīḥ, and a
+reload from a hand-written `localStorage` payload — loved nasheeds, playlists, history, the
+tasbīḥ count and every preference must come back, keys an older save never wrote must fall
+back to their defaults, and a stale track id must degrade quietly instead of breaking the
+library page.
 The audio checks are white-box: the fake context keeps every node it hands out, so the
 suite asserts that voices really are sawtooth through three band-passes at the vowel
 table's frequencies, that changing space swaps in a longer impulse response, that muting
