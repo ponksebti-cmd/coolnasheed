@@ -4,7 +4,7 @@
  *
  *   npm run setup                       schema + catalogue, using whatever it can find
  *   npm run setup -- --no-seed          schema only; publish your own nasheeds into it
- *   npm run setup -- --functions        and deploy the six Edge Functions
+ *   npm run setup -- --functions        set the secret, deploy the six Edge Functions, call them back
  *   npm run setup -- --dry-run          say what it would do, touch nothing
  *
  * It needs one of two ways in, and will tell you which one it is missing:
@@ -27,9 +27,9 @@
  * give it one, plus the file to paste into Studio if you would rather not.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const ROOT = process.cwd();
 const MIGRATIONS = ["20260914120000_core.sql", "20260914120100_functions.sql", "20260914120300_rls.sql", "20260914120400_storage.sql"]
@@ -147,6 +147,54 @@ async function count(table, filter = "") {
   const range = res.headers.get("content-range") ?? "";
   const total = range.split("/")[1];
   return total && total !== "*" ? Number(total) : null;
+}
+
+/**
+ * A deployed function is only deployed if it answers. These two are the ones a browser
+ * calls with no account, so they are called here exactly that way: the publishable key
+ * in `apikey` and in `Authorization`, no session, no cookies. What comes back is the
+ * proof, and what comes back wrong is printed with the command that fixes it.
+ */
+async function callFunction(name) {
+  const res = await fetch(`${url}/functions/v1/${name}`, {
+    headers: { apikey: publishableKey, Authorization: `Bearer ${publishableKey}` },
+  });
+  const text = await res.text();
+  let body = null;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = null;
+  }
+  return { status: res.status, body, text: text.slice(0, 160) };
+}
+
+async function askTheFunctions() {
+  const health = await callFunction("health");
+  if (health.status === 200 && health.body?.checks) {
+    const c = health.body.checks;
+    const marks = ["database", "storage", "auth", "seed"]
+      .map((k) => `${k} ${c[k] ? green("✓") : red("✗")}`)
+      .join(" · ");
+    ok("health answers", `${health.body.counts?.songs ?? 0} nasheeds · ${marks}`);
+  } else if (health.status === 401 || health.status === 403) {
+    warn("health refused the publishable key", `${health.status} — it is behind JWT verification:
+
+    npx supabase functions deploy health --no-verify-jwt --project-ref ${projectRef}`);
+  } else {
+    warn("health did not answer", `${health.status} ${health.text}`);
+  }
+
+  const catalog = await callFunction("catalog");
+  if (catalog.status === 200 && Array.isArray(catalog.body?.songs)) {
+    ok("catalog answers", `${catalog.body.songs.length} nasheeds · ${catalog.body.artists?.length ?? 0} publishers · ${catalog.body.collections?.length ?? 0} collections${catalog.body.seeded ? "" : " · not the seeded catalogue yet"}`);
+  } else if (catalog.status === 401 || catalog.status === 403) {
+    warn("catalog refused the publishable key", `${catalog.status}:
+
+    npx supabase functions deploy catalog --no-verify-jwt --project-ref ${projectRef}`);
+  } else {
+    warn("catalog did not answer", `${catalog.status} ${catalog.text}`);
+  }
 }
 
 /* ---------------------------------------------------------------- the two roads */
@@ -267,14 +315,20 @@ async function main() {
     else warn("cannot tell whether public.songs is there", reach.detail);
   } catch (err) {
     reach = { state: "unreachable" };
+    const ref = projectRef || "<ref>";
     no(`cannot reach ${projectRef}.supabase.co`, String(err?.message ?? err).split("\n")[0]);
     console.log(dim(`
   This script has to run somewhere that can see your project. If you are reading this
   inside a sandboxed workspace, run it on your own machine instead:
 
-    git clone https://github.com/ponksebti-cmd/coolnasheed && cd coolnasheed
-    npm install
-    npm run setup -- --db-url="postgres://postgres.<ref>:<password>@db.<ref>.supabase.co:5432/postgres"`));
+    git clone https://github.com/ponksebti-cmd/coolnasheed
+    cd coolnasheed && git checkout arena/01a09da5-coolnasheed && npm install
+    npm run setup -- --db-url="postgres://postgres.${ref}:<password>@db.${ref}.supabase.co:5432/postgres"
+
+  or, with a personal access token from Account → Access Tokens (no database password,
+  and the only route that can deploy the Edge Functions):
+
+    npm run setup -- --token=sbp_… --functions`));
     process.exit(1);
   }
 
@@ -400,17 +454,47 @@ async function main() {
 
     npm run setup -- --functions --token=sbp_…      (deploys all six)`));
   } else if (dryRun) {
-    warn("dry run — would deploy catalog, analytics, publish, moderate, account, health");
+    warn("dry run — would set the secret key, deploy all six, and call two of them back");
   } else if (!accessToken) {
     warn("deploying needs a personal access token", "npm run setup -- --functions --token=sbp_…");
   } else {
-    const result = spawnSync("npx", ["--yes", "supabase@latest", "functions", "deploy", "--project-ref", projectRef], {
+    const cli = ["--yes", "supabase@latest"];
+    const cliEnv = { ...process.env, SUPABASE_ACCESS_TOKEN: accessToken };
+
+    /* The secret first. A function that boots without it answers 500 on the one job only
+       it can do — deleting an account — and says nothing useful about why. It travels in a
+       0600 file rather than in argv, so it lands in no process list and no shell history. */
+    if (secretKey) {
+      const secretsPath = join(ROOT, "node_modules/.tmp/functions-secrets.env");
+      mkdirSync(dirname(secretsPath), { recursive: true });
+      writeFileSync(secretsPath, `SUPABASE_SECRET_KEY=${secretKey}\n`, { mode: 0o600 });
+      const secrets = spawnSync("npx", [...cli, "secrets", "set", "--env-file", secretsPath, "--project-ref", projectRef], {
+        cwd: ROOT,
+        stdio: "inherit",
+        env: cliEnv,
+      });
+      rmSync(secretsPath, { force: true });
+      if (secrets.status === 0) ok("the secret key is on the project", `${mask(secretKey)} — the functions hold it, the bundle never does`);
+      else warn("the secret key did not take", `exit ${secrets.status} — deleting an account stays unavailable until it does:
+
+    npx supabase secrets set SUPABASE_SECRET_KEY=… --project-ref ${projectRef}`);
+    } else {
+      warn("no SUPABASE_SECRET_KEY to set", "everything works without it except deleting an account, which is the one thing a browser must never be trusted to do");
+    }
+
+    /* --use-api bundles server-side. Without it the CLI reaches for Docker, which is a
+       dependency this project does not otherwise have and most laptops do not have running. */
+    const deploy = spawnSync("npx", [...cli, "functions", "deploy", "--project-ref", projectRef, "--use-api"], {
       cwd: ROOT,
       stdio: "inherit",
-      env: { ...process.env, SUPABASE_ACCESS_TOKEN: accessToken },
+      env: cliEnv,
     });
-    if (result.status === 0) ok("six functions deployed");
-    else no("the deploy did not finish", `exit ${result.status}`);
+    if (deploy.status !== 0) {
+      no("the deploy did not finish", `exit ${deploy.status}`);
+    } else {
+      ok("six functions deployed", "catalog · analytics · publish · moderate · account · health");
+      await askTheFunctions();
+    }
   }
 
   if (runner) await runner.close();

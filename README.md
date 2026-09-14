@@ -177,6 +177,30 @@ comment, moderate and read its dashboard. The one thing that genuinely needs a f
 **deleting an account**, because `auth.users` needs the secret key and a browser must never
 hold it; the app says exactly that instead of failing quietly.
 
+### The Edge Functions, by hand
+
+`npm run setup -- --functions --token=sbp_…` does all of this and then calls the functions
+back to prove they answer. Doing it yourself is four commands, and needs no Docker:
+
+```bash
+export SUPABASE_ACCESS_TOKEN=sbp_…      # Account → Access Tokens
+
+npx supabase secrets set SUPABASE_SECRET_KEY=sb_secret_… --project-ref YOUR_REF
+npx supabase functions deploy --project-ref YOUR_REF --use-api
+
+# the two a signed-out browser calls — both should answer 200
+curl -s "$VITE_SUPABASE_URL/functions/v1/health"  -H "apikey: $VITE_SUPABASE_ANON_KEY"
+curl -s "$VITE_SUPABASE_URL/functions/v1/catalog" -H "apikey: $VITE_SUPABASE_ANON_KEY"
+```
+
+`--use-api` bundles server-side; without it the CLI looks for Docker. The secret key is the
+one thing a function holds that a browser must not — it is what lets `account` delete a user
+from `auth.users`; every other function works without it. Which functions demand a real
+session is decided in `supabase/config.toml` (`verify_jwt`): `catalog`, `analytics` and
+`health` are open, `publish`, `moderate` and `account` are not, and the CLI reads that file
+when it deploys. If a function ever answers `401` to the publishable key, redeploy it with
+`--no-verify-jwt`.
+
 **Everything local, with Docker** (the Supabase CLI runs the whole stack — database, auth,
 storage, functions, studio), if that is the machine you are on:
 
