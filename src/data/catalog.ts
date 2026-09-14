@@ -1,9 +1,21 @@
-import { TRACKS } from "./tracks";
-
-export { TRACKS };
+import { TRACKS as SHIPPED_TRACKS } from "./tracks";
 import type { Artist, Collection, Mood, Track } from "./types";
 import { hashString, mulberry32 } from "../lib/prng";
+import { artworkUrl, audioUrl } from "../lib/supabase";
 import { songFor } from "../lib/song";
+import type { ArtistCard, CatalogCollection, Song } from "../../shared/types";
+
+/**
+ * The live tables.
+ *
+ * They start out as the catalogue bundled with the client and are replaced *in place*
+ * by `hydrateCatalog()` the moment the server answers, so every reader in the app —
+ * shelves, search, the player, Nūr — sees what the database has without knowing or
+ * caring where it came from. In-place mutation (rather than reassigning) is what keeps
+ * the dozen modules that import these arrays working, and it is why an offline visit
+ * still shows the shipped catalogue instead of an empty room.
+ */
+export const TRACKS: Track[] = [...SHIPPED_TRACKS];
 
 export const ARTISTS: Artist[] = [
   {
@@ -241,18 +253,210 @@ const trackById = new Map(TRACKS.map((t) => [t.id, t]));
 const artistById = new Map(ARTISTS.map((a) => [a.id, a]));
 const collectionById = new Map(COLLECTIONS.map((c) => [c.id, c]));
 
+function reindex(): void {
+  trackById.clear();
+  TRACKS.forEach((t) => trackById.set(t.id, t));
+  artistById.clear();
+  ARTISTS.forEach((a) => artistById.set(a.id, a));
+  collectionById.clear();
+  COLLECTIONS.forEach((c) => collectionById.set(c.id, c));
+}
+
+/* ------------------------------------------------------- server hydration
+
+   Song → Track, ArtistCard → Artist, CatalogCollection → Collection. The server owns
+   the truth about what exists; these mappers are the only place that knows the two
+   vocabularies are different. */
+
+export function trackFromSong(song: Song): Track {
+  return {
+    id: song.id,
+    title: song.title,
+    titleAr: song.titleAr ?? undefined,
+    // the catalogue keys its publishers by handle, which is what a URL carries
+    artistId: song.ownerHandle ?? song.ownerId ?? "",
+    collections: [],
+    tags: song.tags,
+    maqam: song.maqam,
+    root: song.root,
+    bpm: song.bpm,
+    voices: song.voices,
+    duff: song.duff ?? undefined,
+    duffEnter: song.duffEnter,
+    passes: song.passes,
+    motifBank: song.motifBank ?? undefined,
+    blurb: song.note,
+    year: song.year ?? new Date(song.publishedAt).getFullYear(),
+    seed: `${song.id}-${song.maqam}`,
+    accent: song.accent,
+    lines: song.lines.map((l) => ({ ...l })),
+    ownerId: song.ownerId,
+    audioUrl: audioUrl(song.audioPath),
+    artworkUrl: artworkUrl(song.artworkPath),
+    durationMs: song.durationMs ?? null,
+    stats: { plays: song.plays, likes: song.likes, notes: song.notes },
+    status: song.status,
+    publishedAt: song.publishedAt,
+  };
+}
+
+export function artistFromCard(card: ArtistCard): Artist {
+  return {
+    id: card.id,
+    name: card.name,
+    nameAr: card.nameAr ?? undefined,
+    role: card.role,
+    origin: card.origin,
+    bio: card.bio,
+    seed: card.seed,
+    accent: card.accent,
+    verified: card.verified,
+  };
+}
+
+export function collectionFromServer(collection: CatalogCollection): Collection {
+  return {
+    id: collection.id,
+    kind: collection.kind,
+    title: collection.title,
+    titleAr: collection.titleAr ?? undefined,
+    curator: collection.curator,
+    blurb: collection.blurb,
+    seed: collection.seed,
+    accent: collection.accent,
+    tags: collection.tags,
+    year: collection.year,
+    trackIds: collection.songIds,
+  };
+}
+
+let serverCatalogAt = 0;
+
+/**
+ * Replace the in-memory catalogue with what the server sent.
+ * Returns the number of nasheeds it now holds, so the boot log can say what happened.
+ */
+export function hydrateCatalog(payload: { artists: ArtistCard[]; songs: Song[]; collections: CatalogCollection[] }): number {
+  const artists = payload.artists.map(artistFromCard);
+  const tracks = payload.songs.map(trackFromSong);
+
+  ARTISTS.length = 0;
+  ARTISTS.push(...artists);
+  TRACKS.length = 0;
+  TRACKS.push(...tracks);
+  COLLECTIONS.length = 0;
+  COLLECTIONS.push(...payload.collections.map(collectionFromServer));
+
+  // a track's collections are the ones that list it
+  for (const track of TRACKS) {
+    track.collections = COLLECTIONS.filter((c) => c.trackIds.includes(track.id)).map((c) => c.id);
+  }
+
+  serverCatalogAt = Date.now();
+  registryVersion++;
+  reindex();
+  return TRACKS.length;
+}
+
+/** Swap in (or update) a single nasheed — used right after publishing or editing. */
+export function applySong(song: Song): Track {
+  const track = trackFromSong(song);
+  const index = TRACKS.findIndex((t) => t.id === track.id);
+  if (index >= 0) TRACKS[index] = track;
+  else TRACKS.push(track);
+  track.collections = COLLECTIONS.filter((c) => c.trackIds.includes(track.id)).map((c) => c.id);
+  registryVersion++;
+  reindex();
+  return track;
+}
+
+/** Drop a nasheed that was taken down or deleted. */
+export function forgetSong(id: string): void {
+  const index = TRACKS.findIndex((t) => t.id === id);
+  if (index >= 0) TRACKS.splice(index, 1);
+  registryVersion++;
+  reindex();
+}
+
+/** When the catalogue last came from the server; 0 means it never did. */
+export function catalogSyncedAt(): number {
+  return serverCatalogAt;
+}
+
+export function isFromServer(track: Track | undefined): boolean {
+  return !!track?.stats;
+}
+
+/* ------------------------------------------------------ published by listeners
+
+   The shipped catalogue is static, but an account can publish a nasheed. Those
+   live in localStorage and are registered here, so every reader — the track page,
+   search, the player, artist pages — resolves a published nasheed exactly the way
+   it resolves a shipped one. Publishing works at all because a nasheed in this app
+   is data: the same composer that sings the catalogue sings what you wrote. */
+
+const publishedTracksById = new Map<string, Track>();
+const publishedArtistsById = new Map<string, Artist>();
+let registryVersion = 0;
+
+export function registerPublished(tracks: Track[], artists: Artist[]): void {
+  publishedTracksById.clear();
+  publishedArtistsById.clear();
+  tracks.forEach((t) => publishedTracksById.set(t.id, t));
+  artists.forEach((a) => publishedArtistsById.set(a.id, a));
+  registryVersion++;
+}
+
+/** Bumped whenever the registry changes, so memoised lists can invalidate. */
+export function catalogVersion(): number {
+  return registryVersion;
+}
+
+export function isPublished(id: string | null | undefined): boolean {
+  return !!id && publishedTracksById.has(id);
+}
+
+/** The whole catalogue: shipped nasheeds first, then whatever listeners published. */
+export function allTracks(): Track[] {
+  return publishedTracksById.size ? [...TRACKS, ...publishedTracksById.values()] : TRACKS;
+}
+
+export function allArtists(): Artist[] {
+  return publishedArtistsById.size ? [...ARTISTS, ...publishedArtistsById.values()] : ARTISTS;
+}
+
+export function publishedTracks(): Track[] {
+  return Array.from(publishedTracksById.values());
+}
+
+/* The studio's work-in-progress resolves like a track — so you can hear it in the
+   real player, with real synced lyrics, before you commit to publishing it — but it
+   never appears in a list, a search result or a shelf. */
+let previewTrack: Track | null = null;
+
+export function registerPreview(track: Track | null): void {
+  previewTrack = track;
+  registryVersion++;
+}
+
+export function isPreview(id: string | null | undefined): boolean {
+  return !!id && previewTrack?.id === id;
+}
+
 export function getTrack(id: string | null | undefined): Track | undefined {
-  return id ? trackById.get(id) : undefined;
+  if (!id) return undefined;
+  return trackById.get(id) ?? publishedTracksById.get(id) ?? (previewTrack?.id === id ? previewTrack : undefined);
 }
 export function getArtist(id: string | null | undefined): Artist | undefined {
-  return id ? artistById.get(id) : undefined;
+  if (!id) return undefined;
+  return artistById.get(id) ?? publishedArtistsById.get(id);
 }
 export function getCollection(id: string | null | undefined): Collection | undefined {
   return id ? collectionById.get(id) : undefined;
 }
 
 export function artistOf(track: Track): Artist {
-  return artistById.get(track.artistId) ?? ARTISTS[0]!;
+  return getArtist(track.artistId) ?? ARTISTS[0]!;
 }
 
 export function tracksOf(collection: Collection): Track[] {
@@ -260,7 +464,7 @@ export function tracksOf(collection: Collection): Track[] {
 }
 
 export function tracksByArtist(artistId: string): Track[] {
-  return TRACKS.filter((t) => t.artistId === artistId);
+  return allTracks().filter((t) => t.artistId === artistId);
 }
 
 export function collectionsOf(track: Track): Collection[] {
@@ -268,6 +472,8 @@ export function collectionsOf(track: Track): Collection[] {
 }
 
 export function durationOf(track: Track): number {
+  // an uploaded recording has a real length; a synthesized one is computed
+  if (track.durationMs && track.durationMs > 0) return track.durationMs / 1000;
   return songFor(track).duration;
 }
 
@@ -277,6 +483,12 @@ export function totalDuration(tracks: Track[]): number {
 
 /** Stable pseudo-social numbers so the catalogue feels lived-in without lying dynamically. */
 export function statsFor(track: Track): { plays: number; likes: number; reposts: number; comments: number } {
+  // real counters from the server win over anything generated here
+  if (track.stats) {
+    return { plays: track.stats.plays, likes: track.stats.likes, reposts: 0, comments: track.stats.notes };
+  }
+  // a nasheed published five minutes ago has no history to invent
+  if (isPublished(track.id)) return { plays: 0, likes: 0, reposts: 0, comments: 0 };
   const rng = mulberry32(hashString(`stats-${track.id}`));
   const recency = 1 + (track.year - 2015) * 0.09;
   const plays = Math.round((180_000 + rng() * 2_400_000) * recency);
@@ -294,13 +506,20 @@ export function formatCount(n: number): string {
   return `${n}`;
 }
 
-export const ALL_TAGS = Array.from(new Set(TRACKS.flatMap((t) => t.tags))).sort();
+export const ALL_TAGS = Array.from(new Set(SHIPPED_TRACKS.flatMap((t) => t.tags))).sort();
+
+/** Every tag in the live catalogue, with how many nasheeds carry it. */
+export function tagCounts(): { tag: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const track of TRACKS) for (const tag of track.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  return [...counts.entries()].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+}
 
 export function searchTracks(query: string): Track[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
   const terms = q.split(/\s+/);
-  const scored = TRACKS.map((track) => {
+  const scored = allTracks().map((track) => {
     const artist = artistOf(track);
     const hay = [
       track.title,
@@ -339,7 +558,7 @@ export function searchTracks(query: string): Track[] {
 export function searchArtists(query: string): Artist[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
-  return ARTISTS.filter((a) =>
+  return allArtists().filter((a) =>
     `${a.name} ${a.nameAr ?? ""} ${a.origin} ${a.role} ${a.bio}`.toLowerCase().includes(q),
   );
 }
@@ -356,3 +575,6 @@ export const CATALOG = {
   collections: COLLECTIONS,
   moods: MOODS,
 };
+
+/** Everything, shipped and published — what search and the shelves browse. */
+export const LIVE_CATALOG = { allTracks, allArtists, publishedTracks };

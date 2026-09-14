@@ -4,10 +4,12 @@ import { clsx } from "clsx";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { PlayerBar } from "../player/PlayerBar";
+import { MobileTabBar } from "./MobileTabBar";
 import { ImmersivePlayer } from "../player/ImmersivePlayer";
 import { NurPanel } from "../nur/NurPanel";
 import { CommandPalette } from "../CommandPalette";
 import { ShortcutsSheet } from "../ShortcutsSheet";
+import { AuthModal } from "../auth/AuthModal";
 import { Icon } from "../ui/Icons";
 import { engine } from "../../lib/audio/engine";
 import { useLibrary } from "../../store/library";
@@ -15,6 +17,7 @@ import { usePlayer } from "../../store/player";
 import { useUi } from "../../store/ui";
 import { useKeyboard } from "../../lib/hooks";
 import { getTrack } from "../../data/catalog";
+import { useBoot } from "../../lib/boot";
 
 export function AppShell() {
   const settings = useLibrary((s) => s.settings);
@@ -26,6 +29,13 @@ export function AppShell() {
   const setNur = useUi((s) => s.setNur);
   const location = useLocation();
   const scroller = useRef<HTMLDivElement>(null);
+
+  /* the catalogue, the session and the beacon, once, before anything else needs them */
+  const boot = useBoot();
+  useEffect(() => {
+    if (!boot) return;
+    document.documentElement.dataset.backend = boot.source;
+  }, [boot]);
 
   /* theme */
   useEffect(() => {
@@ -135,12 +145,14 @@ export function AppShell() {
           </main>
         </div>
         <PlayerBar />
+        <MobileTabBar />
       </div>
 
       <ImmersivePlayer />
       <NurPanel />
       <CommandPalette />
       <ShortcutsSheet />
+      <AuthModal />
 
       {/* tiny footer note, always available */}
       <div className="pointer-events-none fixed bottom-[92px] left-1/2 z-20 hidden -translate-x-1/2 items-center gap-2 rounded-full border border-line bg-elev/85 px-3 py-1.5 text-[10.5px] text-muted backdrop-blur-md xl:flex">

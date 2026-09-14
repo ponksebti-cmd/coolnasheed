@@ -224,8 +224,10 @@ export function NurPanel() {
                       <button
                         className="btn btn-ghost !px-3.5 !py-2"
                         onClick={() => {
-                          const pl = createPlaylist(mix.title, mix.trackIds, mix.blurb);
-                          toast.push({ title: "Saved as a set", msg: pl.name, kind: "ok" });
+                          void createPlaylist(mix.title, mix.trackIds, mix.blurb).then((pl) => {
+                            if (!pl) return;
+                            toast.push({ title: "Saved as a set", msg: pl.name, kind: "ok" });
+                          });
                         }}
                       >
                         <Icon name="plus" size={14} /> Save

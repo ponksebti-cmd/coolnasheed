@@ -86,8 +86,7 @@ export default function CollectionPage() {
               <button
                 className="btn btn-ghost !px-3.5 !py-2"
                 onClick={() => {
-                  const pl = library.createPlaylist(collection.title, ids, collection.blurb);
-                  void pl;
+                  void library.createPlaylist(collection.title, ids, collection.blurb);
                 }}
               >
                 <Icon name="plus" size={14} /> Copy to my sets

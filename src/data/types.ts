@@ -23,6 +23,12 @@ export type LyricLine = {
   en?: string;
   /** Attribution or performance note, e.g. "Qur'an 9:128" or "refrain". */
   note?: string;
+  /**
+   * Seconds from the start. Only meaningful for an uploaded recording whose publisher
+   * supplied timings; for a synthesized nasheed the composer derives them, which is
+   * why the karaoke view can never drift.
+   */
+  t?: number;
 };
 
 export type Track = {
@@ -51,6 +57,20 @@ export type Track = {
   seed: string;
   accent: Accent;
   lines: LyricLine[];
+
+  /* --- set when this track came from the server rather than the bundled catalogue --- */
+
+  /** publisher account id on the server */
+  ownerId?: string | null;
+  /** streamed recording; when absent the browser engine sings the composition */
+  audioUrl?: string | null;
+  artworkUrl?: string | null;
+  /** length of the uploaded recording, ms */
+  durationMs?: number | null;
+  /** real counters; when present they replace the generated demo numbers */
+  stats?: { plays: number; likes: number; notes: number };
+  status?: "live" | "removed";
+  publishedAt?: number;
 };
 
 export type CollectionKind = "album" | "mukhtarat" | "mix";

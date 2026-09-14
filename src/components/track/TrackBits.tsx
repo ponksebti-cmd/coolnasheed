@@ -84,6 +84,7 @@ export function LikeButton({ trackId, size = 17, className }: { trackId: string;
       onClick={(e) => {
         e.stopPropagation();
         const now = toggleLike(trackId);
+        if (now === null) return; // blocked: the sheet is open and will do this for us
         if (window.navigator.vibrate) window.navigator.vibrate(8);
         toast.push({
           title: now ? "Loved" : "Removed from loved",
@@ -140,6 +141,7 @@ export function TrackMenu({ track, contextIds }: { track: Track; contextIds?: st
           icon: "plus" as const,
           onClick: () => {
             const added = library.addToPlaylist(pl.id, track.id);
+            if (added === null) return;
             toast.push({
               title: added ? `Added to ${pl.name}` : `Already in ${pl.name}`,
               kind: added ? "ok" : "info",
@@ -151,8 +153,10 @@ export function TrackMenu({ track, contextIds }: { track: Track; contextIds?: st
       label: "New playlist…",
       icon: "library",
       onClick: () => {
-        const pl = library.createPlaylist("Untitled set", [track.id]);
-        toast.push({ title: "Playlist created", msg: pl.name, kind: "ok" });
+        void library.createPlaylist("Untitled set", [track.id]).then((pl) => {
+          if (!pl) return;
+          toast.push({ title: "Playlist created", msg: pl.name, kind: "ok" });
+        });
       },
     },
     {

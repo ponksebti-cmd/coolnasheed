@@ -53,6 +53,11 @@ export class NasheedEngine {
   private irs = new Map<SpacePreset, AudioBuffer>();
 
   private song: Song | null = null;
+  /** an uploaded recording replaces the synthesized performance when present */
+  private recording: AudioBuffer | null = null;
+  private recordingSource: AudioBufferSourceNode | null = null;
+  private recordingGain: GainNode | null = null;
+  private readonly decoded = new Map<string, AudioBuffer>();
   private noteCursor = 0;
   private duffCursor = 0;
   private startedAt = 0;
@@ -76,6 +81,15 @@ export class NasheedEngine {
   }
   get currentSong(): Song | null {
     return this.song;
+  }
+  /** true while an uploaded recording is loaded rather than a synthesized performance */
+  get isRecording(): boolean {
+    return this.recording !== null;
+  }
+  /** length of whatever is loaded, in seconds — recording or composition */
+  get currentDuration(): number {
+    if (this.recording) return this.recording.duration;
+    return this.song?.duration ?? 0;
   }
 
   /* ---------------------------------------------------------------- setup */
@@ -175,11 +189,100 @@ export class NasheedEngine {
     return this.ctx;
   }
 
+  /* ------------------------------------------------------- uploaded audio */
+
+  /**
+   * Load a recording and route it through the same chain as the synthesized voices, so
+   * volume, the space preset and the visualisers all behave identically. Returns the
+   * decoded length in seconds, which is the only way to know it before playing.
+   */
+  async loadRecording(url: string, atTime = 0): Promise<number> {
+    const ctx = this.ensure();
+    if (ctx.state === "suspended") await ctx.resume().catch(() => {});
+
+    let buffer = this.decoded.get(url);
+    if (!buffer) {
+      const res = await fetch(url, { credentials: "same-origin" });
+      if (!res.ok) throw new Error(`Could not fetch the recording (${res.status}).`);
+      const bytes = await res.arrayBuffer();
+      buffer = await ctx.decodeAudioData(bytes);
+      this.decoded.set(url, buffer);
+    }
+
+    this.stopRecordingSource(0.02);
+    this.killVoices(0.02);
+    this.song = null; // a recording has no note schedule to run
+    this.recording = buffer;
+    this.ensureRecordingChain();
+    this.songTime = clamp(atTime, 0, Math.max(0, buffer.duration - 0.05));
+    return buffer.duration;
+  }
+
+  /** The recording path is wired to the compressor and the reverb, both of which
+   *  survive `killVoices()` rebuilding the synthesized buses. */
+  private ensureRecordingChain() {
+    const ctx = this.ensure();
+    if (this.recordingGain) return;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.95;
+    gain.connect(this.compressor!);
+    const send = ctx.createGain();
+    send.gain.value = 0.16;
+    gain.connect(send);
+    send.connect(this.convolver!);
+    this.recordingGain = gain;
+  }
+
+  private stopRecordingSource(fade: number) {
+    const src = this.recordingSource;
+    if (!src || !this.ctx) return;
+    this.recordingSource = null;
+    try {
+      src.stop(this.ctx.currentTime + fade);
+    } catch {
+      /* already stopped */
+    }
+    src.onended = null;
+  }
+
+  private playRecording(ctx: AudioContext) {
+    const buffer = this.recording;
+    if (!buffer) return;
+    this.ensureRecordingChain();
+    if (this.songTime >= buffer.duration - 0.02) this.songTime = 0;
+    this.stopRecordingSource(0.01);
+
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(this.recordingGain!);
+    const offset = this.songTime;
+    const startAt = ctx.currentTime + 0.02;
+    this.startedAt = startAt - offset;
+    this.recordingSource = src;
+
+    src.onended = () => {
+      if (this.recordingSource !== src) return; // we stopped it ourselves
+      this.recordingSource = null;
+      this.songTime = buffer.duration;
+      this.playing = false;
+      this.stopScheduler();
+      this.handlers.onStateChange?.(false);
+      this.handlers.onEnded?.();
+    };
+
+    src.start(startAt, offset);
+    this.playing = true;
+    this.handlers.onStateChange?.(true);
+  }
+
   /* ------------------------------------------------------------- controls */
 
   async load(song: Song, atTime = 0) {
     const ctx = this.ensure();
     if (ctx.state === "suspended") await ctx.resume().catch(() => {});
+    // switching from a recording back to a synthesized performance
+    this.stopRecordingSource(0.02);
+    this.recording = null;
     this.song = song;
     this.songTime = clamp(atTime, 0, Math.max(0, song.duration - 0.05));
     this.noteCursor = firstIndexAt(song.notes, this.songTime);
@@ -188,16 +291,22 @@ export class NasheedEngine {
   }
 
   async play() {
-    if (!this.song) return;
+    if (!this.song && !this.recording) return;
     const ctx = this.ensure();
     if (ctx.state === "suspended") await ctx.resume().catch(() => {});
-    if (this.songTime >= this.song.duration - 0.02) {
+    if (this.recording) {
+      this.playRecording(ctx);
+      return;
+    }
+    const song = this.song;
+    if (!song) return;
+    if (this.songTime >= song.duration - 0.02) {
       this.songTime = 0;
       this.noteCursor = 0;
       this.duffCursor = 0;
     } else {
-      this.noteCursor = firstIndexAt(this.song.notes, this.songTime);
-      this.duffCursor = firstIndexAt(this.song.duff, this.songTime);
+      this.noteCursor = firstIndexAt(song.notes, this.songTime);
+      this.duffCursor = firstIndexAt(song.duff, this.songTime);
     }
     this.killVoices(0.02);
     this.startedAt = ctx.currentTime + 0.06 - this.songTime;
@@ -211,6 +320,7 @@ export class NasheedEngine {
     this.songTime = this.getTime();
     this.playing = false;
     this.stopScheduler();
+    this.stopRecordingSource(0.04);
     this.killVoices(0.06);
     this.handlers.onStateChange?.(false);
   }
@@ -223,11 +333,18 @@ export class NasheedEngine {
   }
 
   async seek(t: number) {
-    if (!this.song) return;
-    const target = clamp(t, 0, this.song.duration);
+    if (!this.song && !this.recording) return;
+    const target = clamp(t, 0, this.currentDuration);
+    if (this.recording) {
+      this.songTime = target;
+      if (this.playing && this.ctx) this.playRecording(this.ctx);
+      return;
+    }
+    const song = this.song;
+    if (!song) return;
     this.songTime = target;
-    this.noteCursor = firstIndexAt(this.song.notes, target);
-    this.duffCursor = firstIndexAt(this.song.duff, target);
+    this.noteCursor = firstIndexAt(song.notes, target);
+    this.duffCursor = firstIndexAt(song.duff, target);
     if (this.playing) {
       const ctx = this.ensure();
       this.killVoices(0.02);
@@ -237,9 +354,9 @@ export class NasheedEngine {
   }
 
   getTime(): number {
-    if (!this.song) return 0;
+    if (!this.song && !this.recording) return 0;
     if (!this.playing || !this.ctx) return this.songTime;
-    return clamp(this.ctx.currentTime - this.startedAt, 0, this.song.duration);
+    return clamp(this.ctx.currentTime - this.startedAt, 0, this.currentDuration);
   }
 
   setVolume(v: number) {
@@ -309,6 +426,7 @@ export class NasheedEngine {
   private tick() {
     const ctx = this.ctx;
     const song = this.song;
+    // recordings end on their own through the source's onended
     if (!ctx || !song || !this.playing) return;
 
     const now = ctx.currentTime;

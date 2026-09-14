@@ -106,8 +106,10 @@ export default function LibraryPage() {
                 <button
                   className="btn btn-ghost !px-3 !py-1.5"
                   onClick={() => {
-                    const pl = library.createPlaylist("Loved nasheeds", loved.map((t) => t.id), "Copied from your loved list.");
-                    toast.push({ title: "Copied into a set", msg: pl.name, kind: "ok" });
+                    void library.createPlaylist("Loved nasheeds", loved.map((t) => t.id), "Copied from your loved list.").then((pl) => {
+                      if (!pl) return;
+                      toast.push({ title: "Copied into a set", msg: pl.name, kind: "ok" });
+                    });
                   }}
                 >
                   <Icon name="library" size={13} /> Copy to a set
@@ -254,10 +256,12 @@ export default function LibraryPage() {
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && name.trim()) {
-                const pl = library.createPlaylist(name.trim());
-                setCreating(false);
-                setName("");
-                toast.push({ title: "Set created", msg: pl.name, kind: "ok" });
+                void library.createPlaylist(name.trim()).then((pl) => {
+                  if (!pl) return;
+                  setCreating(false);
+                  setName("");
+                  toast.push({ title: "Set created", msg: pl.name, kind: "ok" });
+                });
               }
             }}
             placeholder="e.g. Last ten nights"
@@ -275,10 +279,12 @@ export default function LibraryPage() {
               className="btn btn-primary flex-1 !py-2.5"
               disabled={!name.trim()}
               onClick={() => {
-                const pl = library.createPlaylist(name.trim());
-                setCreating(false);
-                setName("");
-                toast.push({ title: "Set created", msg: pl.name, kind: "ok" });
+                void library.createPlaylist(name.trim()).then((pl) => {
+                  if (!pl) return;
+                  setCreating(false);
+                  setName("");
+                  toast.push({ title: "Set created", msg: pl.name, kind: "ok" });
+                });
               }}
             >
               Create set

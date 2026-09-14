@@ -1,0 +1,78 @@
+# Cool Nasheed · Supabase project configuration
+#
+# This is what `supabase start`, `supabase db push` and `supabase functions deploy`
+# read. Everything here is free-tier friendly: the client talks to PostgREST and
+# Storage directly, and only six functions exist.
+
+project_id = "coolnasheed"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 17
+
+[db.migrations]
+schema_paths = []
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+additional_redirect_urls = [
+  "http://localhost:5173",
+  "http://localhost:4173",
+]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = false
+# local development: no confirmation round trip, so you can sign up and publish
+enable_confirmations = false
+
+[storage]
+enabled = true
+# the buckets in 20260914120400_storage.sql carry their own limits
+file_size_limit = "60MiB"
+
+[edge_runtime]
+enabled = true
+policy = "oneshot"
+
+[analytics]
+enabled = false
+
+# ---- the six functions ------------------------------------------------------
+# verify_jwt = false → callable without an account (catalog, charts, health).
+# The admin half of `analytics` checks the caller's JWT itself before it lets
+# anyone near the dashboard numbers.
+
+[functions.catalog]
+verify_jwt = false
+
+[functions.analytics]
+verify_jwt = false
+
+[functions.health]
+verify_jwt = false
+
+[functions.publish]
+verify_jwt = true
+
+[functions.moderate]
+verify_jwt = true
+
+[functions.account]
+verify_jwt = true

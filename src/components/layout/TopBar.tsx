@@ -5,6 +5,7 @@ import { Icon } from "../ui/Icons";
 import { Kbd } from "../ui/Primitives";
 import { useLibrary } from "../../store/library";
 import { useUi } from "../../store/ui";
+import { AccountMenu } from "../auth/AccountMenu";
 
 export function TopBar({ onMenu }: { onMenu: () => void }) {
   const navigate = useNavigate();
@@ -108,6 +109,8 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
           >
             <Icon name={theme === "night" ? "moon" : "sun"} size={17} />
           </button>
+
+          <AccountMenu />
         </div>
       </div>
     </header>

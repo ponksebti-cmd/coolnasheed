@@ -5,11 +5,12 @@ import { getTrack } from "../data/catalog";
 import { songFor } from "../lib/song";
 import { clamp } from "../lib/prng";
 import { useLibrary } from "./library";
+import { beaconComplete, beaconStart, beaconTick } from "../lib/beacon";
 
 export type Repeat = "off" | "all" | "one";
 
 export type PlayContext = {
-  kind: "collection" | "artist" | "search" | "mix" | "queue" | "liked" | "home";
+  kind: "collection" | "artist" | "search" | "mix" | "queue" | "liked" | "home" | "studio";
   id?: string;
   label: string;
 };
@@ -48,11 +49,16 @@ type PlayerState = {
 
 let ticker: number | null = null;
 let lastPush = 0;
+/** wall-clock reading of the last frame, so the beacon only counts time actually played */
+let lastFrame = 0;
 
 function startTicker(set: (p: Partial<PlayerState>) => void) {
   if (ticker !== null) return;
+  lastFrame = performance.now();
   const loop = () => {
     const now = performance.now();
+    beaconTick((now - lastFrame) / 1000);
+    lastFrame = now;
     if (now - lastPush > 90) {
       lastPush = now;
       set({ time: engine.getTime() });
@@ -66,12 +72,15 @@ function stopTicker() {
   if (ticker !== null) {
     cancelAnimationFrame(ticker);
     ticker = null;
+    lastFrame = 0;
   }
 }
 
 async function loadAndPlay(id: string, set: (p: Partial<PlayerState>) => void) {
   const track = getTrack(id);
   if (!track) return;
+  // whatever was playing has now been listened to as far as it goes: report it
+  beaconStart(id);
   const song = songFor(track);
   set({ trackId: id, duration: song.duration, time: 0, playing: true, ready: true });
   try {
@@ -91,6 +100,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
   };
 
   engine.handlers.onEnded = () => {
+    beaconComplete();
     const { repeat } = get();
     if (repeat === "one" && get().trackId) {
       void loadAndPlay(get().trackId!, set);

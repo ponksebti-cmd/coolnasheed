@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { engine } from "./audio/engine";
 import { currentTime } from "../store/player";
+import { useSession } from "../store/session";
+import { useUi } from "../store/ui";
 
 /** rAF loop that only re-renders when the value actually moves (≈25fps). */
 export function useSmoothTime(active = true): number {
@@ -107,4 +109,35 @@ export function useKeyboard(map: Record<string, (e: KeyboardEvent) => void>, act
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [active]);
+}
+
+/* ---------------------------------------------------------------- accounts */
+
+/**
+ * Gate an action behind an account without ever blocking the app.
+ *
+ * Listening, searching and browsing need nothing. Loving, following, commenting
+ * and publishing do. Returns true when the action may proceed; when it may not,
+ * it opens the sign-in sheet carrying the intent, so the thing the listener was
+ * trying to do happens the moment they have an account.
+ */
+export function useAccountGuard() {
+  const signedIn = useSession((s) => s.currentId !== null);
+  const requestAuth = useUi((s) => s.requestAuth);
+
+  return useCallback(
+    (label: string, run?: () => void, mode: "signin" | "signup" = "signin") => {
+      if (signedIn) return true;
+      requestAuth({ label, run }, mode);
+      return false;
+    },
+    [signedIn, requestAuth],
+  );
+}
+
+/** The signed-in account, reactively. */
+export function useAccount() {
+  const accounts = useSession((s) => s.accounts);
+  const currentId = useSession((s) => s.currentId);
+  return accounts.find((a) => a.id === currentId) ?? null;
 }

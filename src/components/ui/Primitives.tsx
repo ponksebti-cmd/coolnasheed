@@ -169,8 +169,8 @@ export function Modal({
   return createPortal(
     <div
       className={clsx(
-        "fixed inset-0 z-[90] flex justify-center p-4 veil-enter",
-        align === "center" ? "items-center" : "items-end sm:items-center",
+        "fixed inset-0 z-[90] flex justify-center veil-enter",
+        align === "center" ? "items-center p-3 sm:p-4" : "items-end p-0 sm:items-center sm:p-4",
       )}
       role="dialog"
       aria-modal="true"
@@ -183,11 +183,18 @@ export function Modal({
       <div
         ref={ref}
         className={clsx(
-          "relative z-10 max-h-[88vh] w-full overflow-hidden rounded-2xl border border-line2 bg-elev shadow-[0_40px_120px_-40px_rgba(0,0,0,0.95)]",
-          "toast-enter scroll-slim overflow-y-auto",
+          "relative z-10 max-h-[90dvh] w-full overflow-hidden rounded-2xl border border-line2 bg-elev shadow-[0_40px_120px_-40px_rgba(0,0,0,0.95)]",
+          "toast-enter scroll-slim overflow-y-auto overscroll-contain",
+          /* on a phone a bottom sheet is full-bleed: no side gaps, no bottom corners */
+          align === "bottom" && "safe-bottom rounded-b-none border-b-0 sm:rounded-b-2xl sm:border-b sm:pb-0",
           wide ? "max-w-3xl" : "max-w-md",
         )}
       >
+        {align === "bottom" ? (
+          <div className="flex justify-center pt-2.5 sm:hidden" aria-hidden>
+            <span className="sheet-grab" />
+          </div>
+        ) : null}
         {title ? (
           <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
             <div className="min-w-0">
@@ -253,7 +260,7 @@ export function ToastHost({ children }: { children: ReactNode }) {
       <div
         role="status"
         aria-live="polite"
-        className="pointer-events-none fixed bottom-[104px] right-4 z-[120] flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2"
+        className="pointer-events-none fixed inset-x-3 bottom-[178px] z-[120] flex flex-col gap-2 sm:inset-x-auto sm:bottom-[112px] sm:right-4 sm:w-[min(360px,calc(100vw-2rem))]"
       >
         {toasts.map((t) => (
           <div

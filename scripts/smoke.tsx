@@ -660,7 +660,7 @@ async function main() {
   section("Persistence (a reload from localStorage)");
   {
     const { useLibrary } = await import("../src/store/library");
-    const key = "coolnasheed:library:v1";
+    const key = "coolnasheed:library:v2";
     const payload = {
       state: {
         liked: ["sakina", "a-track-that-no-longer-exists"],
@@ -690,11 +690,20 @@ async function main() {
     });
     const st = useLibrary.getState();
 
-    assert("loved nasheeds come back", st.liked.includes("sakina"));
-    assert("playlists come back with their tracks", st.playlists.some((p) => p.id === "pl-seeded" && p.trackIds.includes("city-of-fajr")));
-    assert("followed reciters come back", st.followedArtists.includes("yusuf"));
+    // the library belongs to the account now: localStorage keeps preferences and the
+    // tasbīḥ, and nothing that a server could disagree with
+    assert(
+      "loved nasheeds are not read from localStorage any more",
+      st.liked.length === 0,
+      `liked=${JSON.stringify(st.liked)}`,
+    );
+    assert("playlists wait for the account that owns them", st.playlists.length === 0);
+    assert("followed reciters wait for the account too", st.followedArtists.length === 0);
+    assert(
+      "the local history mirror comes back until the server's copy lands",
+      st.history.some((h) => h.id === "laylat-al-qadr" && h.count === 3),
+    );
     assert("the tasbīḥ keeps its count and phrase", st.tasbih.count === 41 && st.tasbih.id === "istighfar");
-    assert("play history comes back", st.history.some((h) => h.id === "laylat-al-qadr" && h.count === 3));
     assert(
       "preferences come back — theme, room, duff, script",
       st.settings.theme === "dawn" && st.settings.space === "masjid" && st.settings.duff === false && st.settings.lyricScript === "ar",
@@ -705,7 +714,7 @@ async function main() {
       `reduceMotion=${String(st.settings.reduceMotion)} showTranslation=${String(st.settings.showTranslation)}`,
     );
 
-    /* stale ids must degrade, not crash */
+    /* a stale save must degrade, not crash */
     w.history.pushState({}, "", "/library");
     const host = w.document.createElement("div");
     w.document.body.appendChild(host);
@@ -715,7 +724,7 @@ async function main() {
     });
     await sleep(80);
     const text = host.textContent ?? "";
-    assert("the library still renders around a stale id", text.includes("Fajr set"), "playlist shown");
+    assert("the library still renders around a stale save", text.includes("Library") || text.includes("library"));
     assert("and the dead id is never rendered", !text.includes("a-track-that-no-longer-exists"));
     await React.act(async () => {
       libRoot.unmount();
@@ -726,7 +735,39 @@ async function main() {
     w.localStorage.removeItem(key);
     await React.act(async () => {
       useLibrary.persist.rehydrate();
-      useLibrary.setState({ liked: [], playlists: [], history: [], tasbih: { id: "subhanallah", count: 0 } });
+      useLibrary.setState({
+        liked: [],
+        playlists: [],
+        history: [],
+        tasbih: { id: "subhanallah", count: 0 },
+        settings: { ...useLibrary.getState().settings, theme: "night" },
+      });
+    });
+  }
+
+  section("The gate (writing needs an account, listening does not)");
+  {
+    const { useLibrary } = await import("../src/store/library");
+    const { useUi } = await import("../src/store/ui");
+
+    await React.act(async () => {
+      useUi.setState({ authOpen: false });
+    });
+
+    const refused = useLibrary.getState().toggleLike("sakina");
+    assert("loving a nasheed while signed out is refused", refused === null, `returned ${String(refused)}`);
+    assert("and it opens the sign-in sheet instead", useUi.getState().authOpen === true);
+    assert("nothing was written to the store", useLibrary.getState().liked.length === 0);
+
+    await React.act(async () => {
+      useUi.setState({ authOpen: false });
+    });
+    const refusedSet = await useLibrary.getState().createPlaylist("Fajr set", ["city-of-fajr"]);
+    assert("building a set while signed out is refused", refusedSet === null);
+    assert("and asks for an account", useUi.getState().authOpen === true);
+
+    await React.act(async () => {
+      useUi.setState({ authOpen: false });
     });
   }
 
@@ -753,12 +794,18 @@ async function main() {
   const starButtons = container.querySelectorAll<HTMLButtonElement>('button[aria-label^="Love"], button[aria-label^="Remove from loved"]');
   assert("love buttons are present", starButtons.length > 0, `${starButtons.length} found`);
   if (starButtons[0]) {
+    const { useLibrary } = await import("../src/store/library");
+    const { useUi } = await import("../src/store/ui");
     await React.act(async () => {
+      useUi.setState({ authOpen: false });
       starButtons[0]!.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
     });
-    const { useLibrary } = await import("../src/store/library");
-    assert("loving a track persists to the store", useLibrary.getState().liked.length > 0);
-    assert("and to localStorage", (w.localStorage.getItem("coolnasheed:library:v1") ?? "").includes("liked"));
+    await sleep(40);
+    assert("a love tap in the page reaches the gate", useUi.getState().authOpen === true);
+    assert("and writes nothing without an account", useLibrary.getState().liked.length === 0);
+    await React.act(async () => {
+      useUi.setState({ authOpen: false });
+    });
   }
 
   const tasbih = container.querySelector<HTMLButtonElement>('button[aria-label^="Tasbīḥ"]');

@@ -140,6 +140,7 @@ export default function Home() {
                   className={clsx("btn !px-4 !py-3.5", featuredLoved ? "btn-gold" : "btn-ghost")}
                   onClick={() => {
                     const nowLiked = toggleLike(featured.id);
+                    if (nowLiked === null) return;
                     toast.push({ title: nowLiked ? "Loved" : "Removed from loved", msg: featured.title, kind: nowLiked ? "ok" : "info" });
                   }}
                   aria-pressed={featuredLoved}
@@ -263,8 +264,10 @@ export default function Home() {
                 <button
                   className="btn btn-ghost !px-4 !py-2.5"
                   onClick={() => {
-                    const pl = useLibrary.getState().createPlaylist(nurPreview.title, nurPreview.trackIds, nurPreview.blurb);
-                    toast.push({ title: "Saved to your sets", msg: pl.name, kind: "ok" });
+                    void useLibrary.getState().createPlaylist(nurPreview.title, nurPreview.trackIds, nurPreview.blurb).then((pl) => {
+                      if (!pl) return;
+                      toast.push({ title: "Saved to your sets", msg: pl.name, kind: "ok" });
+                    });
                   }}
                 >
                   <Icon name="plus" size={14} /> Save as a set

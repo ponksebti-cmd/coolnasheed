@@ -31,11 +31,14 @@ export function Sidebar({ onNavigate, className }: { onNavigate?: () => void; cl
   const submitNew = () => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    const pl = library.createPlaylist(trimmed);
-    setName("");
-    setCreating(false);
-    toast.push({ title: "Set created", msg: pl.name, kind: "ok", action: { label: "Open", run: () => navigate(`/p/${pl.id}`) } });
-    onNavigate?.();
+    void library.createPlaylist(trimmed).then((pl) => {
+      // null means no account (the sign-in sheet is open and will retry) or a refused write
+      if (!pl) return;
+      setName("");
+      setCreating(false);
+      toast.push({ title: "Set created", msg: pl.name, kind: "ok", action: { label: "Open", run: () => navigate(`/p/${pl.id}`) } });
+      onNavigate?.();
+    });
   };
 
   return (

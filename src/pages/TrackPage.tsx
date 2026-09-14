@@ -14,7 +14,8 @@ import { TRACKS, artistOf, collectionsOf, durationOf, formatCount, getTrack, sta
 import { songFor } from "../lib/song";
 import { MAQAMAT, hasQuarterTones, maqamLabel, noteName } from "../lib/theory";
 import { formatTime, plural, relativeTime } from "../lib/format";
-import { daysAgoLabel, notesFor } from "../lib/comments";
+import { CommentThread } from "../components/track/CommentThread";
+import { useCommunity } from "../store/community";
 import { usePlayer } from "../store/player";
 import { useLibrary } from "../store/library";
 import { rngFrom, shuffle as shuffled } from "../lib/prng";
@@ -24,6 +25,7 @@ export default function TrackPage() {
   const track = getTrack(id);
   const player = usePlayer();
   const library = useLibrary();
+  const thread = useCommunity((s) => (id ? s.threads[id] : undefined));
   const toast = useToast();
 
   const song = useMemo(() => (track ? songFor(track) : null), [track]);
@@ -46,8 +48,8 @@ export default function TrackPage() {
 
   const artist = artistOf(track);
   const stats = statsFor(track);
+  const noteCount = thread?.total ?? thread?.items.length ?? 0;
   const sets = collectionsOf(track);
-  const notes = notesFor(track);
   const isCurrent = player.trackId === track.id;
   const moreFromArtist = TRACKS.filter((t) => t.artistId === track.artistId && t.id !== track.id);
   const similar = shuffled(rngFrom(track.seed), TRACKS.filter((t) => t.id !== track.id && (t.maqam === track.maqam || t.artistId === track.artistId || t.tags.some((x) => track.tags.includes(x))))).slice(0, 10);
@@ -235,60 +237,14 @@ export default function TrackPage() {
             </Reveal>
           ) : null}
 
-          {/* listener notes */}
+          {/* notes — yours and the room's */}
           <section>
             <SectionHeader
-              label="listener notes"
-              title={`${plural(stats.comments, "note")}`}
-              subtitle="Generated for this demo, but the feelings are plausible."
+              label="notes"
+              title={`${plural(noteCount + stats.comments, "note")}`}
+              subtitle="Notes from accounts are real and stay on this device. The rest are generated for the demo, and say so."
             />
-            <ul className="space-y-2.5">
-              {notes.map((n, i) => (
-                <Reveal key={n.id} delay={i * 45}>
-                  <li className="flex gap-3 rounded-xl border border-line bg-surface/50 p-3.5">
-                    <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full ring-1 ring-line">
-                      <PatternArt seed={n.handle} accent={track.accent} showVignette={false} />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11.5px]">
-                        <span className="font-semibold text-text">@{n.handle}</span>
-                        {n.verified ? (
-                          <span className="flex items-center gap-1 rounded-full bg-jade/12 px-1.5 py-px text-[9.5px] font-bold uppercase tracking-wider text-jade">
-                            <Icon name="check" size={9} strokeWidth={3} /> listener
-                          </span>
-                        ) : null}
-                        <span className="text-muted">{daysAgoLabel(n.daysAgo)}</span>
-                        {n.atLine ? (
-                          <button
-                            className="ml-auto flex items-center gap-1 rounded-full border border-line px-2 py-px text-[10px] text-muted transition-colors hover:border-line2 hover:text-text2"
-                            onClick={() => {
-                              const line = song.lines[Math.min(song.lines.length - 1, n.atLine! - 1)];
-                              if (!line) return;
-                              if (!isCurrent) player.playTrack(track.id, { kind: "home", label: track.title });
-                              window.setTimeout(() => player.seek(line.t + 0.05), isCurrent ? 0 : 260);
-                            }}
-                          >
-                            <Icon name="lyrics" size={10} /> line {n.atLine}
-                          </button>
-                        ) : null}
-                      </div>
-                      <p className="mt-1.5 text-[13px] leading-relaxed text-text2">{n.text}</p>
-                      <div className="mt-2 flex items-center gap-3 text-[11px] text-muted">
-                        <button
-                          className="flex items-center gap-1 transition-colors hover:text-gold"
-                          onClick={() => toast.push({ title: "Noted", msg: "Amen counts as a like here.", kind: "info" })}
-                        >
-                          <Icon name="star" size={12} /> {formatCount(n.likes)}
-                        </button>
-                        <span className="flex items-center gap-1">
-                          <Icon name="share" size={12} /> reply
-                        </span>
-                      </div>
-                    </div>
-                  </li>
-                </Reveal>
-              ))}
-            </ul>
+            <CommentThread track={track} song={song} />
           </section>
 
           {sets.length ? (
