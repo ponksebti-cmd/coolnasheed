@@ -133,39 +133,39 @@ a *path*. A 40 MB recording costs no invocation time, no function memory, and no
 
 ## Setting it up
 
-**Local, with Docker** (the Supabase CLI runs the whole stack — database, auth, storage,
-functions, studio):
+**One command builds the database.** It connects, applies the four migrations, seeds the
+catalogue, and then checks its own work from the outside — the way a browser would:
 
 ```bash
 npm install
-npx supabase start          # pulls images, starts Postgres on :54322
-npm run seed                # regenerates supabase/seed.sql from the catalogue
-npx supabase db reset       # migrations + seed, in order
-npx supabase functions serve
-cp .env.example .env        # paste the URL + anon key that `supabase status` prints
+npm run setup -- --db-url="postgres://postgres.YOUR_REF:YOUR_PASSWORD@db.YOUR_REF.supabase.co:5432/postgres"
+cp .env.example .env     # your project URL + publishable key
 npm run dev
 ```
 
-**Hosted** (a project at supabase.com):
+That is the whole backend. `scripts/setup.mjs` needs one of two things and tells you which
+one it is missing:
 
-```bash
-npx supabase login
-npx supabase link --project-ref YOUR-REF
-npx supabase db push                       # the four migrations
-psql "$SUPABASE_DB_URL" -f supabase/seed.sql   # optional; idempotent
-npx supabase functions deploy              # all six
-```
+| You give it | What it does with it |
+| --- | --- |
+| `--db-url` (or `SUPABASE_DB_URL`) | opens one Postgres connection and runs `supabase/migrations/*.sql` then `supabase/seed.sql` — a pooler URL on `:6543` is rewritten to the direct connection automatically, because DDL will not go through PgBouncer |
+| `--token=sbp_…` (or `SUPABASE_ACCESS_TOKEN`) | the same SQL, through the Supabase Management API, so no database password ever leaves your laptop; a token also unlocks `--functions`, which deploys all six Edge Functions with `npx supabase functions deploy` |
 
-**No CLI at all** (a fresh project, a borrowed laptop, a phone):
+Neither credential is written into the repository — they are read from the flags or the
+environment, used once, and gone. Everything it runs is safe to run twice: the migrations
+are `if not exists` / `or replace`, and every seed insert is `on conflict do nothing`, so
+re-running `npm run setup` after a change is the normal thing to do.
 
-```bash
-npm run sql:bundle          # writes supabase/setup.sql — 4 migrations + seed, one file
-```
+Afterwards it proves the result rather than trusting it, using only the *publishable* key:
+it counts `songs`, `publishers` and `collections` over PostgREST, calls `catalog_payload()`
+the way the client does, and reads `storage.buckets` and `pg_policies` to confirm the
+buckets and Row Level Security really exist. Anything missing is printed with the reason.
+`--dry-run` lists the files it would run and stops; `--no-seed` builds the tables and leaves
+the room empty.
 
-Open **Supabase Studio → SQL Editor → New query**, paste `supabase/setup.sql`, and Run. It
-is safe to run twice: the migrations are `if not exists` / `or replace`, and every seed
-insert is `on conflict do nothing`. Then copy the project URL and the *publishable* key
-(**Project Settings → API Keys**) into `.env`.
+**If you would rather not run a script**, `npm run sql:bundle` writes `supabase/setup.sql`
+— the same four migrations plus the seed in one file — and you can paste it into
+**Supabase Studio → SQL Editor → New query** and press Run. It is the same work by hand.
 
 **The Edge Functions are optional.** Every call the client makes has a second road beside
 it: `catalog` → `catalog_payload()`, `analytics?view=admin` → `admin_summary()`,
@@ -177,10 +177,22 @@ comment, moderate and read its dashboard. The one thing that genuinely needs a f
 **deleting an account**, because `auth.users` needs the secret key and a browser must never
 hold it; the app says exactly that instead of failing quietly.
 
+**Everything local, with Docker** (the Supabase CLI runs the whole stack — database, auth,
+storage, functions, studio), if that is the machine you are on:
+
+```bash
+npx supabase start          # pulls images, starts Postgres on :54322
+npm run seed                # regenerates supabase/seed.sql from the catalogue
+npx supabase db reset       # migrations + seed, in order
+npx supabase functions serve
+cp .env.example .env        # paste the URL + anon key that `supabase status` prints
+npm run dev
+```
+
 Then in the dashboard: **Authentication → Providers → Email** on (with *Confirm email* off
 for a demo — the app handles both, and an unconfirmed signup says "check your inbox" instead
 of failing); **Authentication → URL Configuration → Site URL** set to wherever you host the
-client; **Database → Extensions** `pg_trgm` and `pg_cron` (the migrations enable them).
+client. `pg_trgm` and `pg_cron` are enabled by the migrations themselves.
 
 Put `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env`, or in your host's
 environment screen. Both are public by design — the anon key is the key a browser is meant
@@ -279,9 +291,11 @@ supabase/
   functions/   catalog · analytics · publish · moderate · account · health
     _shared/     cors, json/errors, db clients, auth, validation, cache, song mappers
   seed.sql     the catalogue as rows — generated, idempotent, committed on purpose
+  setup.sql    the four migrations + the seed, in one file for the SQL editor
   config.toml  what `supabase start`, `db push` and `functions deploy` read
 shared/
   types.ts     the wire contract — imported by the browser, by Deno and by the seed script
+  fixtures/    publish-cases.json — the one contract both publish validators answer to
 src/
   lib/         composer, maqām theory, syllabifier, prng, formatting
     api.ts       the only file that talks to Supabase
@@ -301,6 +315,10 @@ src/
   pages/       Home, Search, Library, Queue, About, Collection, Playlist, Artist, Track,
                Studio, Profile, Admin, 404
 scripts/
+  setup.mjs                   `npm run setup` — builds a real Supabase project, then verifies it
+  sql-bundle.mjs              migrations + seed → supabase/setup.sql
+  pg-test.mjs                 the database suite: real Postgres in WebAssembly
+  contract.ts                 the browser's publish validator, against the shared contract
   smoke.tsx                   headless suite (jsdom + fake AudioContext)
   export-supabase-seed.ts     catalogue → supabase/seed.sql
 ```
@@ -321,10 +339,19 @@ reading the same request GUCs, `storage.buckets`/`storage.objects`, and the anon
 authenticated / service_role roles), then signs up accounts, plays nasheeds, loves and
 notes and reports them, publishes one straight through PostgREST, and asserts the wire
 shape the client reads: every key of `catalog_payload()`, `trending()`, `daily_curve()`,
-`song_stats()`, `my_history()`, `my_bootstrap()` and `admin_summary()`. It is 113 checks,
+`song_stats()`, `my_history()`, `my_bootstrap()` and `admin_summary()`. It is 115 checks,
 the last of them being the whole bundle applied a second time, because that is what the
 setup file promises. It is not a formality — it found four things that would have shipped
 broken:
+
+Publishing has two validators, and a pair of hand-written mirrors is a pair that drifts, so
+`npm run contract:test` holds both to `shared/fixtures/publish-cases.json`: `scripts/contract.ts`
+reads it from the browser side (`songRowFromInput` / `songFromRow`, bundled by esbuild) and
+`supabase/functions/_shared/contract_test.ts` reads it from the Deno side (`deno test`), each
+asserting the same 15 accepted rows, the same refusals with the same status and field, and the
+same stored-row → model mapping. `pg-test.mjs` closes the loop by inserting all 15 rows into a
+real `public.songs` **as a listener**, which proves they satisfy the CHECK constraints and that
+the column grants cover exactly what a publisher needs. `npm run verify` runs the lot.
 
 - the BEFORE-UPDATE guards were freezing the counters the AFTER triggers maintain, so
   `plays`, `likes`, `notes` and `amens` never moved (a guard cannot tell a client from a

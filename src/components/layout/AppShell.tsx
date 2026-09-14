@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { clsx } from "clsx";
 import { Sidebar } from "./Sidebar";
@@ -32,9 +32,12 @@ export function AppShell() {
 
   /* the catalogue, the session and the beacon, once, before anything else needs them */
   const boot = useBoot();
+  const [noticeClosed, setNoticeClosed] = useState(false);
   useEffect(() => {
     if (!boot) return;
     document.documentElement.dataset.backend = boot.source;
+    // a new answer is a new notice, even if the last one was dismissed
+    setNoticeClosed(false);
   }, [boot]);
 
   /* theme */
@@ -140,6 +143,35 @@ export function AppShell() {
       <div className="flex min-w-0 flex-1 flex-col">
         <div ref={scroller} className="scroll-slim relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
           <TopBar onMenu={() => setMobileNav(true)} />
+
+          {/* The backend answering badly is worth one line on the page. The bundled
+              catalogue keeps playing underneath it, so this is a notice, not a wall. */}
+          {boot?.error && !noticeClosed ? (
+            <div
+              role="status"
+              className="mx-4 mt-3 flex items-start gap-2.5 rounded-xl border border-line bg-surface2/60 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-muted sm:mx-6 lg:mx-8"
+            >
+              <Icon name="server" size={14} className="mt-0.5 shrink-0 text-gold" />
+              <div className="min-w-0 flex-1">
+                <p className="text-text/90">{boot.error}</p>
+                {boot.needsSetup ? (
+                  <p className="mt-1">
+                    One command fixes it: <code className="rounded bg-bg/70 px-1.5 py-0.5 font-mono text-[11.5px] text-goldsoft">npm run setup</code>{" "}
+                    — or paste <code className="rounded bg-bg/70 px-1.5 py-0.5 font-mono text-[11.5px]">supabase/setup.sql</code> into Studio&apos;s SQL
+                    editor. Until then the bundled catalogue is what you hear.
+                  </p>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => setNoticeClosed(true)}
+                className="btn-icon -mr-1 -mt-1 shrink-0 rounded-full p-1.5"
+                aria-label="Dismiss"
+              >
+                <Icon name="close" size={13} />
+              </button>
+            </div>
+          ) : null}
           <main key={location.pathname} className={clsx("page-enter mx-auto w-full max-w-[1400px] px-4 pb-10 pt-5 sm:px-6 lg:px-8")}>
             <Outlet />
           </main>

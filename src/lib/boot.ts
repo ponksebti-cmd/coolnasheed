@@ -20,7 +20,7 @@ import { TRACKS, catalogSyncedAt, hydrateCatalog } from "../data/catalog";
 import { api, invalidateCatalog } from "./api";
 import { backendLabel, hasSupabase } from "./supabase";
 import { bindBeacon } from "./beacon";
-import { errorMessage } from "./errors";
+import { ApiError, errorMessage } from "./errors";
 import { bindAuthListener, isSignedIn, useSession } from "../store/session";
 import { useLibrary } from "../store/library";
 import { useStudio } from "../store/studio";
@@ -35,19 +35,25 @@ export type BootStatus = {
   at: number;
   /** what went wrong, when the database was configured but would not answer */
   error: string | null;
+  /** the project answers, but has no schema yet — one command away from working */
+  needsSetup: boolean;
 };
 
 let started = false;
 let unbindAuth: (() => void) | null = null;
 let lastStatus: BootStatus | null = null;
 
-function status(source: CatalogSource, error: string | null): BootStatus {
+/** Is this the "there is no database yet" failure, rather than a network or auth one? */
+const isMissingSchema = (err: unknown): boolean => err instanceof ApiError && err.field === "schema";
+
+function status(source: CatalogSource, error: string | null, needsSetup = false): BootStatus {
   lastStatus = {
     backend: backendLabel(),
     source,
     songs: TRACKS.length,
     at: catalogSyncedAt(),
     error,
+    needsSetup,
   };
   return lastStatus;
 }
@@ -91,6 +97,7 @@ export async function bootApp(): Promise<BootStatus> {
 
   let source: CatalogSource = "bundled";
   let error: string | null = null;
+  let needsSetup = false;
   try {
     const payload = await api.catalog();
     // A project that is set up but not seeded yet answers with nothing. Pouring that
@@ -103,6 +110,7 @@ export async function bootApp(): Promise<BootStatus> {
     }
   } catch (err) {
     error = errorMessage(err, "The catalogue would not load.");
+    needsSetup = isMissingSchema(err);
   }
 
   /* the account ---------------------------------------------------------- */
@@ -111,9 +119,10 @@ export async function bootApp(): Promise<BootStatus> {
     await loadAccountData();
   } catch (err) {
     error = error ?? errorMessage(err, "Your library would not load.");
+    needsSetup = needsSetup || isMissingSchema(err);
   }
 
-  return status(source, error);
+  return status(source, error, needsSetup);
 }
 
 /** Re-read the catalogue after publishing, so the new nasheed is everywhere at once. */

@@ -115,6 +115,12 @@ function dbError(error: DbError, action: string): ApiError {
     case "PGRST116":
     case "PGRST117":
       return new ApiError("Nothing matched that.", 404);
+    case "PGRST205":
+    case "42P01":
+      // The project is there; the schema is not. Nothing works until this is fixed and
+      // the fix is one command, so it is the one database error worth saying plainly
+      // rather than as whatever Postgres called the missing relation.
+      return new ApiError("This Supabase project has no tables yet — the backend is not set up.", 500, "schema");
     case "22023":
       return new ApiError(message, 400);
     default:

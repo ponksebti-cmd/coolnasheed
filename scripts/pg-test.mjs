@@ -650,6 +650,44 @@ try {
   check("after which the room cannot see it", !(afterRemoval.songs ?? []).some((x) => x.id === publishedId),
     `${afterRemoval.songs?.length ?? 0} nasheeds`);
 
+  /* ------------------------------------------- the publish contract, in the table */
+
+  section("The publish contract, against the real table");
+  const fixture = JSON.parse(readFileSync(join(ROOT, "shared/fixtures/publish-cases.json"), "utf8"));
+  const contractRows = fixture.cases.filter((c) => c.row);
+  const refusedRows = [];
+  await asUser(listenerA);
+  for (const c of contractRows) {
+    const r = c.row;
+    try {
+      // as the listener, not as the owner of the database: this is also the proof that
+      // the column grants cover exactly what a publisher needs and nothing more
+      await sql(`
+        insert into public.songs
+          (owner_id, title, title_ar, note, maqam, root, bpm, voices, duff, duff_enter, passes,
+           accent, year, tags, lines, motif_bank, audio_path, audio_mime, audio_bytes,
+           duration_ms, artwork_path)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::text[],$15::jsonb,$16::integer[],$17,$18,$19,$20,$21)`,
+        [listenerA, r.title, r.title_ar, r.note, r.maqam, r.root, r.bpm, r.voices, r.duff,
+         r.duff_enter, r.passes, r.accent, r.year, r.tags ?? [], JSON.stringify(r.lines ?? []),
+         r.motif_bank, r.audio_path, r.audio_mime, r.audio_bytes, r.duration_ms, r.artwork_path]);
+    } catch (err) {
+      refusedRows.push(`${c.name}: ${String(err.message).split("\n")[0]}`);
+    }
+  }
+  check(`all ${contractRows.length} rows the validators produce are rows Postgres accepts`,
+    refusedRows.length === 0, refusedRows.length ? refusedRows.join(" · ") : "inserted under the column grants, as a listener");
+
+  await asPostgres();
+  // counted by owner and by title, because several cases share a title on purpose
+  const titles = [...new Set(contractRows.map((c) => c.row.title))];
+  const contractCount = Number(
+    await one(`select count(*) from public.songs where owner_id = $1 and title = any($2::text[])`,
+      [listenerA, titles]),
+  );
+  check("and they are all really in there", contractCount === contractRows.length,
+    `${contractCount} of ${contractRows.length} rows owned by the listener`);
+
   /* ------------------------------------------------------------- following */
 
   section("Following a publisher");
