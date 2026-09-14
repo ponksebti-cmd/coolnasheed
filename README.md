@@ -116,6 +116,11 @@ scripts/
 
 Stack: Vite 7 · React 19 · TypeScript (strict) · Tailwind CSS v4 · react-router v7 · zustand 5.
 
+Two projects are typechecked: `tsconfig.json` for the app (`strict`, `noUnusedLocals`,
+`noUnusedParameters`) and `tsconfig.scripts.json`, which adds Node types so the test suite
+is checked too. `npm run typecheck` runs both; `npm run build` refuses to bundle unless
+they pass.
+
 `npm run smoke` bundles the suite with esbuild and runs it under Node against a fake
 `AudioContext`. It validates catalogue integrity (no orphan tracks or dangling reciters),
 every generated song (finite frequencies, monotonic word timings, duff inside the song

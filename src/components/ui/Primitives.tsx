@@ -250,7 +250,11 @@ export function ToastHost({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed bottom-[104px] right-4 z-[120] flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
+      <div
+        role="status"
+        aria-live="polite"
+        className="pointer-events-none fixed bottom-[104px] right-4 z-[120] flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2"
+      >
         {toasts.map((t) => (
           <div
             key={t.id}
