@@ -1,4 +1,4 @@
-# Coolnasheed — vocals of light
+# CoolNasheed — vocals of light
 
 A streaming client for nasheeds, built like Spotify or SoundCloud but shaped around
 what nasheeds actually are: devotional poetry, a maqām, a voice, and a frame drum.

@@ -48,7 +48,7 @@ export function Sidebar({ onNavigate, className }: { onNavigate?: () => void; cl
         </span>
         <div className="min-w-0">
           <div className="truncate font-display text-[17px] leading-none tracking-wide text-text">
-            Cool<span className="text-gold">nasheed</span>
+            Cool<span className="text-gold">Nasheed</span>
           </div>
           <div className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-muted">vocals of light</div>
         </div>
