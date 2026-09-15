@@ -2,15 +2,11 @@ import { clsx } from "clsx";
 import { Icon } from "../ui/Icons";
 import { SeekBar } from "../ui/Primitives";
 import { getTrack, durationOf } from "../../data/catalog";
-import { songFor } from "../../lib/song";
-import { peaksFor } from "../../lib/envelope";
 import { formatTime } from "../../lib/format";
 import { usePlayer } from "../../store/player";
 import { useLibrary } from "../../store/library";
 import { useSmoothTime } from "../../lib/hooks";
-import { SPACE_LABELS } from "../../lib/audio/engine";
-import { useMemo, useState } from "react";
-import { DropdownMenu } from "../ui/Menu";
+import { useState } from "react";
 
 export function TransportButtons({ size = 40 }: { size?: number }) {
   const playing = usePlayer((s) => s.playing);
@@ -66,19 +62,11 @@ export function TimeRow({ showWave = true, className }: { showWave?: boolean; cl
   const t = useSmoothTime(playing) || storeTime;
   const track = getTrack(trackId);
   const duration = track ? durationOf(track) : 0;
-  const peaks = useMemo(() => (track && showWave ? peaksFor(songFor(track)) : undefined), [track, showWave]);
 
   return (
     <div className={clsx("flex w-full items-center gap-3", className)}>
       <span className="w-10 shrink-0 text-right text-[11px] font-semibold tabular-nums text-muted">{formatTime(t)}</span>
-      <SeekBar
-        value={t}
-        max={duration}
-        peaks={peaks}
-        onChange={seek}
-        className="flex-1"
-        label="Seek within the nasheed"
-      />
+      <SeekBar value={t} max={duration} onChange={seek} className="flex-1" label="Seek within the nasheed" compact={!showWave} />
       <span className="w-10 shrink-0 text-[11px] font-semibold tabular-nums text-muted">{formatTime(duration)}</span>
     </div>
   );
@@ -129,34 +117,5 @@ export function VolumeControl({ className }: { className?: string }) {
         />
       </div>
     </div>
-  );
-}
-
-export function SpaceMenu({ compact }: { compact?: boolean }) {
-  const space = useLibrary((s) => s.settings.space);
-  const setSpace = usePlayer((s) => s.setSpace);
-  const label = SPACE_LABELS.find((s) => s.id === space)?.label ?? "Hall";
-  return (
-    <DropdownMenu
-      label="Reverb space"
-      align="right"
-      items={SPACE_LABELS.map((s) => ({
-        label: s.label,
-        icon: s.id === "masjid" ? ("mosque" as const) : s.id === "hall" ? ("home" as const) : ("waveform" as const),
-        checked: s.id === space,
-        onClick: () => setSpace(s.id),
-        hint: s.id === "studio" ? "dry" : s.id === "masjid" ? "4.6s" : undefined,
-      }))}
-      renderTrigger={({ onClick }) => (
-        <button
-          onClick={onClick}
-          className={clsx("btn btn-ghost !px-2.5 !py-1.5", compact && "!px-2")}
-          title="Reverb space — the synthesized voices are convolved with a procedural impulse response"
-        >
-          <Icon name="mosque" size={14} />
-          {compact ? null : <span>{label}</span>}
-        </button>
-      )}
-    />
   );
 }

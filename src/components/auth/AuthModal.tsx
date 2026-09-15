@@ -5,7 +5,6 @@ import { PatternArt } from "../art/PatternArt";
 import { useUi } from "../../store/ui";
 import { useSession, validateEmail, validateHandle, validateName, validatePassword } from "../../store/session";
 import { hasSupabase } from "../../lib/supabase";
-import type { Accent } from "../../data/types";
 
 type Tab = "signin" | "signup";
 type Errors = Partial<Record<"name" | "handle" | "email" | "password" | "identity" | "form", string>>;
@@ -144,7 +143,7 @@ export function AuthModal() {
               <code className="rounded bg-surface2 px-1 py-0.5 text-[11.5px]">VITE_SUPABASE_URL</code> and{" "}
               <code className="rounded bg-surface2 px-1 py-0.5 text-[11.5px]">VITE_SUPABASE_ANON_KEY</code> to{" "}
               <code className="rounded bg-surface2 px-1 py-0.5 text-[11.5px]">.env</code> and reload — everything below
-              will work, and the catalogue you are hearing is the bundled one.
+              will work, and the catalogue stays empty until something is published.
             </span>
           </p>
         ) : null}
@@ -152,7 +151,7 @@ export function AuthModal() {
         {tab === "signup" ? (
           <div className="flex items-center gap-3 rounded-xl border border-line bg-surface2/40 p-3">
             <span className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full ring-1 ring-line2">
-              <PatternArt seed={previewSeed} accent={"gold" as Accent} showVignette={false} />
+              <PatternArt seed={previewSeed} showVignette={false} />
             </span>
             <p className="text-[12.5px] leading-relaxed text-muted">
               Your face is a pattern generated from your handle — no photo, no upload, nothing to moderate.

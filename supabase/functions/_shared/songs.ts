@@ -6,7 +6,7 @@
  * object in SQL — the keys there and here are meant to match exactly).
  */
 
-import type { Accent, LyricLine, MaqamName, Song, SongStatus } from "../../../shared/types.ts";
+import type { LyricLine, MaqamName, Song, SongStatus } from "../../../shared/types.ts";
 
 export type SongDbRow = {
   id: string;
@@ -15,17 +15,9 @@ export type SongDbRow = {
   title_ar: string | null;
   note: string;
   maqam: MaqamName;
-  root: number;
-  bpm: number;
-  voices: "solo" | "duet" | "choir";
-  duff: string | null;
-  duff_enter: "intro" | "verse";
-  passes: number;
-  accent: Accent;
   year: number | null;
   tags: string[] | null;
   lines: LyricLine[] | null;
-  motif_bank: number[] | null;
   audio_path: string | null;
   audio_mime: string | null;
   audio_bytes: number | null;
@@ -41,7 +33,7 @@ export type SongDbRow = {
 
 /** Every column a select needs in order to build a `Song`. */
 export const SONG_COLUMNS =
-  "id, owner_id, title, title_ar, note, maqam, root, bpm, voices, duff, duff_enter, passes, accent, year, tags, lines, motif_bank, audio_path, audio_mime, audio_bytes, duration_ms, artwork_path, status, published_at, created_at, plays, likes, notes";
+  "id, owner_id, title, title_ar, note, maqam, year, tags, lines, audio_path, audio_mime, audio_bytes, duration_ms, artwork_path, status, published_at, created_at, plays, likes, notes";
 
 function epochMs(value: string | number | null | undefined): number {
   if (value === null || value === undefined) return Date.now();
@@ -59,17 +51,9 @@ export function songFromRow(row: SongDbRow, ownerHandle: string | null): Song {
     titleAr: row.title_ar,
     note: row.note ?? "",
     maqam: row.maqam,
-    root: Number(row.root),
-    bpm: Number(row.bpm),
-    voices: row.voices,
-    duff: row.duff,
-    duffEnter: row.duff_enter ?? "verse",
-    passes: Number(row.passes ?? 2),
-    accent: row.accent ?? "jade",
     year: row.year === null || row.year === undefined ? null : Number(row.year),
     tags: Array.isArray(row.tags) ? row.tags : [],
     lines: Array.isArray(row.lines) ? row.lines : [],
-    motifBank: Array.isArray(row.motif_bank) ? row.motif_bank : null,
     audioPath: row.audio_path,
     audioMime: row.audio_mime,
     durationMs: row.duration_ms === null || row.duration_ms === undefined ? null : Number(row.duration_ms),

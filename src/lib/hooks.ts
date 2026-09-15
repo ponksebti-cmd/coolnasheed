@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { engine } from "./audio/engine";
+import { player } from "./audio/player";
 import { currentTime } from "../store/player";
 import { useSession } from "../store/session";
 import { useUi } from "../store/ui";
@@ -13,7 +13,7 @@ export function useSmoothTime(active = true): number {
     if (!active) return;
     let raf = 0;
     const loop = () => {
-      const now = engine.getTime();
+      const now = player.getTime();
       if (Math.abs(now - last.current) > 0.035) {
         last.current = now;
         setT(now);

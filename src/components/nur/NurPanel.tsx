@@ -82,7 +82,7 @@ export function NurPanel() {
         {/* header */}
         <div className="relative shrink-0 overflow-hidden border-b border-line px-5 pb-4 pt-5">
           <div className="absolute -right-10 -top-14 h-44 w-44 opacity-40 blur-[1px]">
-            <PatternArt seed="nur-panel" accent="gold" motif="rosette" />
+            <PatternArt seed="nur-panel" motif="rosette" />
           </div>
           <div className="relative flex items-start justify-between gap-3">
             <div>
@@ -139,16 +139,6 @@ export function NurPanel() {
                       )}
                     </div>
                   </div>
-                  <div className="rounded-xl border border-line bg-surface2/40 p-3">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted">Tempo</div>
-                    <div className="mt-1 font-display text-xl text-text">
-                      {taste.bpm.weight ? `${Math.round(taste.bpm.sum / taste.bpm.weight)}` : "—"}
-                      <span className="ml-1 text-[11px] font-sans text-muted">bpm</span>
-                    </div>
-                    <div className="mt-1 text-[11px] leading-snug text-muted">
-                      {taste.bpm.weight ? (taste.bpm.sum / taste.bpm.weight) < 70 ? "you like it slow" : (taste.bpm.sum / taste.bpm.weight) > 88 ? "you like a pulse" : "middle of the road" : "no data"}
-                    </div>
-                  </div>
                 </div>
                 {topArtists.length ? (
                   <div className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-muted">
@@ -201,7 +191,7 @@ export function NurPanel() {
               <div className="overflow-hidden rounded-2xl border border-line2">
                 <div className="relative overflow-hidden p-4">
                   <div className="absolute inset-0 opacity-70">
-                    <PatternArt seed={mix.seed} accent={mix.accent} />
+                    <PatternArt seed={mix.seed} />
                   </div>
                   <div className="absolute inset-0 bg-gradient-to-t from-[rgba(4,11,9,0.95)] via-[rgba(4,11,9,0.7)] to-[rgba(4,11,9,0.45)]" />
                   <div className="relative">

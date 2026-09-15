@@ -18,16 +18,12 @@ import { api, deviceId, errorMessage } from "../lib/api";
 import { isPreview } from "../data/catalog";
 import { useUi } from "./ui";
 import { isSignedIn } from "./session";
-import type { Accent } from "../data/types";
-import type { SpacePreset } from "../lib/audio/engine";
 import type { HistoryRow, Playlist as ServerPlaylist } from "../../shared/types";
 
 export type LyricScript = "tr" | "en" | "ar";
 
 export type Settings = {
   theme: "night" | "dawn";
-  space: SpacePreset;
-  duff: boolean;
   volume: number;
   lyricScript: LyricScript;
   showArabic: boolean;
@@ -40,7 +36,6 @@ export type Playlist = {
   name: string;
   blurb: string;
   seed: string;
-  accent: Accent;
   trackIds: string[];
   createdAt: number;
 };
@@ -58,8 +53,6 @@ export const DHIKR = [
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: "night",
-  space: "hall",
-  duff: true,
   volume: 0.85,
   lyricScript: "tr",
   showArabic: true,
@@ -67,15 +60,12 @@ export const DEFAULT_SETTINGS: Settings = {
   reduceMotion: false,
 };
 
-const ACCENTS: Accent[] = ["jade", "gold", "turq", "madder", "cobalt"];
-
 function fromServer(playlist: ServerPlaylist): Playlist {
   return {
     id: playlist.id,
     name: playlist.name,
     blurb: playlist.blurb,
     seed: playlist.seed,
-    accent: playlist.accent,
     trackIds: playlist.songIds,
     createdAt: playlist.createdAt,
   };
@@ -368,9 +358,3 @@ function mergeHistory(rows: HistoryRow[], local: HistoryEntry[]): HistoryEntry[]
 
 /** The anonymous device id, so a signed-out listener still gets their own history. */
 export { deviceId };
-
-export function accentFor(name: string): Accent {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-  return ACCENTS[hash % ACCENTS.length]!;
-}

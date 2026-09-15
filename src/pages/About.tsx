@@ -3,8 +3,7 @@ import { Link } from "react-router-dom";
 import { Icon, type IconName } from "../components/ui/Icons";
 import { PatternArt, StarMark } from "../components/art/PatternArt";
 import { Chip, EmptyState, Reveal, SectionHeader } from "../components/ui/Primitives";
-import { ARTISTS, COLLECTIONS, TRACKS, formatCount, statsFor } from "../data/catalog";
-import { songFor } from "../lib/song";
+import { ARTISTS, COLLECTIONS, TRACKS, durationOf, formatCount, statsFor } from "../data/catalog";
 import { MAQAMAT, MAQAM_NAMES, maqamLabel } from "../lib/theory";
 import { plural } from "../lib/format";
 import type { MaqamName } from "../lib/theory";
@@ -12,47 +11,45 @@ import type { MaqamName } from "../lib/theory";
 const FLOW: { icon: IconName; title: string; body: string }[] = [
   {
     icon: "lyrics",
-    title: "1 · Words become syllables",
-    body: "Each line is syllabified — from the transliteration when there is one, otherwise from the Arabic harakāt. Every syllable carries a vowel.",
-  },
-  {
-    icon: "compass",
-    title: "2 · Syllables become a phrase",
-    body: "A motif from the track's maqām is stretched over the syllables, snapped to whole bars, and cadenced on the tonic or the fifth. Some syllables get a melisma.",
+    title: "1 · The words",
+    body: "A nasheed starts as lines: transliteration, Arabic, and a rendering of the meaning in English. A publisher may set the second each line starts.",
   },
   {
     icon: "waveform",
-    title: "3 · Notes become voices",
-    body: "Three detuned sawtooth oscillators per note, each through a band-pass tuned to the formants of that syllable's vowel, plus delayed vibrato and portamento.",
+    title: "2 · The recording",
+    body: "The audio is uploaded straight from the browser to Supabase Storage with the uploader's own token — no function, no proxy, no size limit but the bucket's.",
   },
   {
-    icon: "drum",
-    title: "4 · The duff",
-    body: "A frame drum from filtered noise: a pitch-dropping sine for the dum, a bright band-passed burst for the tak. Sixteen steps to a bar, and it can be switched off.",
+    icon: "library",
+    title: "3 · The row",
+    body: "Publishing writes one row in Postgres: title, maqām, tags, lyrics, the storage paths and the length. Access is decided by Row Level Security, not by app code.",
   },
   {
-    icon: "mosque",
-    title: "5 · The room",
-    body: "A convolution reverb whose impulse response is generated at runtime — noise through an exponential decay with early reflections. Studio, room, hall or masjid.",
+    icon: "play",
+    title: "4 · Streaming it back",
+    body: "The browser plays the file from Storage with range support, so seeking works. The maqām and the words are metadata beside it, not instructions to a synthesiser.",
   },
   {
     icon: "clock",
-    title: "6 · The clock",
-    body: "One scheduler drives both audio and lyrics, so the karaoke fill is reading the same timeline the voices are. It cannot drift, because there is nothing to drift from.",
+    title: "5 · The words follow",
+    body: "Where the publisher set timings, the lyric view reads them. Where they did not, the lines are spread evenly across the recording.",
+  },
+  {
+    icon: "trending",
+    title: "6 · Counted",
+    body: "A play is one row per listen, rolled up per nasheed and per day. Charts read the rollups; the raw events are pruned after ninety days.",
   },
 ];
 
 export default function About() {
-  const totals = useMemo(() => {
-    const songs = TRACKS.map((t) => songFor(t));
-    return {
-      notes: songs.reduce((s, x) => s + x.notes.length, 0),
-      hits: songs.reduce((s, x) => s + x.duff.length, 0),
-      lines: songs.reduce((s, x) => s + x.lines.length, 0),
-      minutes: Math.round(songs.reduce((s, x) => s + x.duration, 0) / 60),
+  const totals = useMemo(
+    () => ({
+      lines: TRACKS.reduce((s, t) => s + t.lines.length, 0),
+      minutes: Math.round(TRACKS.reduce((s, t) => s + durationOf(t), 0) / 60),
       plays: TRACKS.reduce((s, t) => s + statsFor(t).plays, 0),
-    };
-  }, []);
+    }),
+    [],
+  );
 
   const maqamUse = useMemo(
     () =>
@@ -73,7 +70,7 @@ export default function About() {
       {/* header */}
       <section className="relative overflow-hidden rounded-3xl border border-line">
         <div className="absolute inset-0 opacity-70">
-          <PatternArt seed="about-hero" accent="gold" motif="rosette" />
+          <PatternArt seed="about-hero" motif="rosette" />
         </div>
         <div className="absolute inset-0 bg-gradient-to-r from-[rgba(4,11,9,0.96)] via-[rgba(4,11,9,0.86)] to-[rgba(4,11,9,0.55)]" />
         <div className="grain absolute inset-0" />
@@ -84,7 +81,7 @@ export default function About() {
           <div>
             <div className="label mb-2">about</div>
             <h1 className="max-w-[18ch] text-[2.1rem] leading-[0.98] text-text md:text-[3rem]">
-              A streaming app for nasheeds, with the orchestra replaced by mathematics.
+              A streaming home for nasheeds, and the words that come with them.
             </h1>
             <p className="arabic mt-3 text-[1.2rem] text-goldsoft/85" dir="rtl">
               صوتٌ بلا آلة
@@ -104,10 +101,10 @@ export default function About() {
               <Icon name="compass" size={11} /> {maqamUse.length} maqāmāt
             </Chip>
             <Chip>
-              <Icon name="mic" size={11} /> {formatCount(totals.notes)} synthesised notes
+              <Icon name="clock" size={11} /> {totals.minutes} minutes
             </Chip>
             <Chip>
-              <Icon name="clock" size={11} /> {totals.minutes} minutes
+              <Icon name="waveform" size={11} /> {formatCount(totals.plays)} plays
             </Chip>
           </div>
         </div>
@@ -121,18 +118,17 @@ export default function About() {
             <div className="space-y-3 text-[13.5px] leading-relaxed text-text2">
               <p>
                 A player for nasheeds — devotional singing, usually unaccompanied or with a frame drum. Everything you would want
-                from a streaming service is here: curated sets, reciter pages, a queue, loves, playlists, search, a line-by-line
+                from a streaming service is here: curated sets, publisher pages, a queue, loves, playlists, search, a line-by-line
                 lyric view that follows the voice, and a small opinionated recommender called Nūr.
               </p>
               <p>
-                What is unusual is that there are no audio files. Every performance is composed from the data in{" "}
-                <code className="rounded bg-surface2 px-1.5 py-0.5 text-[12px] text-goldsoft">src/data/tracks.ts</code> and
-                synthesised live in your browser while you listen. That is why playback starts instantly, why the lyrics never
-                drift, and why you can turn the drum off without needing a second mix.
+                Every nasheed is a real recording. An account uploads it, the browser puts it straight into Supabase Storage, and
+                everybody else streams it back from there. Nothing is synthesised and nothing is imitated: what you hear is the
+                publisher's own file.
               </p>
               <p>
-                There is no server, no account and no analytics. Your loves, sets, history and tasbīḥ count live in this browser's
-                local storage and nowhere else.
+                The words travel with it. Where a publisher set the second each line starts, the lyric view is exact; where they
+                did not, the lines are spread evenly across the recording and say so.
               </p>
             </div>
           </div>
@@ -141,14 +137,12 @@ export default function About() {
           <div className="rounded-2xl border border-line bg-surface/50 p-5">
             <div className="label mb-3">catalogue, counted</div>
             <dl className="space-y-2.5">
-              <Big k="Lyric lines with timings" v={totals.lines} />
-              <Big k="Scheduled vocal notes" v={totals.notes} />
-              <Big k="Frame-drum hits" v={totals.hits} />
-              <Big k="Minutes of singing" v={totals.minutes} />
-              <Big k="Plays (invented, but stable)" v={totals.plays} format />
+              <Big k="Lyric lines" v={totals.lines} />
+              <Big k="Minutes of listening" v={totals.minutes} />
+              <Big k="Plays counted" v={totals.plays} format />
             </dl>
             <p className="mt-4 border-t border-line pt-3 text-[11.5px] leading-relaxed text-muted">
-              Counts are computed at load by running the composer over every track — the same schedule the audio engine will play.
+              Everything on this page is counted from the catalogue the database is holding right now.
             </p>
           </div>
         </Reveal>
@@ -272,15 +266,14 @@ export default function About() {
               <li className="flex gap-2.5">
                 <Icon name="user" size={14} className="mt-1 shrink-0 text-muted" />
                 <span>
-                  Every reciter is fictional. Yusuf Karim, Al-Rawḍa Ensemble, Hanan Siddiqui and the rest were invented for this
-                  catalogue, and no real singer's voice, recording or reputation is imitated or implied.
+                  Every nasheed is credited to the account that published it. Nothing in the catalogue is invented by the app —
+                  an empty database means an empty shelf.
                 </span>
               </li>
               <li className="flex gap-2.5">
                 <Icon name="trending" size={14} className="mt-1 shrink-0 text-muted" />
                 <span>
-                  Play counts, like counts and the notes under each track are generated from a seed. They are stable, they are
-                  social proof shaped, and they are not real.
+                  Plays, loves and notes are counted in Postgres, one row at a time. Nothing on a track page is a seeded estimate.
                 </span>
               </li>
               <li className="flex gap-2.5">
@@ -292,8 +285,8 @@ export default function About() {
               <li className="flex gap-2.5">
                 <Icon name="mic" size={14} className="mt-1 shrink-0 text-muted" />
                 <span>
-                  The voices are synthesis: formant-filtered oscillators shaped by the vowels in the lyrics. It is meant to sound
-                  like a choir in a tiled room, not like a person.
+                  The cover art is drawn at runtime as SVG geometry from each nasheed's seed — star rosettes, girih, zellige,
+                  mihrab arches. No two are alike, and none of them is a photograph.
                 </span>
               </li>
             </ul>
@@ -305,7 +298,7 @@ export default function About() {
       <Reveal>
         <section className="relative overflow-hidden rounded-2xl border border-gold/25 bg-gold/[0.05] p-6">
           <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 opacity-[0.14]">
-            <PatternArt seed="adab" accent="gold" motif="mihrab" />
+            <PatternArt seed="adab" motif="mihrab" />
           </div>
           <div className="relative max-w-[70ch]">
             <div className="label mb-2 text-gold">adab</div>
@@ -313,8 +306,7 @@ export default function About() {
             <p className="mt-2.5 text-[13.5px] leading-relaxed text-text2">
               Nasheeds sit close to worship for many listeners, so the app tries to behave accordingly: no imagery of the
               Prophet ﷺ or the companions, no invented sayings attributed to anyone, Qurʾānic text marked and referenced,
-              translations labelled as meanings, a vocals-only mode for those who prefer no drum, and nothing that interrupts a
-              track with an advertisement or a countdown.
+              translations labelled as meanings, and nothing that interrupts a track with an advertisement or a countdown.
             </p>
             <p className="mt-2.5 text-[13.5px] leading-relaxed text-text2">
               If a maqām is used loosely, or a transliteration you know is spelled differently, that is the app's limitation and
@@ -326,13 +318,13 @@ export default function About() {
 
       {/* built with */}
       <section>
-        <SectionHeader label="built with" title="Small stack, no backend" />
+        <SectionHeader label="built with" title="A small client, a Postgres backend" />
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
             { k: "React 19 + Vite", v: "TypeScript throughout, one bundle, no SSR." },
-            { k: "Web Audio API", v: "Oscillators, biquad formants, convolver reverb, analyser — written by hand." },
+            { k: "Supabase", v: "Postgres with Row Level Security, Auth, Storage for recordings, six Edge Functions." },
             { k: "Tailwind v4", v: "CSS-variable tokens so the night and dawn themes are the same components." },
-            { k: "Zustand + localStorage", v: "Loves, sets, history, tasbīḥ and settings persist on device." },
+            { k: "Zustand + localStorage", v: "Queue, settings and the tasbīḥ count persist on device." },
           ].map((x, i) => (
             <Reveal key={x.k} delay={i * 45}>
               <div className="card h-full p-4">
@@ -358,7 +350,7 @@ export default function About() {
 
       <div className="hairline" />
       <p className="text-center font-display text-[15px] text-muted">
-        {maqamLabel("hijaz")} at 70 bpm is the closest this app gets to a signature.
+        {maqamLabel("hijaz")} is the closest this app gets to a signature.
       </p>
     </div>
   );

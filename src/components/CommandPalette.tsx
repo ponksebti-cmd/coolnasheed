@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
 import { Icon, type IconName } from "./ui/Icons";
 import { ARTISTS, COLLECTIONS, artistOf, searchArtists, searchCollections, searchTracks } from "../data/catalog";
+import { maqamLabel } from "../lib/theory";
 import { usePlayer } from "../store/player";
 import { useLibrary } from "../store/library";
 import { useUi } from "../store/ui";
@@ -65,7 +66,6 @@ export function CommandPalette() {
       { id: "a-next", group: "Actions", label: "Next nasheed", icon: "next", run: () => { player.next(); close(); } },
       { id: "a-prev", group: "Actions", label: "Previous nasheed", icon: "prev", run: () => { player.prev(); close(); } },
       { id: "a-immersive", group: "Actions", label: player.immersive ? "Close immersive player" : "Open immersive player & lyrics", icon: "lyrics", run: () => { player.setImmersive(!player.immersive); close(); } },
-      { id: "a-duff", group: "Actions", label: library.settings.duff ? "Turn the duff off (vocals only)" : "Turn the duff on", icon: "drum", run: () => { player.setDuff(!library.settings.duff); close(); } },
       { id: "a-shuffle", group: "Actions", label: player.shuffle ? "Shuffle off" : "Shuffle on", icon: "shuffle", run: () => { player.setShuffle(!player.shuffle); close(); } },
       { id: "a-theme", group: "Actions", label: library.settings.theme === "night" ? "Switch to daylight theme" : "Switch to night theme", icon: library.settings.theme === "night" ? "sun" : "moon", run: () => { library.setSetting("theme", library.settings.theme === "night" ? "dawn" : "night"); close(); } },
       { id: "a-nur", group: "Actions", label: "Ask Nūr for a mix", icon: "sparkle", run: () => { setNur(true); close(); } },
@@ -86,7 +86,7 @@ export function CommandPalette() {
       id: `t-${t.id}`,
       group: "Nasheeds",
       label: t.title,
-      sub: `${artistOf(t).name} · ${t.bpm} bpm`,
+      sub: `${artistOf(t).name} · ${maqamLabel(t.maqam)}`,
       icon: "waveform" as IconName,
       run: () => {
         player.playTrack(t.id, { kind: "search", label: `Search · ${q}` });

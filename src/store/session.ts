@@ -17,7 +17,7 @@
  * one. The first account on a fresh project is made staff, which is how you get into
  * the moderation queue without touching the SQL editor.
  *
- * With no project configured the app still runs: the bundled catalogue plays, and
+ * With no project configured the app still runs: the catalogue stays empty, and
  * every account-gated action explains that it needs Supabase. Listening offline beats
  * a blank page.
  */
@@ -138,7 +138,7 @@ type SessionState = {
   stats: ListenerStats | null;
   /** the boot request has answered, successfully or not */
   ready: boolean;
-  /** a project is configured and answered — false means the bundled catalogue */
+  /** a project is configured and answered — false means an empty catalogue */
   online: boolean;
   /** a project is configured at all */
   configured: boolean;

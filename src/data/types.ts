@@ -1,33 +1,38 @@
+/**
+ * What the app reads.
+ *
+ * These are the shapes the interface renders. They are filled from the server —
+ * `hydrateCatalog()` pours a `catalog` payload into the registry in
+ * `data/catalog.ts` — so an empty catalogue means an empty app until a nasheed is
+ * published. Nothing here is bundled with the client any more.
+ */
+
 import type { MaqamName } from "../lib/theory";
 
-export type Accent = "jade" | "gold" | "turq" | "madder" | "cobalt";
-
 export type Artist = {
+  /** the handle — this is what a URL carries (/yusuf), so it is the public id */
   id: string;
   name: string;
   nameAr?: string;
+  /** the profile tagline, e.g. "voice, no instruments" */
   role: string;
   origin: string;
   bio: string;
+  /** seed for the generated avatar pattern */
   seed: string;
-  accent: Accent;
   verified?: boolean;
 };
 
 export type LyricLine = {
-  /** Transliteration — the line that is actually "sung" by the engine when present. */
+  /** transliteration */
   tr?: string;
-  /** Arabic script. */
+  /** Arabic script */
   ar?: string;
-  /** English rendering. */
+  /** English rendering of the meaning */
   en?: string;
-  /** Attribution or performance note, e.g. "Qur'an 9:128" or "refrain". */
+  /** attribution, e.g. "Qur'an 9:128" or "refrain" */
   note?: string;
-  /**
-   * Seconds from the start. Only meaningful for an uploaded recording whose publisher
-   * supplied timings; for a synthesized nasheed the composer derives them, which is
-   * why the karaoke view can never drift.
-   */
+  /** seconds from the start, when the publisher supplied timings */
   t?: number;
 };
 
@@ -35,40 +40,29 @@ export type Track = {
   id: string;
   title: string;
   titleAr?: string;
+  /** publisher handle */
   artistId: string;
   collections: string[];
   tags: string[];
   /** maqām (melodic mode) */
   maqam: MaqamName;
-  /** tonic as a MIDI note (60 = middle C) */
-  root: number;
-  bpm: number;
-  voices: "solo" | "duet" | "choir";
-  /** 16-step frame-drum pattern; omit for a vocals-only nasheed */
-  duff?: string;
-  /** where the duff enters */
-  duffEnter?: "intro" | "verse";
-  introBars?: number;
-  /** how many times the text is sung; later passes lift and settle */
-  passes?: number;
-  motifBank?: number[];
-  blurb: string;
+  /** the note on the sleeve: what this is, where it comes from */
+  note: string;
   year: number;
+  /** seed for the generated cover */
   seed: string;
-  accent: Accent;
   lines: LyricLine[];
 
-  /* --- set when this track came from the server rather than the bundled catalogue --- */
+  /* --- everything below here comes from the server --- */
 
-  /** publisher account id on the server */
+  /** storage path turned into a URL: streamed from Supabase Storage */
+  audioUrl: string | null;
+  artworkUrl: string | null;
+  /** length of the recording, ms; null until it is known */
+  durationMs: number | null;
+  /** real counters, straight from the database */
+  stats: { plays: number; likes: number; notes: number };
   ownerId?: string | null;
-  /** streamed recording; when absent the browser engine sings the composition */
-  audioUrl?: string | null;
-  artworkUrl?: string | null;
-  /** length of the uploaded recording, ms */
-  durationMs?: number | null;
-  /** real counters; when present they replace the generated demo numbers */
-  stats?: { plays: number; likes: number; notes: number };
   status?: "live" | "removed";
   publishedAt?: number;
 };
@@ -83,18 +77,7 @@ export type Collection = {
   curator: string;
   blurb: string;
   seed: string;
-  accent: Accent;
   tags: string[];
   year: number;
   trackIds: string[];
-};
-
-export type Mood = {
-  id: string;
-  label: string;
-  labelAr?: string;
-  blurb: string;
-  accent: Accent;
-  seed: string;
-  match: (track: Track) => boolean;
 };

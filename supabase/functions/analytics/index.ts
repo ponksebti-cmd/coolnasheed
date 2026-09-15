@@ -40,7 +40,6 @@ function clamp(value: string | null, min: number, max: number, fallback: number)
 const trendingRow = (row: TrendingDbRow): TrendingRow => ({
   songId: row.song_id,
   title: row.title,
-  accent: row.accent,
   maqam: row.maqam,
   ownerName: row.owner_name,
   plays: Number(row.plays ?? 0),

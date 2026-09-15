@@ -1,13 +1,16 @@
 /**
  * Headless smoke test.
  *
- * Bundled with esbuild and run under jsdom, so the whole app — data, composer,
- * audio graph, every route — is exercised without a browser. Run with:
+ * Bundled with esbuild and run under jsdom, so the whole app — the registry, the
+ * lyric timings, the player, every route — is exercised without a browser:
  *
  *   npm run smoke
  *
- * It validates the catalogue, the generated songs (timings, words, frequencies),
- * the Web Audio engine against a fake context, and server-renders each route.
+ * The catalogue ships empty, so this file brings its own: a handful of nasheeds
+ * poured into the registry with `hydrateCatalog()`, the same call the client makes
+ * when the server answers. Everything the test reads after that is real code
+ * reading real shapes — nothing here is a bundled library, and nothing that is
+ * asserted about a nasheed is invented by the app.
  */
 
 import { JSDOM, VirtualConsole } from "jsdom";
@@ -31,152 +34,118 @@ function section(title: string) {
   notes.push(`\n${title}`);
 }
 
-/* ------------------------------------------------------------- fake audio */
+/* ---------------------------------------------------------- fake media element */
 
-let nodeCount = 0;
-let startedSources = 0;
-let buffersPlayed = 0;
+/**
+ * jsdom's `<audio>` is a shell: `play()` throws "not implemented" and there is no
+ * clock. This gives the element the four things the player actually reads — a
+ * duration per source, a currentTime that advances while playing, a paused flag
+ * and a volume — and fires the same events a browser would.
+ */
+const DURATIONS = new Map<string, number>();
+const liveMedia: HTMLMediaElement[] = [];
+let mediaPlayCalls = 0;
 
-class FakeParam {
-  value = 0;
-  private calls = 0;
-  setValueAtTime(v: number) {
-    if (!Number.isFinite(v)) throw new Error("setValueAtTime got a non-finite value");
-    this.value = v;
-    this.calls++;
-    return this;
-  }
-  linearRampToValueAtTime(v: number, t: number) {
-    if (!Number.isFinite(v) || !Number.isFinite(t) || t < 0) throw new Error(`bad linearRamp ${v}@${t}`);
-    this.value = v;
-    this.calls++;
-    return this;
-  }
-  exponentialRampToValueAtTime(v: number, t: number) {
-    if (!Number.isFinite(v) || v === 0 || !Number.isFinite(t) || t < 0) throw new Error(`bad exponentialRamp ${v}@${t}`);
-    this.value = v;
-    this.calls++;
-    return this;
-  }
-  setTargetAtTime(v: number, t: number, c: number) {
-    if (!Number.isFinite(v) || !Number.isFinite(t) || !Number.isFinite(c)) throw new Error("bad setTargetAtTime");
-    this.value = v;
-    this.calls++;
-    return this;
-  }
-  cancelScheduledValues(t: number) {
-    if (!Number.isFinite(t)) throw new Error("bad cancelScheduledValues");
-    this.calls++;
-    return this;
-  }
-  get automationCalls() {
-    return this.calls;
-  }
+function installMediaShim(w: Window & typeof globalThis) {
+  const proto = w.HTMLMediaElement.prototype as unknown as Record<string, unknown>;
+
+  const store = (el: HTMLMediaElement) => {
+    const bag = (el as unknown as { __media?: { time: number; volume: number; playing: boolean } }).__media;
+    if (bag) return bag;
+    const fresh = { time: 0, volume: 1, playing: false };
+    (el as unknown as { __media: typeof fresh }).__media = fresh;
+    return fresh;
+  };
+
+  Object.defineProperty(proto, "duration", {
+    configurable: true,
+    get(this: HTMLMediaElement) {
+      return DURATIONS.get(this.src) ?? NaN;
+    },
+  });
+
+  Object.defineProperty(proto, "paused", {
+    configurable: true,
+    get(this: HTMLMediaElement) {
+      return !store(this).playing;
+    },
+  });
+
+  Object.defineProperty(proto, "ended", {
+    configurable: true,
+    get() {
+      return false;
+    },
+  });
+
+  Object.defineProperty(proto, "currentTime", {
+    configurable: true,
+    get(this: HTMLMediaElement) {
+      return store(this).time;
+    },
+    set(this: HTMLMediaElement, value: number) {
+      store(this).time = Math.max(0, Number.isFinite(value) ? value : 0);
+    },
+  });
+
+  Object.defineProperty(proto, "volume", {
+    configurable: true,
+    get(this: HTMLMediaElement) {
+      return store(this).volume;
+    },
+    set(this: HTMLMediaElement, value: number) {
+      store(this).volume = value;
+    },
+  });
+
+  proto.play = function play(this: HTMLMediaElement) {
+    mediaPlayCalls++;
+    store(this).playing = true;
+    this.dispatchEvent(new w.Event("play"));
+    return Promise.resolve();
+  };
+
+  proto.pause = function pause(this: HTMLMediaElement) {
+    store(this).playing = false;
+    this.dispatchEvent(new w.Event("pause"));
+  };
+
+  proto.load = function load() {};
+
+  /* The player builds its element with `new Audio()` and never puts it in the
+     document, so keep hold of every one that is made. */
+  const NativeAudio = w.Audio;
+  (w as unknown as { Audio: unknown }).Audio = function FakeAudio(this: unknown, src?: string) {
+    const el = new NativeAudio();
+    if (src) el.src = src;
+    liveMedia.push(el);
+    return el;
+  };
+
+  // a clock that only moves while something is playing, like the real thing
+  w.setInterval(() => {
+    for (const el of liveMedia) {
+      const bag = (el as unknown as { __media?: { time: number; playing: boolean } }).__media;
+      if (!bag?.playing) continue;
+      const length = DURATIONS.get(el.src) ?? 0;
+      if (length && bag.time + 0.05 >= length) {
+        bag.time = length;
+        bag.playing = false;
+        el.dispatchEvent(new w.Event("ended"));
+        continue;
+      }
+      bag.time += 0.05;
+      el.dispatchEvent(new w.Event("timeupdate"));
+    }
+  }, 50);
 }
 
-/** Every node the engine builds, kept so tests can inspect the graph itself. */
-const liveNodes: FakeNode[] = [];
+/* ------------------------------------------------------- fake audio context */
 
-class FakeNode {
-  context: FakeAudioContext;
-  numberOfInputs = 1;
-  numberOfOutputs = 1;
-  constructor(ctx: FakeAudioContext) {
-    this.context = ctx;
-    nodeCount++;
-    liveNodes.push(this);
-  }
-  connect(dest: unknown) {
-    if (!dest) throw new Error("connect() called with no destination");
-    return dest as FakeNode;
-  }
-  disconnect() {}
-}
+/** Only what the player asks of Web Audio: a source, an analyser, a destination. */
+let analysersBuilt = 0;
 
-class FakeGain extends FakeNode {
-  gain = new FakeParam();
-}
-class FakeFilter extends FakeNode {
-  type = "lowpass";
-  frequency = new FakeParam();
-  Q = new FakeParam();
-  detune = new FakeParam();
-  gain = new FakeParam();
-}
-class FakePanner extends FakeNode {
-  pan = new FakeParam();
-}
-class FakeOsc extends FakeNode {
-  type = "sine";
-  frequency = new FakeParam();
-  detune = new FakeParam();
-  onended: (() => void) | null = null;
-  private started = false;
-  private stopped = false;
-  start(when = 0) {
-    if (this.started) throw new Error("oscillator started twice");
-    if (!Number.isFinite(when) || when < 0) throw new Error(`bad start time ${when}`);
-    this.started = true;
-    startedSources++;
-  }
-  stop(when = 0) {
-    if (!this.started) throw new Error("stop before start");
-    if (!Number.isFinite(when) || when < 0) throw new Error(`bad stop time ${when}`);
-    this.stopped = true;
-  }
-  get wasStopped() {
-    return this.stopped;
-  }
-}
-class FakeBufferSource extends FakeNode {
-  buffer: FakeBuffer | null = null;
-  playbackRate = new FakeParam();
-  detune = new FakeParam();
-  loop = false;
-  onended: (() => void) | null = null;
-  private started = false;
-  start(when = 0) {
-    if (this.started) throw new Error("buffer source started twice");
-    if (!Number.isFinite(when) || when < 0) throw new Error(`bad start time ${when}`);
-    this.started = true;
-    startedSources++;
-    buffersPlayed++;
-  }
-  stop(when = 0) {
-    if (!Number.isFinite(when) || when < 0) throw new Error(`bad stop time ${when}`);
-  }
-}
-class FakeBuffer {
-  length: number;
-  numberOfChannels: number;
-  sampleRate: number;
-  private data: Float32Array[];
-  constructor(channels: number, length: number, sampleRate: number) {
-    this.numberOfChannels = channels;
-    this.length = length;
-    this.sampleRate = sampleRate;
-    this.data = Array.from({ length: channels }, () => new Float32Array(length));
-  }
-  get duration() {
-    return this.length / this.sampleRate;
-  }
-  getChannelData(i: number) {
-    return this.data[i]!;
-  }
-}
-class FakeConvolver extends FakeNode {
-  buffer: FakeBuffer | null = null;
-  normalize = true;
-}
-class FakeCompressor extends FakeNode {
-  threshold = new FakeParam();
-  knee = new FakeParam();
-  ratio = new FakeParam();
-  attack = new FakeParam();
-  release = new FakeParam();
-  reduction = 0;
-}
-class FakeAnalyser extends FakeNode {
+class FakeAnalyser {
   fftSize = 2048;
   smoothingTimeConstant = 0.8;
   get frequencyBinCount() {
@@ -185,59 +154,26 @@ class FakeAnalyser extends FakeNode {
   getByteFrequencyData(arr: Uint8Array) {
     for (let i = 0; i < arr.length; i++) arr[i] = Math.floor(120 + 60 * Math.sin(i / 7));
   }
-  getByteTimeDomainData(arr: Uint8Array) {
-    arr.fill(128);
-  }
+  connect() {}
+  disconnect() {}
 }
 
 class FakeAudioContext {
-  private t0 = Date.now();
-  sampleRate = 48000;
-  state: "running" | "suspended" = "running";
-  destination = new FakeNode(this);
-  onstatechange: (() => void) | null = null;
-  get currentTime() {
-    return (Date.now() - this.t0) / 1000;
-  }
-  createGain() {
-    return new FakeGain(this);
-  }
-  createBiquadFilter() {
-    return new FakeFilter(this);
-  }
-  createStereoPanner() {
-    return new FakePanner(this);
-  }
-  createOscillator() {
-    return new FakeOsc(this);
-  }
-  createBufferSource() {
-    return new FakeBufferSource(this);
-  }
-  createConvolver() {
-    return new FakeConvolver(this);
-  }
-  createDynamicsCompressor() {
-    return new FakeCompressor(this);
+  state = "running";
+  destination = { connect() {}, disconnect() {} };
+  createMediaElementSource() {
+    analysersBuilt++;
+    return { connect() {}, disconnect() {} };
   }
   createAnalyser() {
-    return new FakeAnalyser(this);
-  }
-  createBuffer(channels: number, length: number, sampleRate: number) {
-    return new FakeBuffer(channels, length, sampleRate);
+    return new FakeAnalyser();
   }
   async resume() {
     this.state = "running";
   }
-  async suspend() {
-    this.state = "suspended";
-  }
-  async close() {
-    this.state = "suspended";
-  }
 }
 
-/* -------------------------------------------------------------- jsdom host */
+/* ------------------------------------------------------------------ jsdom host */
 
 const dom = new JSDOM(`<!doctype html><html><head></head><body><div id="root"></div></body></html>`, {
   url: "http://localhost:5173/",
@@ -246,6 +182,7 @@ const dom = new JSDOM(`<!doctype html><html><head></head><body><div id="root"></
 });
 
 const w = dom.window as unknown as Record<string, unknown> & typeof dom.window;
+installMediaShim(dom.window as unknown as Window & typeof globalThis);
 w.AudioContext = FakeAudioContext as unknown as typeof AudioContext;
 (w as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
   cb: (entries: { isIntersecting: boolean; target: Element }[]) => void;
@@ -294,6 +231,7 @@ setGlobal("HTMLElement", w.HTMLElement);
 setGlobal("Element", w.Element);
 setGlobal("Node", w.Node);
 setGlobal("getComputedStyle", w.getComputedStyle.bind(w));
+setGlobal("Audio", (w as unknown as { Audio: unknown }).Audio);
 setGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 16) as unknown as number);
 setGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
 setGlobal("IntersectionObserver", (w as unknown as { IntersectionObserver: unknown }).IntersectionObserver);
@@ -314,264 +252,375 @@ async function main() {
     if (!msg.includes("act(") && !msg.includes("ReactDOMTestUtils")) realError(...args);
   };
 
-  /* ---- catalogue + composer ---- */
-  const catalog = await import("../src/data/catalog");
-  const { songFor } = await import("../src/lib/song");
-  const theory = await import("../src/lib/theory");
-
-  section("Catalogue");
-  assert(`${catalog.TRACKS.length} tracks loaded`, catalog.TRACKS.length >= 20);
-  assert(`${catalog.ARTISTS.length} reciters loaded`, catalog.ARTISTS.length >= 6);
-  assert(`${catalog.COLLECTIONS.length} sets loaded`, catalog.COLLECTIONS.length >= 6);
-
-  const badArtist = catalog.TRACKS.filter((t) => !catalog.getArtist(t.artistId));
-  assert("every track has a real reciter", badArtist.length === 0, badArtist.map((t) => t.id).join(","));
-
-  const orphanTracks = catalog.COLLECTIONS.flatMap((c) => c.trackIds).filter((id) => !catalog.getTrack(id));
-  assert("every set points at real tracks", orphanTracks.length === 0, orphanTracks.join(","));
-
-  const uncollected = catalog.TRACKS.filter((t) => !catalog.COLLECTIONS.some((c) => c.trackIds.includes(t.id)));
-  assert("every track appears in at least one set", uncollected.length === 0, uncollected.map((t) => t.id).join(","));
-
-  const dupes = catalog.TRACKS.map((t) => t.id).filter((id, i, arr) => arr.indexOf(id) !== i);
-  assert("track ids are unique", dupes.length === 0, dupes.join(","));
-
-  section("Composer (song builder)");
-  let minDur = Infinity;
-  let maxDur = 0;
-  let totalNotes = 0;
-  let totalHits = 0;
-  let totalLines = 0;
-  const problems: string[] = [];
-
-  catalog.TRACKS.forEach((track) => {
-    const song = songFor(track);
-    totalNotes += song.notes.length;
-    totalHits += song.duff.length;
-    totalLines += song.lines.length;
-    minDur = Math.min(minDur, song.duration);
-    maxDur = Math.max(maxDur, song.duration);
-
-    const expectedLines = track.lines.length * Math.max(1, track.passes ?? 2);
-    if (song.lines.length !== expectedLines)
-      problems.push(`${track.id}: expected ${expectedLines} timed lines, got ${song.lines.length}`);
-    if (!Number.isFinite(song.duration) || song.duration <= 0) problems.push(`${track.id}: bad duration`);
-    song.notes.forEach((n, i) => {
-      if (!Number.isFinite(n.freq) || n.freq <= 20 || n.freq > 6000) problems.push(`${track.id}: note ${i} freq ${n.freq}`);
-      if (!Number.isFinite(n.t) || n.t < 0) problems.push(`${track.id}: note ${i} time ${n.t}`);
-      if (!Number.isFinite(n.dur) || n.dur <= 0) problems.push(`${track.id}: note ${i} dur ${n.dur}`);
-    });
-    song.duff.forEach((d, i) => {
-      if (!Number.isFinite(d.t) || d.t < 0 || d.t > song.duration + 0.5) problems.push(`${track.id}: duff ${i} at ${d.t}`);
-    });
-    song.lines.forEach((l, i) => {
-      if (l.words.length === 0) problems.push(`${track.id}: line ${i} has no words`);
-      if (l.end <= l.t) problems.push(`${track.id}: line ${i} ends before it starts`);
-      if (i > 0 && l.t < song.lines[i - 1]!.end - 0.001) problems.push(`${track.id}: line ${i} overlaps the previous`);
-      let prevEnd = -1;
-      l.words.forEach((wd) => {
-        if (wd.t < l.t - 0.001 || wd.end > l.end + 0.001) problems.push(`${track.id}: word "${wd.text}" outside its line`);
-        if (wd.t < prevEnd - 0.001) problems.push(`${track.id}: word "${wd.text}" goes backwards`);
-        if (!wd.text.trim()) problems.push(`${track.id}: empty word`);
-        prevEnd = wd.end;
-      });
-    });
-  });
-
-  assert("every song is finite and non-empty", problems.length === 0, problems.slice(0, 4).join(" | "));
-  assert(
-    `durations between 40s and 5m`,
-    minDur >= 40 && maxDur <= 300,
-    `min ${minDur.toFixed(1)}s, max ${maxDur.toFixed(1)}s`,
-  );
-  assert(`${totalNotes} notes scheduled`, totalNotes > 500);
-  assert(`${totalHits} duff hits scheduled`, totalHits > 100);
-  const expectedTotal = catalog.TRACKS.reduce((n, t) => n + t.lines.length * Math.max(1, t.passes ?? 2), 0);
-  assert(
-    `${totalLines} timed lyric lines across all repetitions`,
-    totalLines === expectedTotal,
-    `expected ${expectedTotal}`,
-  );
-
-  notes.push(
-    catalog.TRACKS.map((t) => {
-      const sg = songFor(t);
-      return `    ${t.id.padEnd(26)} ${sg.duration.toFixed(0).padStart(3)}s  ${String(sg.notes.length).padStart(4)} notes  ${String(sg.duff.length).padStart(4)} hits  ${String(sg.lines.length).padStart(2)} lines  ${t.maqam}/${t.bpm}bpm/${t.voices}`;
-    }).join("\n"),
-  );
-
-  section("Maqām theory");
-  const hijaz = theory.degreeToFreq(57, "hijaz", 2);
-  const tonic = theory.degreeToFreq(57, "hijaz", 0);
-  assert("degree 2 in Ḥijāz is a major third up", Math.abs(hijaz / tonic - Math.pow(2, 4 / 12)) < 1e-6);
-  assert("octave wraps", Math.abs(theory.degreeToFreq(57, "hijaz", 7) / tonic - 2) < 1e-6);
-  assert("negative degrees wrap down", Math.abs(theory.degreeToFreq(57, "hijaz", -7) / tonic - 0.5) < 1e-6);
-  const rastThird = theory.degreeToFreq(60, "rast", 2) / theory.degreeToFreq(60, "rast", 0);
-  assert("Rāst keeps its quarter tone", Math.abs(rastThird - Math.pow(2, 3.5 / 12)) < 1e-6, `${rastThird.toFixed(4)} ratio`);
-  assert("note names resolve", theory.noteName(60) === "C4", theory.noteName(60));
-
-  section("Syllabifier");
-  const latin = theory.syllabifyLine("Mawlāya ṣalli wa sallim dāʾiman abadā", undefined);
-  assert("transliteration splits into words", latin.words.length === 6, `${latin.words.length}: ${latin.words.join(" ")}`);
-  assert("and into more syllables than words", latin.syllables.length > latin.words.length, `${latin.syllables.length} syllables`);
-  assert("vowels are extracted", latin.syllables.every((s) => "aeioum".includes(s.vowel)));
-  const arabic = theory.syllabifyLine(undefined, "طَلَعَ البَدْرُ عَلَيْنَا");
-  assert("Arabic-only lines syllabify", arabic.syllables.length >= 4, `${arabic.syllables.length} syllables`);
-  const english = theory.syllabifyLine("The full moon rose upon us", undefined);
-  assert("English lines syllabify", english.syllables.length >= 6, `${english.syllables.length} syllables`);
-
-  section("Search & curator");
-  assert("title search", catalog.searchTracks("badru").length > 0);
-  assert("lyric-line search", catalog.searchTracks("gratitude").length > 0);
-  assert("artist search", catalog.searchArtists("cairo").length > 0);
-  assert("maqām search", catalog.searchTracks("hijaz").length > 0);
-  assert("nonsense search returns nothing", catalog.searchTracks("zzzqqq").length === 0);
-
-  const { generateNurMix, buildTaste } = await import("../src/lib/nur");
-  const emptyMix = generateNurMix({ liked: [], history: [], size: 8, seedKey: "smoke-a" });
-  assert("Nūr builds a mix from nothing", emptyMix.trackIds.length === 8);
-  assert("Nūr mix has no duplicate tracks", new Set(emptyMix.trackIds).size === emptyMix.trackIds.length);
-  assert("every pick has a reason", emptyMix.picks.every((p) => p.reason.length > 12));
-  const deterministic = generateNurMix({ liked: [], history: [], size: 8, seedKey: "smoke-a" });
-  assert("same seed, same mix", deterministic.trackIds.join() === emptyMix.trackIds.join());
-  const taste = buildTaste(["talaa-al-badru", "sakina"], [{ id: "la-ilaha-illa-allah", at: Date.now(), count: 3 }]);
-  assert("taste vector learns tags", Object.keys(taste.tags).length > 0);
-  const seededMix = generateNurMix({ liked: ["sakina", "dust-and-light", "ya-rabb"], history: [], size: 8, seedKey: "smoke-b", moodId: "still" });
-  assert("mood-constrained mix still fills up", seededMix.trackIds.length === 8);
-  assert("taste shifts the picks", seededMix.trackIds.join() !== emptyMix.trackIds.join());
-
-  /* ---- audio engine ---- */
-  section("Audio engine (fake context)");
-  const { engine } = await import("../src/lib/audio/engine");
-  const target = catalog.getTrack("talaa-al-badru")!;
-  const song = songFor(target);
-  let ended = 0;
-  engine.handlers.onEnded = () => {
-    ended++;
-  };
-  await engine.load(song, 0);
-  assert("loaded at t=0", Math.abs(engine.getTime()) < 0.01);
-  await engine.play();
-  assert("playing after play()", engine.isPlaying);
-  await sleep(420);
-  const advanced = engine.getTime();
-  assert("the clock advances", advanced > 0.05, `${advanced.toFixed(2)}s`);
-  assert("sources were scheduled", startedSources > 4, `${startedSources} started, ${nodeCount} nodes built`);
-  const spectrum = engine.readSpectrum();
-  assert("analyser spectrum is readable", spectrum.length > 0 && spectrum[0] !== undefined);
-  assert("level meter reads", engine.readLevel() >= 0 && engine.readLevel() <= 1);
-
-  /* The intro is one long hum drone, so jump into a sung verse and let the
-     scheduler run through a few phrases before inspecting what it built. */
-  await engine.seek(song.lines[2]!.t + 0.05);
-  await sleep(1600);
-
-  /* ---- white-box: inspect the graph the engine actually built ---- */
-  const { FORMANTS } = await import("../src/lib/voice-types");
-  const gains = liveNodes.filter((n): n is FakeGain => n instanceof FakeGain);
-  const saws = liveNodes.filter((n): n is FakeOsc => n instanceof FakeOsc && n.type === "sawtooth");
-  const bandpass = liveNodes.filter((n): n is FakeFilter => n instanceof FakeFilter && n.type === "bandpass");
-  const convs = liveNodes.filter((n): n is FakeConvolver => n instanceof FakeConvolver);
-
-  assert("voices are sawtooth sources, not sine beeps", saws.length >= 12, `${saws.length} sawtooth oscillators`);
-  assert(
-    "every voice is shaped by three formant resonators",
-    bandpass.length >= saws.length,
-    `${bandpass.length} band-passes for ${saws.length} saws`,
-  );
-
-  const bpFreqs = new Set(bandpass.map((b) => Math.round(b.frequency.value)));
-  const vowelsUsed = Object.entries(FORMANTS)
-    .map(([v, cfg]) => ({ v, hits: cfg.f.filter((f) => bpFreqs.has(Math.round(f))).length }))
-    .filter((x) => x.hits >= 2);
-  assert(
-    "their frequencies come from the vowel table",
-    vowelsUsed.length >= 2,
-    vowelsUsed.map((x) => `${x.v} ${x.hits}/3`).join(", "),
-  );
-
-  assert("one convolver carries the whole mix", convs.length === 1, `${convs.length} convolvers`);
-  const irBefore = convs[0]?.buffer?.duration ?? 0;
-  engine.setSpace("masjid");
-  const irAfter = convs[0]?.buffer?.duration ?? 0;
-  assert(
-    "changing space rebuilds a longer impulse response",
-    irAfter > irBefore + 1,
-    `${irBefore.toFixed(2)}s → ${irAfter.toFixed(2)}s`,
-  );
-  assert("and the engine reports the new space", engine.currentSpace === "masjid");
-
-  /* Identify buses by what moves, not by guessing values. */
-  const beforeVolume = gains.map((g) => g.gain.value);
-  engine.setVolume(4);
-  const master = gains.filter((g, i) => g.gain.value !== beforeVolume[i]);
-  assert(
-    "out-of-range volume is clamped onto exactly one bus",
-    master.length === 1 && master[0]!.gain.value === 1,
-    `${master.length} bus(es) moved, value ${master[0]?.gain.value}`,
-  );
-  engine.setVolume(0.4);
-  assert("0.4 reaches the same master bus", Math.abs(master[0]!.gain.value - 0.4) < 1e-9);
-
-  const beforeDuff = gains.map((g) => g.gain.value);
-  engine.setDuff(false);
-  const drumBus = gains.filter((g, i) => g.gain.value !== beforeDuff[i]);
-  assert(
-    "duff off silences one bus and leaves the voices alone",
-    drumBus.length === 1 && drumBus[0]!.gain.value === 0 && Math.abs(master[0]!.gain.value - 0.4) < 1e-9,
-    `${drumBus.length} bus(es) moved`,
-  );
-  assert("the engine remembers the choice", engine.duffEnabled === false);
-  engine.setDuff(true);
-  assert("duff on restores that bus to 0.5", Math.abs(drumBus[0]!.gain.value - 0.5) < 1e-9);
-  assert("and reports it", engine.duffEnabled === true);
-
-  await engine.seek(2);
-  assert("seek lands near the target", Math.abs(engine.getTime() - 2) < 0.4, engine.getTime().toFixed(2));
-
-  engine.pause();
-  assert("paused", !engine.isPlaying);
-  const pausedAt = engine.getTime();
-  await sleep(120);
-  assert("the clock holds while paused", Math.abs(engine.getTime() - pausedAt) < 0.05);
-
-  await engine.seek(song.duration - 0.25);
-  await engine.play();
-  await sleep(600);
-  assert("reaches the end and fires onEnded", ended >= 1, `ended=${ended}`);
-  assert("engine stopped itself", !engine.isPlaying);
-
-  // a second track, to be sure the graph survives a rebuild
-  const second = songFor(catalog.getTrack("sakina")!);
-  await engine.load(second, 0);
-  await engine.play();
-  await sleep(260);
-  assert("a second track plays after the first finished", engine.isPlaying && engine.getTime() > 0.05);
-  engine.stop();
-  assert("stop resets the clock", engine.getTime() === 0);
-
-  /* ---- routes ---- */
-  section("Routes (jsdom render)");
   const React = await import("react");
   const { createRoot } = await import("react-dom/client");
+
+  /* ---- the empty registry, before anything is published ---- */
+
+  const catalog = await import("../src/data/catalog");
+  const { timedLyrics, lineAt } = await import("../src/lib/lyrics");
+  const theory = await import("../src/lib/theory");
+
+  section("An empty catalogue");
+  assert("the registry starts empty", catalog.TRACKS.length === 0 && catalog.ARTISTS.length === 0);
+  assert("looking a nasheed up finds nothing", catalog.getTrack("sng_nothing") === undefined);
+  assert("and the counts it prints are zero, not invented", catalog.statsFor(catalog.TRACKS[0] ?? ({} as never)).plays === 0);
+
+  {
+    const { default: App } = await import("../src/App");
+    const host = w.document.createElement("div");
+    w.document.body.appendChild(host);
+    const root = createRoot(host);
+    w.history.pushState({}, "", "/");
+    await React.act(async () => {
+      root.render(React.createElement(App));
+    });
+    await sleep(40);
+    const text = host.textContent ?? "";
+    assert("the home page says so instead of inventing a shelf", text.includes("Nothing here yet"), text.slice(0, 80));
+    await React.act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  }
+
+  /* ---- the fixture: what a `catalog` payload from the server looks like ---- */
+
+  const now = Date.now();
+  const song = (over: Record<string, unknown>) => ({
+    id: "sng_x",
+    ownerId: "uuid-1",
+    ownerHandle: "test.reciter",
+    title: "A Nasheed",
+    titleAr: null,
+    note: "",
+    maqam: "hijaz",
+    year: 2025,
+    tags: ["test"],
+    lines: [{ tr: "ya rabbi", en: "O my Lord" }],
+    audioPath: null,
+    audioMime: null,
+    durationMs: null,
+    artworkPath: null,
+    status: "live",
+    publishedAt: now,
+    plays: 0,
+    likes: 0,
+    notes: 0,
+    ...over,
+  });
+
+  const songs = [
+    song({
+      id: "sng_fajr",
+      title: "City of Fajr",
+      titleAr: "مدينة الفجر",
+      note: "Recorded before dawn.",
+      maqam: "bayati",
+      year: 2024,
+      tags: ["fajr", "test"],
+      audioPath: "audio/fajr.mp3",
+      audioMime: "audio/mpeg",
+      durationMs: 214_000,
+      lines: [
+        { tr: "ya rabbi", ar: "يا ربي", en: "O my Lord", t: 0 },
+        { tr: "salli ala", en: "Bless him", t: 34 },
+        { tr: "wa sallim", en: "and grant peace", note: "traditional", t: 88 },
+      ],
+      plays: 412,
+      likes: 33,
+      notes: 4,
+      publishedAt: now - 86_400_000 * 9,
+    }),
+    song({
+      id: "sng_sakina",
+      title: "Sakīna",
+      maqam: "hijaz",
+      year: 2023,
+      tags: ["still", "test"],
+      audioPath: "audio/sakina.mp3",
+      audioMime: "audio/mpeg",
+      durationMs: 268_000,
+      lines: [
+        { tr: "first line of the quiet one", en: "the first" },
+        { tr: "second line of the quiet one", en: "the second" },
+        { tr: "third line of the quiet one", en: "the third" },
+        { tr: "fourth line of the quiet one", en: "the fourth" },
+      ],
+      plays: 1204,
+      likes: 190,
+      notes: 21,
+      publishedAt: now - 86_400_000 * 30,
+    }),
+    song({
+      id: "sng_no-audio",
+      title: "Words Without A Recording",
+      maqam: "rast",
+      year: 2025,
+      tags: ["test"],
+      ownerHandle: "test.ensemble",
+      ownerId: "uuid-2",
+      lines: [{ tr: "sung alone", en: "sung alone" }],
+      publishedAt: now - 86_400_000,
+    }),
+    song({
+      id: "sng_badru",
+      title: "Ṭalaʿa al-Badru",
+      titleAr: "طلع البدر علينا",
+      maqam: "hijazkar",
+      year: 2022,
+      tags: ["traditional", "test"],
+      ownerHandle: "test.ensemble",
+      ownerId: "uuid-2",
+      audioPath: "audio/badru.m4a",
+      audioMime: "audio/mp4",
+      durationMs: 196_000,
+      artworkPath: "art/badru.png",
+      lines: [
+        { tr: "talaʿa al-badru ʿalayna", ar: "طلع البدر علينا", en: "The full moon rose upon us", note: "traditional", t: 2 },
+        { tr: "min thaniyyati al-wadaʿ", en: "from the valley of Wadāʿ", note: "traditional", t: 26 },
+      ],
+      plays: 88,
+      likes: 9,
+      notes: 1,
+      publishedAt: now - 86_400_000 * 60,
+    }),
+    song({
+      id: "sng_laylat",
+      title: "Laylat al-Qadr",
+      maqam: "saba",
+      year: 2026,
+      tags: ["ramadan", "test"],
+      audioPath: "audio/laylat.mp3",
+      audioMime: "audio/mpeg",
+      durationMs: 302_000,
+      lines: [
+        { tr: "the odd nights are the good ones", en: "the odd nights", t: 0 },
+        { tr: "better than a thousand months", en: "better than a thousand", note: "Qurʾān 97:3", t: 70 },
+      ],
+      plays: 12,
+      likes: 2,
+      notes: 0,
+      publishedAt: now - 86_400_000 * 3,
+    }),
+    song({
+      id: "sng_dhikr",
+      title: "Subḥān Allāh",
+      maqam: "kurd",
+      year: 2025,
+      tags: ["dhikr", "test"],
+      ownerHandle: "test.ensemble",
+      ownerId: "uuid-2",
+      audioPath: "audio/dhikr.ogg",
+      audioMime: "audio/ogg",
+      durationMs: 148_000,
+      lines: [{ tr: "subhana allah", en: "Glory be to God", t: 0 }],
+      plays: 640,
+      likes: 71,
+      notes: 8,
+      publishedAt: now - 86_400_000 * 14,
+    }),
+  ];
+
+  const artist = (over: Record<string, unknown>) => ({
+    id: "test.reciter",
+    profileId: "uuid-1",
+    handle: "test.reciter",
+    name: "Test Reciter",
+    nameAr: null,
+    role: "voice, no instruments",
+    origin: "Algiers",
+    bio: "Publishes the smoke fixture.",
+    seed: "seed-reciter",
+    verified: true,
+    kind: "artist",
+    songs: 0,
+    followers: 0,
+    ...over,
+  });
+
+  const artists = [
+    artist({}),
+    artist({
+      id: "test.ensemble",
+      profileId: "uuid-2",
+      handle: "test.ensemble",
+      name: "Test Ensemble",
+      role: "seven voices",
+      origin: "Cairo",
+      seed: "seed-ensemble",
+      verified: false,
+    }),
+  ];
+
+  const collection = (over: Record<string, unknown>) => ({
+    id: "col_fajr",
+    kind: "mukhtarat",
+    title: "Before Dawn",
+    titleAr: null,
+    curator: "CoolNasheed",
+    blurb: "For the hour before Fajr.",
+    seed: "seed-shelf",
+    tags: ["fajr"],
+    year: 2026,
+    songIds: ["sng_fajr", "sng_sakina"],
+    ...over,
+  });
+
+  const collections = [
+    collection({}),
+    collection({
+      id: "col_ramadan",
+      kind: "mix",
+      title: "Ramadan Nights",
+      blurb: "The last ten.",
+      seed: "seed-ramadan",
+      tags: ["ramadan"],
+      songIds: ["sng_laylat", "sng_sakina", "sng_badru"],
+    }),
+  ];
+
+  section("Hydration (what the server sends)");
+  const hydrated = catalog.hydrateCatalog({ artists, songs, collections } as never);
+  assert(`${hydrated} nasheeds registered`, hydrated === songs.length, `${catalog.TRACKS.length} in the registry`);
+  assert(`${catalog.ARTISTS.length} publishers registered`, catalog.ARTISTS.length === 2);
+  assert(`${catalog.COLLECTIONS.length} shelves registered`, catalog.COLLECTIONS.length === 2);
+
+  const noArtist = catalog.TRACKS.filter((t) => !catalog.getArtist(t.artistId));
+  assert("every nasheed is credited to a publisher in the same payload", noArtist.length === 0, noArtist.map((t) => t.id).join(","));
+
+  const orphans = catalog.COLLECTIONS.flatMap((c) => c.trackIds).filter((id) => !catalog.getTrack(id));
+  assert("every shelf points at real nasheeds", orphans.length === 0, orphans.join(","));
+
+  const ids = catalog.TRACKS.map((t) => t.id);
+  assert("nasheed ids are unique", new Set(ids).size === ids.length);
+
+  const linked = catalog.TRACKS.filter((t) => t.collections.length > 0);
+  assert("and the shelves are linked back onto their nasheeds", linked.length === 4, `${linked.length} of ${ids.length} appear in a shelf`);
+
+  const fajr = catalog.getTrack("sng_fajr")!;
+  assert("a nasheed carries its recording's length", catalog.durationOf(fajr) === 214, `${catalog.durationOf(fajr)}s`);
+  assert("and its real counters", catalog.statsFor(fajr).plays === 412);
+  assert("a nasheed with no recording says so", catalog.getTrack("sng_no-audio")!.audioUrl === null);
+
+  section("Lyric timings");
+  const timed = timedLyrics("sng_fajr", fajr.lines, 214);
+  assert("a publisher's timings are used as they stand", timed.lines.map((l) => l.t).join() === "0,34,88");
+  assert("each line runs until the next begins", timed.lines[1]!.dur === 54, `${timed.lines[1]!.dur}s`);
+  assert("the last line runs to the end of the recording", Math.abs(timed.lines[2]!.t + timed.lines[2]!.dur - 214) < 1e-6);
+  assert(
+    "words share their line's span",
+    timed.lines[0]!.words.length === 2 && timed.lines[0]!.words[0]!.text === "ya" && timed.lines[0]!.words[1]!.text === "rabbi",
+    timed.lines[0]!.words.map((wd) => wd.text).join("|"),
+  );
+  assert(
+    "every word sits inside its line",
+    timed.lines.every((l) => l.words.every((wd) => wd.t >= l.t - 1e-6 && wd.end <= l.t + l.dur + 1e-6)),
+  );
+  assert("lineAt() finds the line being sung", lineAt(timed.lines, 40) === 1 && lineAt(timed.lines, 0) === 0 && lineAt(timed.lines, 200) === 2);
+
+  const spread = timedLyrics("sng_sakina", catalog.getTrack("sng_sakina")!.lines, 268);
+  assert("untimed lines are spread evenly instead of guessed at", spread.lines.map((l) => Math.round(l.t)).join() === "0,67,134,201");
+  assert("and they cover the whole recording", Math.abs(spread.lines[3]!.t + spread.lines[3]!.dur - 268) < 1e-6);
+
+  const empty = timedLyrics("sng_none", [], 0);
+  assert("a nasheed with no words is not an error", empty.lines.length === 0);
+
+  section("Maqām reference");
+  assert("every maqām has a name, a mood and its steps", theory.MAQAM_NAMES.every((m) => theory.MAQAMAT[m].name && theory.MAQAMAT[m].mood && theory.MAQAMAT[m].steps.length === 7));
+  assert(
+    "the quarter-tone modes are the ones that say so",
+    theory.hasQuarterTones("rast") && theory.hasQuarterTones("bayati") && theory.hasQuarterTones("saba") && !theory.hasQuarterTones("hijaz"),
+    theory.MAQAM_NAMES.filter((m) => theory.hasQuarterTones(m)).join(", "),
+  );
+  assert("labels are names, not slugs", theory.maqamLabel("hijaz") === "Ḥijāz", theory.maqamLabel("hijaz"));
+  assert("ten modes are on offer", theory.MAQAM_NAMES.length === 10);
+
+  section("Search & curator");
+  assert("title search", catalog.searchTracks("fajr").some((t) => t.id === "sng_fajr"));
+  assert("lyric-line search", catalog.searchTracks("thousand months").some((t) => t.id === "sng_laylat"));
+  assert("publisher search", catalog.searchArtists("cairo").some((a) => a.id === "test.ensemble"));
+  assert("maqām search", catalog.searchTracks("hijaz").length >= 2);
+  assert("shelf search", catalog.searchCollections("ramadan").length === 1);
+  assert("nonsense search returns nothing", catalog.searchTracks("zzzqqq").length === 0);
+  assert("tags are counted across the catalogue", catalog.tagCounts().some((t) => t.tag === "test" && t.count === 6));
+
+  const { generateNurMix, buildTaste } = await import("../src/lib/nur");
+  const emptyMix = generateNurMix({ liked: [], history: [], size: 5, seedKey: "smoke-a" });
+  assert("Nūr builds a mix from nothing", emptyMix.trackIds.length === 5);
+  assert("Nūr mix has no duplicate nasheeds", new Set(emptyMix.trackIds).size === emptyMix.trackIds.length);
+  assert("every pick has a reason", emptyMix.picks.every((p) => p.reason.length > 12));
+  const deterministic = generateNurMix({ liked: [], history: [], size: 5, seedKey: "smoke-a" });
+  assert("same seed, same mix", deterministic.trackIds.join() === emptyMix.trackIds.join());
+  const taste = buildTaste(["sng_sakina"], [{ id: "sng_fajr", at: Date.now(), count: 3 }]);
+  assert("taste vector learns tags", Object.keys(taste.tags).length > 0);
+  assert("and maqām", Object.keys(taste.maqam).length > 0);
+  const seededMix = generateNurMix({ liked: ["sng_sakina", "sng_dhikr"], history: [], size: 5, seedKey: "smoke-b", moodId: "still" });
+  assert("a mood-constrained mix still fills up", seededMix.trackIds.length === 5);
+  assert("taste shifts the picks", seededMix.trackIds.join() !== emptyMix.trackIds.join());
+
+  /* ---- the player ---- */
+
+  section("Player (a real recording, one <audio> element)");
+  const { player } = await import("../src/lib/audio/player");
+  const AUDIO = "https://example.invalid/storage/v1/object/public/nasheed-audio/fajr.mp3";
+  DURATIONS.set(AUDIO, 214);
+
+  let ended = 0;
+  player.handlers.onEnded = () => {
+    ended++;
+  };
+
+  player.load(AUDIO, 0);
+  assert("loaded at t=0", Math.abs(player.getTime()) < 0.01);
+  assert("nothing is playing yet", !player.playing);
+  await player.play();
+  assert("playing after play()", player.playing);
+  assert("an analyser was wired up for the visualizer", analysersBuilt === 1, `${analysersBuilt} media sources`);
+  await sleep(260);
+  const advanced = player.getTime();
+  assert("the element's clock advances", advanced > 0.05, `${advanced.toFixed(2)}s`);
+  const spectrum = player.readSpectrum();
+  assert("the spectrum is readable", spectrum.length > 0 && spectrum[0] !== undefined, `${spectrum.length} bins`);
+
+  player.setVolume(4);
+  assert("out-of-range volume is clamped", player.getVolume() === 1, String(player.getVolume()));
+  player.setVolume(0.4);
+  assert("0.4 reaches the element", Math.abs(player.getVolume() - 0.4) < 1e-9);
+
+  player.seek(30);
+  assert("seek lands on the target", Math.abs(player.getTime() - 30) < 0.001, player.getTime().toFixed(2));
+  player.pause();
+  assert("paused", !player.playing);
+  const pausedAt = player.getTime();
+  await sleep(140);
+  assert("the clock holds while paused", Math.abs(player.getTime() - pausedAt) < 1e-6);
+
+  await player.play();
+  player.seek(213.9);
+  await sleep(300);
+  assert("reaches the end and fires onEnded", ended >= 1, `ended=${ended}`);
+  assert("and stops itself", !player.playing);
+  assert("the duration comes from the element", player.getDuration(214) === 214, `${player.getDuration(0)}s`);
+
+  /* ---- routes ---- */
+
+  section("Routes (jsdom render)");
   const { default: App } = await import("../src/App");
 
   const routes: [string, string][] = [
     ["/", "Most played nasheeds"],
     ["/search", "Every nasheed"],
     ["/search?q=hijaz", "Matching"],
-    ["/search?mood=still", "Stillness"],
     ["/library", "Library"],
     ["/queue", "The queue"],
-    ["/about", "A streaming app for nasheeds"],
-    ["/c/nur", "Nūr"],
-    ["/c/ramadan-nights", "Ramadan"],
+    ["/about", "A streaming home for nasheeds"],
+    ["/c/col_fajr", "Before Dawn"],
     ["/c/does-not-exist", "does not exist"],
-    ["/a/yusuf", "Yusuf Karim"],
-    ["/a/halabi", "Ḥalabī"],
-    ["/t/talaa-al-badru", "Ṭalaʿa al-Badru"],
-    ["/t/sakina", "Sakīna"],
-    ["/t/nur-ala-nur", "Nūrun"],
+    ["/a/test.reciter", "Test Reciter"],
+    ["/a/test.ensemble", "Test Ensemble"],
+    ["/t/sng_fajr", "City of Fajr"],
+    ["/t/sng_sakina", "Sakīna"],
     ["/t/nope", "No such nasheed"],
     ["/p/missing", "That set is gone"],
     ["/somewhere-else", "not in the catalogue"],
@@ -594,7 +643,11 @@ async function main() {
     }
     const html = container.innerHTML;
     assert(`${route} renders`, !error && html.length > 800, error ? String(error).slice(0, 160) : `${html.length} chars`);
-    assert(`${route} contains “${expect}”`, html.includes(expect), html.includes(expect) ? "" : html.slice(0, 90).replace(/\s+/g, " "));
+    assert(
+      `${route} contains “${expect}”`,
+      html.includes(expect),
+      html.includes(expect) ? "" : html.slice(0, 120).replace(/\s+/g, " "),
+    );
     try {
       await React.act(async () => {
         root.unmount();
@@ -604,51 +657,45 @@ async function main() {
     }
   }
 
-  /* ---- interactions ---- */
+  /* ---- the lyric view ---- */
+
   section("Lyrics view");
   {
     const { Lyrics } = await import("../src/components/player/Lyrics");
     const { usePlayer: usePlayerStore } = await import("../src/store/player");
-    const song = songFor(catalog.TRACKS.find((t) => t.id === "sakina")!);
+    const lyrics = timedLyrics("sng_sakina", catalog.getTrack("sng_sakina")!.lines, 268);
     const host = w.document.createElement("div");
     w.document.body.appendChild(host);
     const lyrRoot = createRoot(host);
     await React.act(async () => {
-      lyrRoot.render(React.createElement(Lyrics, { song, variant: "immersive" }));
+      lyrRoot.render(React.createElement(Lyrics, { lyrics, variant: "immersive" }));
     });
     await sleep(80);
 
     const rendered = host.querySelectorAll(".lyric-line");
-    assert(
-      "every timed line is rendered",
-      rendered.length === song.lines.length,
-      `${rendered.length} of ${song.lines.length}`,
-    );
-    const karaoke = host.querySelectorAll(".lyric-word");
-    assert("per-word karaoke spans exist", karaoke.length > 30, `${karaoke.length} words`);
+    assert("every line is rendered", rendered.length === lyrics.lines.length, `${rendered.length} of ${lyrics.lines.length}`);
+    const words = host.querySelectorAll(".lyric-word");
+    assert("per-word karaoke spans exist", words.length > 8, `${words.length} words`);
     const fill = host.querySelectorAll(".lyric-word .fill");
-    assert("each word has its fill layer", fill.length === karaoke.length);
+    assert("each word has its fill layer", fill.length === words.length);
     const text = host.textContent ?? "";
-    assert("repetitions are labelled, not duplicated", text.includes("the answer — a step higher"), "pass divider");
     assert("script switcher is present", text.includes("Transliteration") && text.includes("العربية"));
-    assert("the rail offers one jump per line", host.querySelectorAll('button[aria-label^="Jump to line"]').length === song.lines.length);
+    const jumps = host.querySelectorAll('button[aria-label^="Jump to line"]').length;
+    assert("the rail offers one jump per line", jumps === lyrics.lines.length, `${jumps} jumps`);
 
-    const railJump = host.querySelectorAll<HTMLButtonElement>('button[aria-label^="Jump to line"]')[5];
+    const railJump = host.querySelectorAll<HTMLButtonElement>('button[aria-label^="Jump to line"]')[2];
     if (railJump) {
       await React.act(async () => {
-        usePlayerStore.getState().playTrack(song.trackId);
+        usePlayerStore.getState().playTrack("sng_sakina");
       });
-      await sleep(150);
-      const target = song.lines[5]!.t;
+      await sleep(60);
+      const target = lyrics.lines[2]!.t;
       await React.act(async () => {
         railJump.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
       });
+      await sleep(60);
       const after = usePlayerStore.getState().time;
-      assert(
-        "jumping from the rail seeks the song",
-        Math.abs(after - target) < 2,
-        `seeked to ${after.toFixed(1)}s for a line at ${target.toFixed(1)}s`,
-      );
+      assert("jumping from the rail seeks the recording", Math.abs(after - target) < 2, `seeked to ${after.toFixed(1)}s for a line at ${target.toFixed(1)}s`);
     }
 
     await React.act(async () => {
@@ -657,30 +704,31 @@ async function main() {
     host.remove();
   }
 
+  /* ---- persistence ---- */
+
   section("Persistence (a reload from localStorage)");
   {
     const { useLibrary } = await import("../src/store/library");
     const key = "coolnasheed:library:v2";
     const payload = {
       state: {
-        liked: ["sakina", "a-track-that-no-longer-exists"],
-        likedCollections: ["nur"],
-        followedArtists: ["yusuf"],
+        liked: ["sng_sakina", "a-track-that-no-longer-exists"],
+        likedCollections: ["col_fajr"],
+        followedArtists: ["test.reciter"],
         playlists: [
           {
             id: "pl-seeded",
             name: "Fajr set",
             blurb: "Seeded by the test.",
             seed: "playlist-seeded",
-            accent: "jade",
-            trackIds: ["city-of-fajr", "also-gone"],
+            trackIds: ["sng_fajr", "also-gone"],
             createdAt: 1700000000000,
           },
         ],
-        history: [{ id: "laylat-al-qadr", at: Date.now(), count: 3 }],
+        history: [{ id: "sng_laylat", at: Date.now(), count: 3 }],
         tasbih: { id: "istighfar", count: 41 },
         // deliberately missing reduceMotion + showTranslation: an older save
-        settings: { theme: "dawn", space: "masjid", duff: false, volume: 0.6, lyricScript: "ar", showArabic: false },
+        settings: { theme: "dawn", volume: 0.6, lyricScript: "ar", showArabic: false },
       },
       version: 0,
     };
@@ -692,22 +740,15 @@ async function main() {
 
     // the library belongs to the account now: localStorage keeps preferences and the
     // tasbīḥ, and nothing that a server could disagree with
-    assert(
-      "loved nasheeds are not read from localStorage any more",
-      st.liked.length === 0,
-      `liked=${JSON.stringify(st.liked)}`,
-    );
+    assert("loved nasheeds are not read from localStorage any more", st.liked.length === 0, `liked=${JSON.stringify(st.liked)}`);
     assert("playlists wait for the account that owns them", st.playlists.length === 0);
-    assert("followed reciters wait for the account too", st.followedArtists.length === 0);
+    assert("followed publishers wait for the account too", st.followedArtists.length === 0);
     assert(
       "the local history mirror comes back until the server's copy lands",
-      st.history.some((h) => h.id === "laylat-al-qadr" && h.count === 3),
+      st.history.some((h) => h.id === "sng_laylat" && h.count === 3),
     );
     assert("the tasbīḥ keeps its count and phrase", st.tasbih.count === 41 && st.tasbih.id === "istighfar");
-    assert(
-      "preferences come back — theme, room, duff, script",
-      st.settings.theme === "dawn" && st.settings.space === "masjid" && st.settings.duff === false && st.settings.lyricScript === "ar",
-    );
+    assert("preferences come back — theme, script, volume", st.settings.theme === "dawn" && st.settings.lyricScript === "ar" && Math.abs(st.settings.volume - 0.6) < 1e-9);
     assert(
       "keys an older save never had fall back to defaults",
       st.settings.reduceMotion === false && st.settings.showTranslation === true,
@@ -754,7 +795,7 @@ async function main() {
       useUi.setState({ authOpen: false });
     });
 
-    const refused = useLibrary.getState().toggleLike("sakina");
+    const refused = useLibrary.getState().toggleLike("sng_sakina");
     assert("loving a nasheed while signed out is refused", refused === null, `returned ${String(refused)}`);
     assert("and it opens the sign-in sheet instead", useUi.getState().authOpen === true);
     assert("nothing was written to the store", useLibrary.getState().liked.length === 0);
@@ -762,7 +803,7 @@ async function main() {
     await React.act(async () => {
       useUi.setState({ authOpen: false });
     });
-    const refusedSet = await useLibrary.getState().createPlaylist("Fajr set", ["city-of-fajr"]);
+    const refusedSet = await useLibrary.getState().createPlaylist("Fajr set", ["sng_fajr"]);
     assert("building a set while signed out is refused", refusedSet === null);
     assert("and asks for an account", useUi.getState().authOpen === true);
 
@@ -784,11 +825,12 @@ async function main() {
 
   const firstPlay = Array.from(playButtons).find((b) => b.getAttribute("aria-label")?.startsWith("Play"));
   if (firstPlay) {
+    const before = mediaPlayCalls;
     await React.act(async () => {
       firstPlay.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
     });
     await sleep(200);
-    assert("clicking play starts the engine", engine.isPlaying || engine.isReady);
+    assert("clicking play starts the player", player.playing || mediaPlayCalls > before, `playing=${player.playing}`);
   }
 
   const starButtons = container.querySelectorAll<HTMLButtonElement>('button[aria-label^="Love"], button[aria-label^="Remove from loved"]');
@@ -828,13 +870,16 @@ async function main() {
   assert("no console.error noise", realErrors.length === 0, realErrors.slice(0, 2).join(" | ").slice(0, 220));
 
   /* ---- output ---- */
+
   console.log(notes.join("\n"));
   if (failures.length) {
     console.log(`\nFAILURES (${failures.length}):`);
     console.log(failures.join("\n"));
     process.exit(1);
   }
-  console.log(`\nAll checks passed — ${totalNotes} notes, ${totalHits} drum hits, ${nodeCount} audio nodes built during the run.`);
+  console.log(
+    `\nAll checks passed — ${catalog.TRACKS.length} nasheeds hydrated, ${timed.lines.length + spread.lines.length} timed lyric lines, ${mediaPlayCalls} play() calls on the element.`,
+  );
   process.exit(0);
 }
 

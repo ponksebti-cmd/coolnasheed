@@ -23,8 +23,6 @@ export type UserRole = "listener" | "staff";
  */
 export type UserKind = "listener" | "artist";
 
-export type Accent = "jade" | "gold" | "turq" | "madder" | "cobalt";
-
 /** A profile as `my_bootstrap()` and `publisher_profile()` return it. */
 export type User = {
   /** the handle — this is what a URL carries (/yusuf), so it is the public id */
@@ -34,13 +32,12 @@ export type User = {
   handle: string;
   name: string;
   nameAr: string | null;
-  /** what they do, e.g. "seven voices & duff" */
+  /** what they do, e.g. "voice, no instruments" */
   tagline: string;
   bio: string;
   city: string;
-  /** seed for the generated avatar pattern */
+  /** seed for the generated avatar pattern — the artwork is derived from it */
   seed: string;
-  accent: Accent;
   role: UserRole;
   kind: UserKind;
   verified: boolean;
@@ -56,7 +53,6 @@ export type ProfileInput = {
   tagline?: string;
   bio?: string;
   city?: string;
-  accent?: Accent;
   handle?: string;
 };
 
@@ -107,7 +103,7 @@ export const MAQAM_NAMES: MaqamName[] = [
 ];
 
 export type LyricLine = {
-  /** transliteration — what the synthesis engine sings when there is no upload */
+  /** transliteration — the words as they are sung, in Latin script */
   tr?: string;
   ar?: string;
   en?: string;
@@ -128,20 +124,10 @@ export type Song = {
   titleAr: string | null;
   note: string;
   maqam: MaqamName;
-  /** tonic as a MIDI note (60 = middle C) */
-  root: number;
-  bpm: number;
-  voices: "solo" | "duet" | "choir";
-  /** 16-step frame-drum pattern; null means vocals only */
-  duff: string | null;
-  duffEnter: "intro" | "verse";
-  passes: number;
-  accent: Accent;
   year: number | null;
   tags: string[];
   lines: LyricLine[];
-  motifBank: number[] | null;
-  /** storage path inside the `nasheed-audio` bucket; null means the engine sings it */
+  /** storage path inside the `nasheed-audio` bucket */
   audioPath: string | null;
   audioMime: string | null;
   durationMs: number | null;
@@ -160,17 +146,9 @@ export type SongInput = {
   titleAr?: string | null;
   note?: string | null;
   maqam: MaqamName;
-  root: number;
-  bpm: number;
-  voices: Song["voices"];
-  duff?: string | null;
-  duffEnter?: Song["duffEnter"];
-  passes?: number;
-  accent?: Accent;
   year?: number | null;
   tags?: string[];
   lines?: LyricLine[];
-  motifBank?: number[] | null;
   durationMs?: number | null;
   audioPath?: string | null;
   audioMime?: string | null;
@@ -196,7 +174,6 @@ export type ArtistCard = {
   origin: string;
   bio: string;
   seed: string;
-  accent: Accent;
   verified: boolean;
   kind: UserKind;
   songs: number;
@@ -213,7 +190,6 @@ export type CatalogCollection = {
   curator: string;
   blurb: string;
   seed: string;
-  accent: Accent;
   tags: string[];
   year: number;
   songIds: string[];
@@ -228,8 +204,6 @@ export type CatalogResponse = {
   collections: CatalogCollection[];
   tags: TagCount[];
   generatedAt: number;
-  /** true when the seeded catalogue is in there, not only what people published */
-  seeded: boolean;
 };
 
 /* ------------------------------------------------------------------- social */
@@ -242,7 +216,6 @@ export type Comment = {
   authorName: string;
   authorHandle: string;
   authorSeed: string;
-  authorAccent: Accent;
   authorVerified: boolean;
   text: string;
   atLine: number | null;
@@ -273,7 +246,6 @@ export type CommentRow = {
     handle: string;
     name: string;
     seed: string;
-    accent: Accent;
     verified: boolean;
   } | null;
 };
@@ -284,7 +256,6 @@ export type Playlist = {
   name: string;
   blurb: string;
   seed: string;
-  accent: Accent;
   songIds: string[];
   createdAt: number;
 };
@@ -296,12 +267,11 @@ export type PlaylistRow = {
   name: string;
   blurb: string;
   seed: string;
-  accent: Accent;
   song_ids: string[];
   created_at: string;
 };
 
-export type PlaylistInput = { name: string; blurb?: string; songIds?: string[]; accent?: Accent; seed?: string };
+export type PlaylistInput = { name: string; blurb?: string; songIds?: string[]; seed?: string };
 
 /* ---------------------------------------------------------------- analytics */
 
@@ -318,7 +288,6 @@ export type PlayReceipt = { ok: boolean; counted?: boolean; duplicate?: boolean;
 export type TrendingDbRow = {
   song_id: string;
   title: string;
-  accent: Accent;
   maqam: MaqamName;
   owner_name: string | null;
   plays: number;
@@ -330,7 +299,6 @@ export type TrendingDbRow = {
 export type TrendingRow = {
   songId: string;
   title: string;
-  accent: Accent;
   maqam: MaqamName;
   ownerName: string | null;
   plays: number;
@@ -344,7 +312,6 @@ export type TrendingWindow = "24h" | "7d" | "30d" | "all";
 export type HistoryRow = {
   songId: string;
   title: string;
-  accent: Accent;
   ownerName: string | null;
   plays: number;
   seconds: number;
@@ -451,7 +418,7 @@ export type HealthResponse = {
   version: string;
   driver: "supabase";
   project: string;
-  checks: { database: boolean; storage: boolean; auth: boolean; seed: boolean };
+  checks: { database: boolean; storage: boolean; auth: boolean; catalogue: boolean };
   counts: { profiles: number; songs: number; comments: number; playEvents: number };
   storageBytes: number;
   tookMs: number;

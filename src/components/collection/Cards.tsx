@@ -9,7 +9,7 @@ import { artistOf, durationOf, formatCount, statsFor, tracksOf } from "../../dat
 import { maqamLabel } from "../../lib/theory";
 import { formatTotal } from "../../lib/format";
 import { usePlayer, type PlayContext } from "../../store/player";
-import type { Accent, Artist, Collection, Track } from "../../data/types";
+import type { Artist, Collection, Track } from "../../data/types";
 
 /* ------------------------------------------------------------------- rail */
 
@@ -73,7 +73,7 @@ export function CollectionCard({
   index = 0,
   to,
 }: {
-  collection: Pick<Collection, "id" | "title" | "titleAr" | "curator" | "seed" | "accent" | "blurb" | "tags">;
+  collection: Pick<Collection, "id" | "title" | "titleAr" | "curator" | "seed" | "blurb" | "tags">;
   index?: number;
   to?: string;
 }) {
@@ -88,7 +88,7 @@ export function CollectionCard({
         <Link to={to ?? `/c/${collection.id}`} className="block">
           <div className="relative aspect-[4/3] overflow-hidden">
             <div className="absolute inset-0 transition-transform duration-[1100ms] ease-out group-hover:scale-[1.07]">
-              <PatternArt seed={collection.seed} accent={collection.accent} />
+              <PatternArt seed={collection.seed} />
             </div>
             <div className="absolute inset-0 bg-gradient-to-t from-[rgba(3,10,8,0.9)] via-[rgba(3,10,8,0.15)] to-transparent" />
             {collection.titleAr ? (
@@ -133,7 +133,7 @@ export function ArtistCard({ artist, index = 0 }: { artist: Artist; index?: numb
     <Reveal delay={index * 40}>
       <Link to={`/a/${artist.id}`} className="card group block overflow-hidden p-4 text-center">
         <div className="relative mx-auto mb-3 h-[92px] w-[92px] overflow-hidden rounded-full ring-1 ring-line2 transition-transform duration-500 group-hover:scale-[1.05]">
-          <PatternArt seed={artist.seed} accent={artist.accent} motif="rosette" />
+          <PatternArt seed={artist.seed} motif="rosette" />
           <span className="absolute inset-0 rounded-full shadow-[inset_0_0_24px_rgba(0,0,0,0.55)]" />
           {artist.verified ? (
             <span className="absolute -bottom-0.5 left-1/2 grid h-5 w-5 -translate-x-1/2 place-items-center rounded-full border border-line2 bg-elev text-jade">
@@ -156,7 +156,7 @@ export function MoodTile({
   index = 0,
   active,
 }: {
-  mood: { id: string; label: string; labelAr?: string; blurb: string; accent: Accent };
+  mood: { id: string; label: string; labelAr?: string; blurb: string };
   index?: number;
   active?: boolean;
 }) {
@@ -170,7 +170,7 @@ export function MoodTile({
         )}
       >
         <div className="absolute inset-0 opacity-[0.22] transition-opacity duration-500 group-hover:opacity-40">
-          <PatternArt seed={mood.id} accent={mood.accent} motif="mashrabiya" showVignette={false} />
+          <PatternArt seed={mood.id} motif="mashrabiya" showVignette={false} />
         </div>
         <div className="relative">
           <h3 className="font-display text-[19px] leading-tight text-text">{mood.label}</h3>
@@ -201,7 +201,7 @@ export function MiniTrack({ track, index, queue, context }: { track: Track; inde
     >
       <span className={clsx("w-4 shrink-0 text-center text-[11px] tabular-nums", isCurrent ? "text-jade" : "text-muted")}>{index + 1}</span>
       <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg ring-1 ring-line">
-        <PatternArt seed={track.seed} accent={track.accent} showVignette={false} />
+        <PatternArt seed={track.seed} showVignette={false} />
         <button
           className="absolute inset-0 grid place-items-center bg-[rgba(3,10,8,0.66)] opacity-0 transition-opacity group-hover:opacity-100"
           onClick={() => (isCurrent ? toggle() : playIds(queue, index, context))}

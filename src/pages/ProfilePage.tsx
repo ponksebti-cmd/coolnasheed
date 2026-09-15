@@ -95,11 +95,11 @@ export default function ProfilePage() {
       {/* identity */}
       <header className="relative overflow-hidden rounded-2xl border border-line bg-surface/40">
         <div className="pointer-events-none absolute inset-0 opacity-[0.16]" aria-hidden>
-          <PatternArt seed={account.seed} accent="jade" showVignette={false} />
+          <PatternArt seed={account.seed} showVignette={false} />
         </div>
         <div className="relative flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-6">
           <span className="grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-xl ring-1 ring-line2 sm:h-24 sm:w-24">
-            <PatternArt seed={account.seed} accent="jade" />
+            <PatternArt seed={account.seed} />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -157,9 +157,7 @@ export default function ProfilePage() {
                     {t.title}
                   </Link>
                   <span>·</span>
-                  <span>
-                    {MAQAMAT[t.maqam].name} at {t.bpm} bpm
-                  </span>
+                  <span>{MAQAMAT[t.maqam].name}</span>
                   <button
                     className="ml-auto flex items-center gap-1 rounded-full border border-line px-2.5 py-1 transition-colors hover:border-madder/50 hover:text-madder"
                     onClick={() => {
@@ -245,7 +243,7 @@ export default function ProfilePage() {
                     className="flex items-center gap-3 rounded-xl border border-line bg-surface/50 p-3 transition-colors hover:border-line2"
                   >
                     <span className={clsx("grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-lg ring-1 ring-line2")}>
-                      <PatternArt seed={pl.seed} accent={pl.accent} />
+                      <PatternArt seed={pl.seed} />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13.5px] font-semibold text-text">{pl.name}</span>

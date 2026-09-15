@@ -148,7 +148,7 @@ export default function LibraryPage() {
                           {(tracks.length ? tracks.slice(0, 4) : [null, null, null, null]).map((t, k) =>
                             t ? (
                               <span key={k} className="overflow-hidden">
-                                <PatternArt seed={t.seed} accent={t.accent} showVignette={false} />
+                                <PatternArt seed={t.seed} showVignette={false} />
                               </span>
                             ) : (
                               <span key={k} className="bg-surface3/60" />
@@ -224,7 +224,7 @@ export default function LibraryPage() {
               {historyRows.map(({ h, track }) => (
                 <div key={h.id} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-surface2/50">
                   <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg ring-1 ring-line">
-                    <PatternArt seed={track.seed} accent={track.accent} showVignette={false} />
+                    <PatternArt seed={track.seed} showVignette={false} />
                   </span>
                   <Link to={`/t/${track.id}`} className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] font-semibold text-text group-hover:text-jadesoft">{track.title}</span>

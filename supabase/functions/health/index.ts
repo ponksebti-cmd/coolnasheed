@@ -3,8 +3,8 @@
  *
  * The client calls this once at boot when it has credentials, and shows the answer on
  * the staff dashboard. It is deliberately boring and deliberately cheap: a handful of
- * counted rows, the storage total, and whether the seeded catalogue is present. It is
- * the page you look at when the app says "demo mode" and you want to know why.
+ * counted rows, the storage total, and whether anybody has published anything yet. It
+ * is the page you look at when the app says "demo mode" and you want to know why.
  */
 
 import { anonClient, hasServiceKey, PROJECT_REF, serviceClient } from "../_shared/db.ts";
@@ -18,13 +18,12 @@ async function build(): Promise<Response> {
   const started = Date.now();
   const admin = hasServiceKey() ? serviceClient() : anonClient();
 
-  const [profiles, songs, comments, events, buckets, artists, authProbe] = await Promise.all([
+  const [profiles, songs, comments, events, buckets, authProbe] = await Promise.all([
     admin.from("profiles").select("id", { count: "exact", head: true }),
     admin.from("songs").select("id", { count: "exact", head: true }),
     admin.from("comments").select("id", { count: "exact", head: true }),
     admin.from("play_events").select("id", { count: "exact", head: true }),
     admin.storage.listBuckets(),
-    admin.from("profiles").select("id").eq("kind", "artist").eq("verified", true).limit(1),
     // a reachable auth service answers "user not found" for a made-up id; an
     // unreachable one throws something else entirely. That is the whole test.
     admin.auth.getUser("00000000-0000-0000-0000-000000000000"),
@@ -49,7 +48,8 @@ async function build(): Promise<Response> {
       database: !profiles.error,
       storage: names.includes(AUDIO_BUCKET) && names.includes(ARTWORK_BUCKET),
       auth: /not found|invalid/i.test(authProbe.error?.message ?? ""),
-      seed: (artists.data ?? []).length > 0,
+      // nothing ships with the database: a catalogue only exists once accounts publish
+      catalogue: (songs.count ?? 0) > 0,
     },
     counts: {
       profiles: profiles.count ?? 0,

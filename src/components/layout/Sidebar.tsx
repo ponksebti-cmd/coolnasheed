@@ -8,7 +8,6 @@ import { COLLECTIONS, getTrack } from "../../data/catalog";
 import { useLibrary } from "../../store/library";
 import { usePlayer } from "../../store/player";
 import { useToast } from "../ui/Primitives";
-import type { Accent } from "../../data/types";
 
 const NAV: { to: string; label: string; icon: IconName; end?: boolean }[] = [
   { to: "/", label: "Home", icon: "home", end: true },
@@ -153,7 +152,7 @@ export function Sidebar({ onNavigate, className }: { onNavigate?: () => void; cl
             }
           >
             <span className="relative h-9 w-9 shrink-0 overflow-hidden rounded-lg ring-1 ring-line">
-              <PlaylistArt seed={pl.seed} accent={pl.accent} ids={pl.trackIds} />
+              <PlaylistArt seed={pl.seed} ids={pl.trackIds} />
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13px] font-medium text-text2 group-hover:text-text">{pl.name}</span>
@@ -191,7 +190,7 @@ export function Sidebar({ onNavigate, className }: { onNavigate?: () => void; cl
             }
           >
             <span className="h-7 w-7 shrink-0 overflow-hidden rounded-md ring-1 ring-line">
-              <PatternArt seed={c.seed} accent={c.accent} />
+              <PatternArt seed={c.seed} />
             </span>
             <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted group-hover:text-text2">{c.title}</span>
           </NavLink>
@@ -212,9 +211,9 @@ export function Sidebar({ onNavigate, className }: { onNavigate?: () => void; cl
   );
 }
 
-function PlaylistArt({ seed, accent, ids }: { seed: string; accent: Accent; ids: string[] }) {
+function PlaylistArt({ seed, ids }: { seed: string; ids: string[] }) {
   const first = getTrack(ids[0]);
-  if (!first) return <PatternArt seed={seed} accent={accent} />;
+  if (!first) return <PatternArt seed={seed} />;
   return (
     <span className="grid h-full w-full grid-cols-2 grid-rows-2">
       {ids.slice(0, 4).map((id, i) => {
@@ -222,15 +221,15 @@ function PlaylistArt({ seed, accent, ids }: { seed: string; accent: Accent; ids:
         if (!t) return <span key={i} className="bg-surface3" />;
         return (
           <span key={i} className="overflow-hidden">
-            <PatternArt seed={t.seed} accent={t.accent} showVignette={false} />
+            <PatternArt seed={t.seed} showVignette={false} />
           </span>
         );
       })}
       {ids.length === 1 ? (
         <>
-          <PatternArt seed={seed} accent={accent} showVignette={false} className="col-span-1" />
-          <PatternArt seed={`${seed}-b`} accent={accent} showVignette={false} />
-          <PatternArt seed={`${seed}-c`} accent={accent} showVignette={false} />
+          <PatternArt seed={seed} showVignette={false} className="col-span-1" />
+          <PatternArt seed={`${seed}-b`} showVignette={false} />
+          <PatternArt seed={`${seed}-c`} showVignette={false} />
         </>
       ) : null}
       {ids.length === 2 || ids.length === 3

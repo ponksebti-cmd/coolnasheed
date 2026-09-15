@@ -429,7 +429,7 @@ export default function AdminPage() {
               summary.topOwners.map((owner) => (
                 <Link key={owner.ownerId} to={`/a/${owner.handle}`} className="flex items-center gap-3 group">
                   <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full ring-1 ring-line">
-                    <PatternArt seed={`artist-${owner.handle}`} accent="gold" showVignette={false} />
+                    <PatternArt seed={`artist-${owner.handle}`} showVignette={false} />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] text-text2 group-hover:text-jadesoft">{owner.name}</span>
@@ -471,7 +471,7 @@ export default function AdminPage() {
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[10.5px] text-muted">
-                      <Icon name="waveform" size={10} /> synthesized
+                      <Icon name="waveform" size={10} /> no recording
                     </span>
                   )}
                   <button

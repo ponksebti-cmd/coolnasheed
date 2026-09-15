@@ -4,8 +4,8 @@
  *   1. the beacon is armed, so the first play is counted like every other
  *   2. the catalogue is fetched — one cached Edge Function call, or the RPC behind it
  *      if the functions are not deployed — and poured into the in-memory registry the
- *      whole app already reads from. If that fails for any reason the bundled
- *      catalogue stays where it is and the app carries on playing.
+ *      whole app already reads from. Until it answers, the registry stays empty and
+ *      the pages say so rather than filling the room with something invented.
  *   3. the session is restored from Supabase Auth, and everything that belongs to it
  *      (loves, follows, sets, history, what you published) follows in one bootstrap
  *   4. auth changes are subscribed to, so signing in on another tab updates this one
@@ -26,7 +26,7 @@ import { useLibrary } from "../store/library";
 import { useStudio } from "../store/studio";
 import { useCommunity } from "../store/community";
 
-export type CatalogSource = "supabase" | "bundled";
+export type CatalogSource = "supabase" | "empty";
 
 export type BootStatus = {
   backend: string;
@@ -78,7 +78,7 @@ function clearAccountData(): void {
 export async function bootApp(): Promise<BootStatus> {
   bindBeacon();
 
-  if (started) return lastStatus ?? status("bundled", null);
+  if (started) return lastStatus ?? status("empty", null);
   started = true;
 
   if (!unbindAuth) {
@@ -90,24 +90,20 @@ export async function bootApp(): Promise<BootStatus> {
 
   /* the catalogue -------------------------------------------------------- */
   if (!hasSupabase) {
-    // demo mode: the bundled nasheeds are the catalogue, and nothing is missing
+    // no project configured: an empty room, and the shell says what is missing
     await useSession.getState().load();
-    return status("bundled", null);
+    return status("empty", null);
   }
 
-  let source: CatalogSource = "bundled";
+  let source: CatalogSource = "empty";
   let error: string | null = null;
   let needsSetup = false;
   try {
     const payload = await api.catalog();
-    // A project that is set up but not seeded yet answers with nothing. Pouring that
-    // over the registry would leave an empty room with a working backend, which is
-    // the worst of both: so the bundled catalogue stays until the database has
-    // nasheeds of its own, and the shell says which one is on screen.
-    if (payload.songs.length > 0) {
-      hydrateCatalog(payload);
-      source = "supabase";
-    }
+    // A project with a schema but no nasheeds yet answers with an empty list, and an
+    // empty list is the honest answer: hydrate it and let the pages say so.
+    hydrateCatalog(payload);
+    source = "supabase";
   } catch (err) {
     error = errorMessage(err, "The catalogue would not load.");
     needsSetup = isMissingSchema(err);
@@ -139,7 +135,7 @@ export async function refreshCatalog(): Promise<number> {
 
 /**
  * Boot once, from the shell. Returns null until the catalogue has answered, which is
- * the moment the registry can be trusted to hold more than the bundled nasheeds.
+ * the moment the registry can be trusted to hold what the database holds.
  */
 export function useBoot(): BootStatus | null {
   const [state, setState] = useState<BootStatus | null>(lastStatus);

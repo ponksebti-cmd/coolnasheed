@@ -24,21 +24,19 @@ create extension if not exists pgcrypto with schema extensions;
 
 -- A profile is a publisher identity. When somebody signs up through Supabase Auth the
 -- trigger below creates their row with the same id as their auth user, so
--- `profiles.id = auth.uid()` is the ownership test everywhere. The seeded catalogue
--- artists are profiles *without* an auth row: they can be followed and credited, but
--- nobody can sign in as them, because there is no credential to sign in with.
+-- `profiles.id = auth.uid()` is the ownership test everywhere. `kind` is what
+-- separates the two: an `artist` is a publisher identity in the catalogue, a
+-- `listener` is somebody who can sign in. Both are rows in the same table.
 create table if not exists public.profiles (
   id          uuid primary key default gen_random_uuid(),
   handle      text not null,
   name        text not null,
   name_ar     text,
-  -- what they do, e.g. "seven voices & duff" — shown on a publisher page
+  -- what they do, e.g. "voice, no instruments" — shown on a publisher page
   tagline     text not null default '',
   bio         text not null default '',
   city        text not null default '',
   seed        text not null default '',
-  accent      text not null default 'jade'
-              check (accent in ('jade','gold','turq','madder','cobalt')),
   role        text not null default 'listener'
               check (role in ('listener','staff')),
   kind        text not null default 'listener'
@@ -60,11 +58,7 @@ create table if not exists public.reserved_handles (
 );
 
 insert into public.reserved_handles (handle) values
-  ('coolnasheed'),('nur'),('admin'),('root'),('staff'),('system'),
-  ('umm_sumayya'),('fajr_walker'),('ibn_al_bahr'),('quiet_minaret'),
-  ('sabr_and_coffee'),('muhajir_1998'),('layla.k'),('abu_yusuf'),('zaytuna_22'),
-  ('night_of_qadr'),('halabi_in_exile'),('dust_and_light'),('rawda_listener'),
-  ('third_of_the_night'),('sokoto_sings'),('madrassa_dad')
+  ('coolnasheed'),('nur'),('admin'),('root'),('staff'),('system')
 on conflict do nothing;
 
 /* --------------------------------------------------------------------- songs */
@@ -75,22 +69,15 @@ create table if not exists public.songs (
   title         text not null,
   title_ar      text,
   note          text not null default '',
+  -- the maqām it is sung in: the one piece of musical metadata a listener
+  -- actually browses by, so it stays even though nothing synthesizes it
   maqam         text not null
                 check (maqam in ('rast','bayati','hijaz','nahawand','kurd','ajam','saba','nikriz','hijazkar','ushshaq')),
-  root          integer not null check (root between 24 and 96),
-  bpm           integer not null check (bpm between 30 and 240),
-  voices        text not null check (voices in ('solo','duet','choir')),
-  -- 16-step frame-drum pattern; null means vocals only
-  duff          text check (duff is null or duff ~ '^[DT.]{16}$'),
-  duff_enter    text not null default 'verse' check (duff_enter in ('intro','verse')),
-  passes        integer not null default 2 check (passes between 1 and 6),
-  accent        text not null default 'jade'
-                check (accent in ('jade','gold','turq','madder','cobalt')),
   year          integer check (year between 600 and 2200),
   tags          text[] not null default '{}',
-  -- [{tr,ar,en,note,t?}] — the lyrics, and the timings when a recording supplied them
+  -- [{tr,ar,en,note,t?}] — the lyrics, with `t` in seconds when the publisher
+  -- supplied timings, which is what the karaoke view syncs to
   lines         jsonb not null default '[]'::jsonb,
-  motif_bank    integer[],
   -- storage paths, not URLs: /storage/v1/object/public/nasheed-audio/<path>
   audio_path    text,
   audio_mime    text,
@@ -126,8 +113,6 @@ create table if not exists public.collections (
   curator     text not null default 'CoolNasheed',
   blurb       text not null default '',
   seed        text not null default '',
-  accent      text not null default 'jade'
-              check (accent in ('jade','gold','turq','madder','cobalt')),
   tags        text[] not null default '{}',
   year        integer,
   -- ordered ids rather than a join table: a shelf is read whole and written by staff
@@ -189,8 +174,6 @@ create table if not exists public.playlists (
   name        text not null,
   blurb       text not null default '',
   seed        text not null default '',
-  accent      text not null default 'jade'
-              check (accent in ('jade','gold','turq','madder','cobalt')),
   song_ids    text[] not null default '{}',
   created_at  timestamptz not null default now(),
   constraint playlist_name_shape check (char_length(name) between 1 and 80),

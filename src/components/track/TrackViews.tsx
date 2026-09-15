@@ -227,7 +227,7 @@ export function TrackCard({
         <Link to={`/t/${track.id}`} className="block">
           <div className={clsx("relative overflow-hidden", variant === "wide" ? "aspect-[16/9]" : "aspect-square")}>
             <div className="absolute inset-0 transition-transform duration-[900ms] ease-out group-hover:scale-[1.06]">
-              <PatternArt seed={track.seed} accent={track.accent} />
+              <PatternArt seed={track.seed} />
             </div>
             <div className="absolute inset-0 bg-gradient-to-t from-[rgba(3,10,8,0.86)] via-[rgba(3,10,8,0.12)] to-transparent" />
             <div className="absolute left-3 top-3 flex items-center gap-2">

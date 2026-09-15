@@ -2,33 +2,31 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { clsx } from "clsx";
 import { Icon } from "../components/ui/Icons";
-import { Chip, EmptyState, Reveal, SectionHeader } from "../components/ui/Primitives";
+import { Chip, EmptyState, SectionHeader } from "../components/ui/Primitives";
 import { ArtistCard, CollectionCard } from "../components/collection/Cards";
 import { TrackCardGrid, TrackList } from "../components/track/TrackViews";
-import { ALL_TAGS, ARTISTS, COLLECTIONS, MOODS, TRACKS, durationOf, searchArtists, searchCollections, searchTracks, statsFor } from "../data/catalog";
+import { ARTISTS, COLLECTIONS, TRACKS, durationOf, searchArtists, searchCollections, searchTracks, statsFor, tagCounts } from "../data/catalog";
 import { MAQAM_NAMES, maqamLabel } from "../lib/theory";
 import { plural } from "../lib/format";
 import type { Track } from "../data/types";
 
-type Sort = "relevance" | "plays" | "slow" | "fast" | "az";
+type Sort = "relevance" | "plays" | "longest" | "shortest" | "az";
 
 const SORTS: { id: Sort; label: string }[] = [
   { id: "relevance", label: "Relevance" },
   { id: "plays", label: "Most played" },
-  { id: "slow", label: "Slowest" },
-  { id: "fast", label: "Fastest" },
+  { id: "longest", label: "Longest" },
+  { id: "shortest", label: "Shortest" },
   { id: "az", label: "A–Z" },
 ];
 
-const SUGGESTIONS = ["Ḥijāz", "Ramadan", "vocals only", "dhikr", "Madinah", "Qurʾān", "quarter tone", "Cairo", "sleep"];
+const SUGGESTIONS = ["Ḥijāz", "Ramadan", "dhikr", "Madinah", "Qurʾān", "Cairo", "sleep"];
 
 export default function Search() {
   const [params, setParams] = useSearchParams();
   const q = params.get("q") ?? "";
-  const mood = params.get("mood");
   const [maqam, setMaqam] = useState<string | null>(null);
   const [tag, setTag] = useState<string | null>(null);
-  const [duffOnly, setDuffOnly] = useState<"any" | "with" | "without">("any");
   const [sort, setSort] = useState<Sort>("relevance");
   const [view, setView] = useState<"rows" | "grid">("rows");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -49,25 +47,19 @@ export default function Search() {
   const results = useMemo<Track[]>(() => {
     let list = q.trim() ? searchTracks(q) : TRACKS.slice();
 
-    if (mood) {
-      const m = MOODS.find((x) => x.id === mood);
-      if (m) list = list.filter((t) => m.match(t));
-    }
     if (maqam) list = list.filter((t) => t.maqam === maqam);
     if (tag) list = list.filter((t) => t.tags.includes(tag));
-    if (duffOnly === "with") list = list.filter((t) => !!t.duff);
-    if (duffOnly === "without") list = list.filter((t) => !t.duff);
 
     const sorted = list.slice();
     switch (sort) {
       case "plays":
         sorted.sort((a, b) => statsFor(b).plays - statsFor(a).plays);
         break;
-      case "slow":
-        sorted.sort((a, b) => a.bpm - b.bpm);
+      case "longest":
+        sorted.sort((a, b) => durationOf(b) - durationOf(a));
         break;
-      case "fast":
-        sorted.sort((a, b) => b.bpm - a.bpm);
+      case "shortest":
+        sorted.sort((a, b) => durationOf(a) - durationOf(b));
         break;
       case "az":
         sorted.sort((a, b) => a.title.localeCompare(b.title));
@@ -76,12 +68,11 @@ export default function Search() {
         break;
     }
     return sorted;
-  }, [q, mood, maqam, tag, duffOnly, sort]);
+  }, [q, maqam, tag, sort]);
 
   const artists = useMemo(() => (q.trim() ? searchArtists(q) : []), [q]);
   const collections = useMemo(() => (q.trim() ? searchCollections(q) : []), [q]);
-  const activeMood = MOODS.find((m) => m.id === mood);
-  const filtersOn = !!maqam || !!tag || duffOnly !== "any" || !!mood;
+  const filtersOn = !!maqam || !!tag;
 
   return (
     <div className="space-y-8">
@@ -122,25 +113,6 @@ export default function Search() {
             )}
           </div>
 
-          {/* moods */}
-          <div className="mt-4 flex flex-wrap items-center gap-1.5">
-            <span className="label mr-1">mood</span>
-            {MOODS.map((m) => (
-              <Chip
-                key={m.id}
-                active={mood === m.id}
-                onClick={() => {
-                  const next = new URLSearchParams(params);
-                  if (mood === m.id) next.delete("mood");
-                  else next.set("mood", m.id);
-                  setParams(next, { replace: true });
-                }}
-              >
-                {m.label}
-              </Chip>
-            ))}
-          </div>
-
           {/* filters */}
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             <span className="label mr-1">maqām</span>
@@ -149,18 +121,13 @@ export default function Search() {
                 {maqamLabel(m)}
               </Chip>
             ))}
-            <span className="mx-2 hidden h-4 w-px bg-line2 sm:block" />
-            <span className="label mr-1">duff</span>
-            {(["any", "with", "without"] as const).map((v) => (
-              <Chip key={v} active={duffOnly === v} onClick={() => setDuffOnly(v)}>
-                {v === "any" ? "either" : v === "with" ? "with drum" : "vocals only"}
-              </Chip>
-            ))}
           </div>
 
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             <span className="label mr-1">tag</span>
-            {ALL_TAGS.slice(0, 14).map((t) => (
+            {tagCounts()
+              .slice(0, 14)
+              .map(({ tag: t }) => (
               <Chip key={t} active={tag === t} onClick={() => setTag(tag === t ? null : t)}>
                 {t}
               </Chip>
@@ -168,21 +135,6 @@ export default function Search() {
           </div>
         </div>
       </section>
-
-      {activeMood ? (
-        <Reveal>
-          <div className="flex items-center gap-3 rounded-xl border border-jade/25 bg-jade/[0.06] px-4 py-3">
-            <Icon name="compass" size={16} className="shrink-0 text-jade" />
-            <p className="text-[12.5px] leading-relaxed text-text2">
-              <span className="font-semibold text-text">{activeMood.label}</span> — {activeMood.blurb}.{" "}
-              <span className="text-muted">
-                {activeMood.labelAr ? <span className="arabic mr-1 text-[13px] text-goldsoft/80">{activeMood.labelAr}</span> : null}
-                Filtering by tempo, maqām and intent rather than by keyword.
-              </span>
-            </p>
-          </div>
-        </Reveal>
-      ) : null}
 
       {/* artists + collections when searching */}
       {artists.length ? (
@@ -209,7 +161,7 @@ export default function Search() {
       <section>
         <SectionHeader
           label={q ? `${results.length} results` : filtersOn ? `${results.length} filtered` : "the catalogue"}
-          title={q ? `Matching “${q}”` : activeMood ? `${activeMood.label}, sorted` : "Every nasheed we have"}
+          title={q ? `Matching “${q}”` : "Every nasheed we have"}
           action={
             <div className="flex items-center gap-2">
               <div className="hidden items-center gap-1 sm:flex">
@@ -266,7 +218,7 @@ export default function Search() {
             <TrackList
               tracks={results}
               showHeader
-              context={{ kind: "search", label: q ? `Search · ${q}` : activeMood ? `Mood · ${activeMood.label}` : "Catalogue" }}
+              context={{ kind: "search", label: q ? `Search · ${q}` : "Catalogue" }}
             />
           </div>
         ) : (
@@ -284,7 +236,7 @@ export default function Search() {
           </div>
           <div className="mt-6 flex flex-wrap items-center gap-2 text-[12px] text-muted">
             <Icon name="info" size={13} />
-            <span>Every reciter in this catalogue is fictional; the texts are traditional, scriptural, or written for the app.</span>
+            <span>Every nasheed here was published by an account and is credited to it.</span>
             <Link to="/about" className="font-semibold text-jade hover:underline underline-offset-2">
               Read the whole note
             </Link>
@@ -296,8 +248,7 @@ export default function Search() {
         <div className="flex flex-wrap items-center gap-2 text-[11.5px] text-muted">
           <Icon name="waveform" size={13} />
           <span>
-            {results.length} tracks · {plural(results.reduce((s, t) => s + Math.round(durationOf(t) / 60), 0), "minute")} of singing
-            {results.some((t) => !t.duff) ? ` · ${results.filter((t) => !t.duff).length} vocals-only` : ""}
+            {results.length} tracks · {plural(results.reduce((s, t) => s + Math.round(durationOf(t) / 60), 0), "minute")} of listening
             {results.some((t) => t.lines.some((l) => l.note?.startsWith("Qurʾān"))) ? " · includes Qurʾānic lines" : ""}
           </span>
         </div>

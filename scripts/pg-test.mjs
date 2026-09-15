@@ -1,5 +1,5 @@
 /**
- * The migrations, the seed and Row Level Security, run against a real Postgres.
+ * The migrations, Row Level Security and every RPC, run against a real Postgres.
  *
  * There is no Docker here and no `supabase start`, and SQL that has never met a
  * database is SQL that has never been tested — 2,700 lines of it, about to be pasted
@@ -18,6 +18,11 @@
  * migrations wrap in `do … exception when others` precisely so their absence is not
  * fatal. This run is the proof that those blocks behave.
  *
+ * The database ships empty — there is no catalogue to seed, only what accounts
+ * publish. So this file brings its own fixture: two publishers, two listeners,
+ * four nasheeds and two weeks of charts, inserted by the test itself and thrown
+ * away with the in-memory database when it ends.
+ *
  *   node scripts/pg-test.mjs
  */
 
@@ -31,7 +36,75 @@ const ROOT = process.cwd();
 const MIGRATIONS = readdirSync(join(ROOT, "supabase/migrations"))
   .filter((name) => name.endsWith(".sql"))
   .sort();
-const SEED = join(ROOT, "supabase/seed.sql");
+/* The fixture the tests read from. The database itself is empty: everything here is
+   inserted by this run, as the database owner, and nothing in it is the catalogue. */
+const FIXTURE = `
+insert into public.profiles
+  (id, handle, name, name_ar, tagline, bio, city, seed, role, kind, verified, created_at)
+values
+  ('11111111-1111-4111-8111-111111111111', 'test.reciter', 'Test Reciter', 'قارئ الاختبار',
+   'voice, no instruments', 'Publishes the fixtures.', 'Algiers', 'seed-reciter', 'listener', 'artist', true,  now() - interval '30 days'),
+  ('22222222-2222-4222-8222-222222222222', 'test.ensemble', 'Test Ensemble', null,
+   'seven voices', 'Publishes the fixtures.', 'Cairo', 'seed-ensemble', 'listener', 'artist', false, now() - interval '30 days'),
+  ('33333333-3333-4333-8333-333333333333', 'test.listener.a', 'Listener A', null,
+   'listener', '', 'Algiers', 'seed-listener-a', 'listener', 'listener', false, now() - interval '20 days'),
+  ('44444444-4444-4444-8444-444444444444', 'test.listener.b', 'Listener B', null,
+   'listener', '', 'Fes', 'seed-listener-b', 'listener', 'listener', false, now() - interval '19 days');
+
+insert into public.songs
+  (id, owner_id, title, title_ar, note, maqam, year, tags, lines,
+   audio_path, audio_mime, audio_bytes, duration_ms, artwork_path, status, published_at)
+values
+  ('sng_fixture-one', '11111111-1111-4111-8111-111111111111', 'Fixture One', 'نشيد واحد',
+   'Two lines with timings.', 'hijaz', 2025, array['test','fixture'],
+   '[{"tr":"ya rabbi","ar":"يا ربي","en":"O my Lord","t":0},{"tr":"salli ala","en":"Bless him","t":12}]'::jsonb,
+   'audio/fixture-one.mp3', 'audio/mpeg', 2048000, 245000, null, 'live', now() - interval '12 days'),
+  ('sng_fixture-two', '11111111-1111-4111-8111-111111111111', 'Fixture Two', null,
+   'Three lines, no timings.', 'bayati', 2024, array['test'],
+   '[{"tr":"first line","en":"the first"},{"tr":"second line","en":"the second"},{"tr":"third line","en":"the third"}]'::jsonb,
+   'audio/fixture-two.m4a', 'audio/mp4', 1024000, 180000, 'art/fixture-two.png', 'live', now() - interval '11 days'),
+  ('sng_fixture-three', '11111111-1111-4111-8111-111111111111', 'Fixture Three', null,
+   'A nasheed whose recording never arrived.', 'rast', 2024, array['test'],
+   '[{"tr":"sung alone","en":"sung alone"}]'::jsonb,
+   null, null, null, null, null, 'live', now() - interval '10 days'),
+  ('sng_fixture-four', '22222222-2222-4222-8222-222222222222', 'Fixture Four', null,
+   'Published by the other account.', 'saba', 2026, array['ensemble','test'],
+   '[{"tr":"ya man yafu","ar":"يا من يعفو","en":"O You who pardons","t":3}]'::jsonb,
+   'audio/fixture-four.ogg', 'audio/ogg', 3072000, 300000, null, 'live', now() - interval '9 days');
+
+insert into public.collections (id, kind, title, curator, blurb, seed, tags, year, song_ids, owner_id)
+values ('col_fixture-shelf', 'mukhtarat', 'The Fixture Shelf', 'CoolNasheed',
+        'A shelf the test can walk.', 'seed-shelf', array['test'], 2026,
+        array['sng_fixture-one','sng_fixture-two','sng_fixture-four'],
+        '11111111-1111-4111-8111-111111111111');
+
+insert into public.comments (song_id, author_id, text, at_line)
+values ('sng_fixture-one', '44444444-4444-4444-8444-444444444444', 'Peace on this one.', 1),
+       ('sng_fixture-one', '44444444-4444-4444-8444-444444444444', 'The second line undoes me.', 2),
+       ('sng_fixture-one', '11111111-1111-4111-8111-111111111111', 'Recorded in one take.', null),
+       ('sng_fixture-two', '33333333-3333-4333-8333-333333333333', 'This one is for Fajr.', null);
+
+insert into public.amens (profile_id, comment_id)
+select '33333333-3333-4333-8333-333333333333', id from public.comments where song_id = 'sng_fixture-one' limit 1;
+
+insert into public.loves (profile_id, song_id)
+values ('44444444-4444-4444-8444-444444444444', 'sng_fixture-one'),
+       ('44444444-4444-4444-8444-444444444444', 'sng_fixture-two');
+
+insert into public.follows (profile_id, artist_id)
+values ('33333333-3333-4333-8333-333333333333', '22222222-2222-4222-8222-222222222222');
+
+-- two weeks of charts, none of it today: the play tests count today's delta
+insert into public.song_stats_daily (song_id, day, plays, listeners, seconds)
+select s.id, d::date, 3, 2, 420
+  from public.songs s, generate_series((now() at time zone 'utc')::date - 13,
+                                       (now() at time zone 'utc')::date - 1, interval '1 day') d;
+
+insert into public.site_stats_daily (day, plays, listeners, signups)
+select d::date, 12, 8, 1
+  from generate_series((now() at time zone 'utc')::date - 13,
+                       (now() at time zone 'utc')::date - 1, interval '1 day') d;
+`;
 
 /* ------------------------------------------------------------------ reporting */
 
@@ -206,13 +279,12 @@ try {
     }
   }
 
-  section("Seed");
-  const seed = readFileSync(SEED, "utf8");
+  section("Fixture");
   try {
-    await db.exec(seed);
-    check("supabase/seed.sql applies", true);
+    await db.exec(FIXTURE);
+    check("the fixture applies — two publishers, two listeners, four nasheeds", true);
   } catch (err) {
-    check("supabase/seed.sql applies", false, String(err.message).split("\n")[0]);
+    check("the fixture applies", false, String(err.message).split("\n")[0]);
   }
 
   /* ------------------------------------------------------------- the schema */
@@ -254,9 +326,9 @@ try {
   const missingRpcs = EXPECTED_RPCS.filter((f) => !rpcs.includes(f));
   check("every RPC the client calls exists", missingRpcs.length === 0, missingRpcs.length ? `missing ${missingRpcs.join(", ")}` : `${EXPECTED_RPCS.length} of them`);
 
-  /* ---------------------------------------------------------------- the seed */
+  /* -------------------------------------------------------------- the fixture */
 
-  section("What the seed put in");
+  section("What the fixture put in");
   const counts = (await sql(`
     select
       (select count(*) from public.profiles)                        as profiles,
@@ -271,28 +343,23 @@ try {
       (select count(*) from public.song_stats_daily)                as song_days,
       (select count(*) from public.site_stats_daily)                as site_days
   `)).rows[0];
-  check("24 nasheeds, 9 shelves, 144 notes", counts.songs === 24 && counts.collections === 9 && counts.comments === 144,
+  check("four nasheeds, one shelf, four notes", counts.songs === 4 && counts.collections === 1 && counts.comments === 4,
     `${counts.songs} songs · ${counts.collections} collections · ${counts.comments} comments · ${counts.amens} amens · ${counts.loves} loves · ${counts.follows} follows`);
-  check("8 publishers and 16 listeners", counts.artists === 8 && counts.profiles === 24, `${counts.artists} artists · ${counts.profiles} profiles`);
-  check("14 days of charts to read", counts.song_days > 200 && counts.site_days === 14, `${counts.song_days} song-days · ${counts.site_days} site-days`);
+  check("two publishers and two listeners", counts.artists === 2 && counts.profiles === 4, `${counts.artists} artists · ${counts.profiles} profiles`);
+  check("two weeks of charts behind them, none of it today", counts.song_days === 52 && counts.site_days === 13,
+    `${counts.song_days} song-days · ${counts.site_days} site-days`);
 
   const drift = Number(await one(`
     select count(*) from public.songs s
      where s.notes <> (select count(*) from public.comments c where c.song_id = s.id and not c.removed)
   `));
-  check("songs.notes agrees with the notes that exist", drift === 0, drift ? `${drift} nasheeds out` : "counters kept by trigger, reconciled by seed");
+  check("songs.notes agrees with the notes that exist", drift === 0, drift ? `${drift} nasheeds out` : "counters kept by trigger, reconciled by the fixture");
 
   const likeDrift = Number(await one(`
     select count(*) from public.songs s
      where s.likes < (select count(*) from public.loves l where l.song_id = s.id)
   `));
-  check("every seeded love is counted on its nasheed", likeDrift === 0, likeDrift ? `${likeDrift} behind` : "likes ≥ loves rows");
-
-  section("And again — the seed is idempotent");
-  await db.exec(seed);
-  const after = Number(await one("select count(*) from public.songs"));
-  const amensAfter = Number(await one("select count(*) from public.amens"));
-  check("seeding twice changes nothing", after === 24 && amensAfter === counts.amens, `${after} songs · ${amensAfter} amens`);
+  check("every love in the fixture is counted on its nasheed", likeDrift === 0, likeDrift ? `${likeDrift} behind` : "likes ≥ loves rows");
 
   /* --------------------------------------------------------------- sign-up */
 
@@ -319,22 +386,21 @@ try {
   const artists = payload.artists ?? [];
   const collections = payload.collections ?? [];
   const tags = payload.tags ?? [];
-  check("24 nasheeds, publishers, shelves and tags", songs.length === 24 && artists.length >= 8 && collections.length === 9 && tags.length > 0,
+  check("four nasheeds, publishers, shelves and tags", songs.length === 4 && artists.length === 2 && collections.length === 1 && tags.length > 0,
     `${songs.length} songs · ${artists.length} artists · ${collections.length} collections · ${tags.length} tags`);
 
-  const SONG_KEYS = ["id", "ownerId", "ownerHandle", "title", "titleAr", "note", "maqam", "root", "bpm", "voices",
-    "duff", "duffEnter", "passes", "accent", "year", "tags", "lines", "motifBank", "audioPath", "audioMime",
-    "durationMs", "artworkPath", "status", "publishedAt", "plays", "likes", "notes"];
+  const SONG_KEYS = ["id", "ownerId", "ownerHandle", "title", "titleAr", "note", "maqam", "year", "tags", "lines",
+    "audioPath", "audioMime", "durationMs", "artworkPath", "status", "publishedAt", "plays", "likes", "notes"];
   const songKeyGaps = SONG_KEYS.filter((k) => !(k in (songs[0] ?? {})));
   check("a nasheed arrives in camelCase with every key the app reads", songKeyGaps.length === 0,
     songKeyGaps.length ? `missing ${songKeyGaps.join(", ")}` : `${SONG_KEYS.length} keys`);
 
-  const ARTIST_KEYS = ["id", "profileId", "name", "nameAr", "role", "origin", "bio", "seed", "accent", "verified"];
+  const ARTIST_KEYS = ["id", "profileId", "handle", "name", "nameAr", "role", "origin", "bio", "seed", "verified", "kind"];
   const artistKeyGaps = ARTIST_KEYS.filter((k) => !(k in (artists[0] ?? {})));
   check("a publisher arrives with the keys artistFromCard reads", artistKeyGaps.length === 0,
     artistKeyGaps.length ? `missing ${artistKeyGaps.join(", ")}` : `${ARTIST_KEYS.length} keys`);
 
-  const COLLECTION_KEYS = ["id", "kind", "title", "titleAr", "curator", "blurb", "seed", "accent", "tags", "year", "songIds"];
+  const COLLECTION_KEYS = ["id", "kind", "title", "titleAr", "curator", "blurb", "seed", "tags", "year", "songIds"];
   const collectionKeyGaps = COLLECTION_KEYS.filter((k) => !(k in (collections[0] ?? {})));
   check("a shelf arrives with songIds the player can walk", collectionKeyGaps.length === 0 && Array.isArray(collections[0]?.songIds),
     collectionKeyGaps.length ? `missing ${collectionKeyGaps.join(", ")}` : `${collections[0]?.songIds?.length ?? 0} nasheeds on the first shelf`);
@@ -348,7 +414,7 @@ try {
 
   const lyricShape = songs.every((s) => Array.isArray(s.lines) && s.lines.every((l) => typeof l === "object" && (l.tr || l.ar || l.en)));
   const timed = songs.some((s) => s.lines.some((l) => typeof l.t === "number"));
-  check("lyrics arrive as lines, with timings when the seed has them", lyricShape, timed ? "some lines carry t" : "no timings in the seed");
+  check("lyrics arrive as lines, with timings when the publisher set them", lyricShape, timed ? "some lines carry t" : "no timings in the fixture");
   check("nothing unpublished leaks", songs.every((s) => s.status === "live"), "");
 
   /* ------------------------------------------------------------ play beacon */
@@ -357,7 +423,7 @@ try {
   const songId = songs[0].id;
   const playsBefore = Number(await one("select plays from public.songs where id = $1", [songId]));
 
-  // the seed already wrote today's rollups, so what matters is the difference
+  // the fixture wrote the last two weeks, so what matters is today's difference
   const rollupBefore = (await sql(`
     select coalesce(plays,0) as plays, coalesce(listeners,0) as listeners, coalesce(seconds,0) as seconds
       from public.song_stats_daily where song_id = $1 and day = (now() at time zone 'utc')::date`, [songId])).rows[0] ?? { plays: 0, listeners: 0, seconds: 0 };
@@ -410,7 +476,7 @@ try {
 
   section("The read paths the pages use");
   await asAnon();
-  const TRENDING_KEYS = ["song_id", "title", "accent", "maqam", "owner_name", "plays", "listeners", "seconds", "likes"];
+  const TRENDING_KEYS = ["song_id", "title", "maqam", "owner_name", "plays", "listeners", "seconds", "likes"];
   const trending = (await sql("select * from public.trending('7d', 10) limit 10")).rows ?? [];
   const trendingGaps = TRENDING_KEYS.filter((k) => !(k in (trending[0] ?? {})));
   check("trending() answers in the columns trendingFromRow reads", Array.isArray(trending) && trending.length > 0 && trendingGaps.length === 0,
@@ -430,29 +496,29 @@ try {
   // my_history returns a jsonb array (trending and daily_curve return rows), which is
   // what supabase-js hands back either way — but the two are read differently here
   const history = (await sql("select public.my_history(30, 'device-aaa') as rows")).rows[0]?.rows ?? [];
-  const HISTORY_KEYS = ["songId", "title", "accent", "ownerName", "plays", "seconds", "lastAt"];
+  const HISTORY_KEYS = ["songId", "title", "ownerName", "plays", "seconds", "lastAt"];
   const historyGaps = HISTORY_KEYS.filter((k) => !(k in (history[0] ?? {})));
   check("my_history() answers camelCase rows for an anonymous device", history.length >= 1 && historyGaps.length === 0,
     historyGaps.length ? `missing ${historyGaps.join(", ")}` : `${history.length} rows`);
 
-  const publisher = (await sql("select public.publisher_profile('yusuf') as p")).rows[0].p ?? {};
+  const publisher = (await sql("select public.publisher_profile('test.reciter') as p")).rows[0].p ?? {};
   check("publisher_profile() takes a handle",
-    publisher?.user?.handle === "yusuf" && Array.isArray(publisher.songs) && typeof publisher.totals?.plays === "number" && typeof publisher.followers === "number",
+    publisher?.user?.handle === "test.reciter" && Array.isArray(publisher.songs) && typeof publisher.totals?.plays === "number" && typeof publisher.followers === "number",
     `${publisher?.user?.name} · ${publisher?.songs?.length ?? 0} nasheeds · ${publisher?.followers ?? 0} followers`);
 
   const publisherByUuid = (await sql("select public.publisher_profile($1) as p", [publisher?.user?.profileId ?? publisher?.user?.id])).rows[0].p ?? {};
-  check("and it takes a uuid", publisherByUuid?.user?.handle === "yusuf", `${publisherByUuid?.user?.handle ?? "nothing"}`);
+  check("and it takes a uuid", publisherByUuid?.user?.handle === "test.reciter", `${publisherByUuid?.user?.handle ?? "nothing"}`);
 
   /* ------------------------------------------------------------------- RLS */
 
   section("Row level security, as the three kinds of caller");
-  const listenerA = await one("select id from public.profiles where kind = 'listener' and role = 'listener' order by created_at limit 1");
-  const listenerB = await one("select id from public.profiles where kind = 'listener' and role = 'listener' order by created_at desc limit 1");
+  const listenerA = await one("select id from public.profiles where handle = 'test.listener.a'");
+  const listenerB = await one("select id from public.profiles where handle = 'test.listener.b'");
   const staffId = firstId;
 
   await asAnon();
-  check("an anonymous listener reads the catalogue", Number(await one("select count(*) from public.songs")) === 24);
-  check("and reads the notes under it", Number(await one("select count(*) from public.comments where not removed")) >= 144);
+  check("an anonymous listener reads the catalogue", Number(await one("select count(*) from public.songs")) === 4);
+  check("and reads the notes under it", Number(await one("select count(*) from public.comments where not removed")) === 4);
   // anon has no table-level grant on these at all, which is a stronger refusal than
   // a policy that returns nothing — and the client never reads them directly anyway,
   // it goes through my_history() and my_bootstrap(), which are definer
@@ -601,14 +667,13 @@ try {
   await asUser(listenerA);
   const published = await sql(`
     insert into public.songs
-      (owner_id, title, title_ar, note, maqam, root, bpm, voices, duff, duff_enter,
-       passes, accent, year, tags, lines, duration_ms, status)
+      (owner_id, title, title_ar, note, maqam, year, tags, lines,
+       audio_path, audio_mime, audio_bytes, duration_ms, status)
     values
       ($1, 'A Test of the Direct Road', 'اختبار', 'Published by a listener, straight to the table.',
-       'bayati', 62, 84, 'solo', 'DT..DT..DT..DT..', 'verse', 2, 'gold', 2026,
-       array['test','direct'],
+       'bayati', 2026, array['test','direct'],
        '[{"tr":"yā rabbi","en":"O my Lord","t":0}]'::jsonb,
-       180000, 'live')
+       'audio/direct.mp3', 'audio/mpeg', 512000, 180000, 'live')
     returning id, plays, likes, notes`,
     [listenerA],
   );
@@ -618,7 +683,7 @@ try {
     published.rows[0]?.plays === 0 && published.rows[0]?.likes === 0 && published.rows[0]?.notes === 0,
     JSON.stringify(published.rows[0]));
   await refused("but cannot buy itself a play count", () => sql(
-    "insert into public.songs (owner_id, title, note, maqam, root, bpm, voices, plays, likes, notes) values ($1, 'Bought', '', 'rast', 60, 80, 'solo', 999999, 999, 999)",
+    "insert into public.songs (owner_id, title, note, maqam, plays, likes, notes) values ($1, 'Bought', '', 'rast', 999999, 999, 999)",
     [listenerA],
   ), "42501");
 
@@ -653,46 +718,68 @@ try {
   /* ------------------------------------------- the publish contract, in the table */
 
   section("The publish contract, against the real table");
-  const fixture = JSON.parse(readFileSync(join(ROOT, "shared/fixtures/publish-cases.json"), "utf8"));
-  const contractRows = fixture.cases.filter((c) => c.row);
+  /* What supabase/functions/_shared/validate.ts accepts is what the table must take,
+     and the checks that live in the schema are the ones it must refuse. A handful of
+     rows is enough: the point is the column set, not the volume. */
+  const CONTRACT_ROWS = [
+    { name: "everything a publisher may set", row: {
+      title: "The Whole Field", title_ar: "كل الحقول", note: "Every column, set.", maqam: "hijaz", year: 2026,
+      tags: ["test", "contract"], lines: [{ tr: "ya rabbi", ar: "يا ربي", en: "O my Lord", note: "traditional", t: 0 }],
+      audio_path: "audio/contract-one.mp3", audio_mime: "audio/mpeg", audio_bytes: 2048000,
+      duration_ms: 245000, artwork_path: "art/contract-one.png" } },
+    { name: "the one thing that is required", row: {
+      title: "Bare Minimum", note: "", maqam: "rast", tags: [], lines: [{ en: "one line" }] } },
+    { name: "forty lines is the ceiling", row: {
+      title: "Forty Lines", note: "", maqam: "kurd", tags: ["test"],
+      lines: Array.from({ length: 40 }, (_, i) => ({ en: `line ${i + 1}` })) } },
+  ];
+
   const refusedRows = [];
   await asUser(listenerA);
-  for (const c of contractRows) {
+  for (const c of CONTRACT_ROWS) {
     const r = c.row;
     try {
       // as the listener, not as the owner of the database: this is also the proof that
       // the column grants cover exactly what a publisher needs and nothing more
       await sql(`
         insert into public.songs
-          (owner_id, title, title_ar, note, maqam, root, bpm, voices, duff, duff_enter, passes,
-           accent, year, tags, lines, motif_bank, audio_path, audio_mime, audio_bytes,
-           duration_ms, artwork_path)
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::text[],$15::jsonb,$16::integer[],$17,$18,$19,$20,$21)`,
-        [listenerA, r.title, r.title_ar, r.note, r.maqam, r.root, r.bpm, r.voices, r.duff,
-         r.duff_enter, r.passes, r.accent, r.year, r.tags ?? [], JSON.stringify(r.lines ?? []),
-         r.motif_bank, r.audio_path, r.audio_mime, r.audio_bytes, r.duration_ms, r.artwork_path]);
+          (owner_id, title, title_ar, note, maqam, year, tags, lines,
+           audio_path, audio_mime, audio_bytes, duration_ms, artwork_path)
+        values ($1,$2,$3,$4,$5,$6,$7::text[],$8::jsonb,$9,$10,$11,$12,$13)`,
+        [listenerA, r.title, r.title_ar ?? null, r.note, r.maqam, r.year ?? null, r.tags ?? [],
+         JSON.stringify(r.lines ?? []), r.audio_path ?? null, r.audio_mime ?? null,
+         r.audio_bytes ?? null, r.duration_ms ?? null, r.artwork_path ?? null]);
     } catch (err) {
       refusedRows.push(`${c.name}: ${String(err.message).split("\n")[0]}`);
     }
   }
-  check(`all ${contractRows.length} rows the validators produce are rows Postgres accepts`,
+  check(`all ${CONTRACT_ROWS.length} rows the validator produces are rows Postgres accepts`,
     refusedRows.length === 0, refusedRows.length ? refusedRows.join(" · ") : "inserted under the column grants, as a listener");
 
   await asPostgres();
-  // counted by owner and by title, because several cases share a title on purpose
-  const titles = [...new Set(contractRows.map((c) => c.row.title))];
   const contractCount = Number(
     await one(`select count(*) from public.songs where owner_id = $1 and title = any($2::text[])`,
-      [listenerA, titles]),
+      [listenerA, CONTRACT_ROWS.map((c) => c.row.title)]),
   );
-  check("and they are all really in there", contractCount === contractRows.length,
-    `${contractCount} of ${contractRows.length} rows owned by the listener`);
+  check("and they are all really in there", contractCount === CONTRACT_ROWS.length,
+    `${contractCount} of ${CONTRACT_ROWS.length} rows owned by the listener`);
+
+  await asUser(listenerA);
+  await refused("a maqām outside the ten is refused by the table", () => sql(
+    "insert into public.songs (owner_id, title, note, maqam) values ($1, 'Not A Mode', '', 'lydian')", [listenerA]), "23514");
+  await refused("so is a title of one character", () => sql(
+    "insert into public.songs (owner_id, title, note, maqam) values ($1, 'x', '', 'rast')", [listenerA]), "23514");
+  await refused("and so is a recording shorter than a second", () => sql(
+    "insert into public.songs (owner_id, title, note, maqam, duration_ms) values ($1, 'Too Short', '', 'rast', 200)", [listenerA]), "23514");
+  await refused("forty-one lines is a book", () => sql(
+    `insert into public.songs (owner_id, title, note, maqam, lines) values ($1, 'A Book', '', 'rast',
+     $2::jsonb)`, [listenerA, JSON.stringify(Array.from({ length: 41 }, (_, i) => ({ en: `line ${i + 1}` })))]), "23514");
 
   /* ------------------------------------------------------------- following */
 
   section("Following a publisher");
   await asUser(listenerA);
-  // somebody this listener has not followed yet — the seed already follows most of them
+  // somebody this listener has not followed yet — the fixture already follows the other one
   const unfollowed = (await sql(`
     select a.id, a.handle from public.profiles a
      where a.kind = 'artist'
@@ -739,12 +826,6 @@ try {
     }
   }
   check("every migration applies a second time", rerunError === null, rerunError ?? "tables, indexes, triggers and policies are all drop-if-exists / if-not-exists");
-  try {
-    await db.exec(seed);
-    check("and so does the seed", true);
-  } catch (err) {
-    check("and so does the seed", false, String(err.message).split("\n")[0]);
-  }
   check("nothing about the schema changed", Number(await one("select count(*) from pg_policies where schemaname = 'public'")) === policiesBefore
     && Number(await one("select count(*) from pg_trigger where not tgisinternal")) === triggersBefore,
     `${policiesBefore} policies · ${triggersBefore} triggers`);
@@ -768,7 +849,7 @@ if (failures.length) {
   for (const failure of failures) console.log(`  ${red("✗")} ${failure}`);
   exitCode = 1;
 } else if (!aborted) {
-  console.log(`  ${green("the schema, the seed, the RPCs and RLS all behave")}`);
+  console.log(`  ${green("the schema, the RPCs and RLS all behave")}`);
 }
 await db.close().catch(() => {});
 process.exit(exitCode);

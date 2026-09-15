@@ -2,8 +2,7 @@
 /**
  * One command between an empty Supabase project and a working CoolNasheed.
  *
- *   npm run setup                       schema + catalogue, using whatever it can find
- *   npm run setup -- --no-seed          schema only; publish your own nasheeds into it
+ *   npm run setup                       the schema, using whatever route it can find
  *   npm run setup -- --functions        set the secret, deploy the six Edge Functions, call them back
  *   npm run setup -- --dry-run          say what it would do, touch nothing
  *
@@ -11,8 +10,9 @@
  *
  *   SUPABASE_DB_URL        the connection string from Project Settings → Database.
  *                          Everything happens over one Postgres connection: the four
- *                          migrations, the seed, and the verification queries. This is
- *                          the route to use if you have the database password.
+ *                          migrations and the verification queries. This is the route to
+ *                          use if you have the database password. It leaves an empty
+ *                          catalogue behind — nasheeds come from accounts, not a seed.
  *
  *   SUPABASE_ACCESS_TOKEN  a personal access token (sbp_…) from Account → Access Tokens.
  *                          The SQL goes to Supabase's Management API instead, and the
@@ -34,7 +34,6 @@ import { dirname, join } from "node:path";
 const ROOT = process.cwd();
 const MIGRATIONS = ["20260914120000_core.sql", "20260914120100_functions.sql", "20260914120300_rls.sql", "20260914120400_storage.sql"]
   .map((name) => join(ROOT, "supabase/migrations", name));
-const SEED = join(ROOT, "supabase/seed.sql");
 
 /* ------------------------------------------------------------------- terminal */
 
@@ -69,7 +68,6 @@ if (flag("help") || flag("h")) {
 }
 
 const dryRun = flag("dry-run");
-const wantSeed = !flag("no-seed");
 const wantFunctions = flag("functions");
 
 /* ------------------------------------------------------------------ the .env */
@@ -173,7 +171,7 @@ async function askTheFunctions() {
   const health = await callFunction("health");
   if (health.status === 200 && health.body?.checks) {
     const c = health.body.checks;
-    const marks = ["database", "storage", "auth", "seed"]
+    const marks = ["database", "storage", "auth", "catalogue"]
       .map((k) => `${k} ${c[k] ? green("✓") : red("✗")}`)
       .join(" · ");
     ok("health answers", `${health.body.counts?.songs ?? 0} nasheeds · ${marks}`);
@@ -187,7 +185,7 @@ async function askTheFunctions() {
 
   const catalog = await callFunction("catalog");
   if (catalog.status === 200 && Array.isArray(catalog.body?.songs)) {
-    ok("catalog answers", `${catalog.body.songs.length} nasheeds · ${catalog.body.artists?.length ?? 0} publishers · ${catalog.body.collections?.length ?? 0} collections${catalog.body.seeded ? "" : " · not the seeded catalogue yet"}`);
+    ok("catalog answers", `${catalog.body.songs.length} nasheeds · ${catalog.body.artists?.length ?? 0} publishers · ${catalog.body.collections?.length ?? 0} collections`);
   } else if (catalog.status === 401 || catalog.status === 403) {
     warn("catalog refused the publishable key", `${catalog.status}:
 
@@ -279,9 +277,9 @@ async function openManagement(token) {
 /** The paste-it-yourself alternative, described with the file's real size. */
 function bundleHint() {
   const path = join(ROOT, "supabase/setup.sql");
-  if (!existsSync(path)) return "supabase/setup.sql (run `npm run sql:bundle` first — migrations and seed in one file)";
+  if (!existsSync(path)) return "supabase/setup.sql (run `npm run sql:bundle` first — the four migrations in one file)";
   const kb = Math.round(readFileSync(path, "utf8").length / 1024);
-  return `supabase/setup.sql (${kb} KB — the four migrations and the seed in one file)`;
+  return `supabase/setup.sql (${kb} KB — the four migrations in one file)`;
 }
 
 /* ------------------------------------------------------------------------ main */
@@ -337,7 +335,7 @@ async function main() {
   let runner = null;
   if (dryRun) {
     warn("dry run — nothing will be written");
-    console.log(dim(`  would apply ${MIGRATIONS.length} migrations${wantSeed ? " + the seed" : ""} by ${dbUrl ? "a Postgres connection" : accessToken ? "the Management API" : "…no route given"}`));
+    console.log(dim(`  would apply ${MIGRATIONS.length} migrations by ${dbUrl ? "a Postgres connection" : accessToken ? "the Management API" : "…no route given"}`));
   } else if (dbUrl) {
     try {
       runner = await openPg(dbUrl);
@@ -373,7 +371,7 @@ async function main() {
   }
 
   /* 3. apply ---------------------------------------------------------------- */
-  step(`3 · applying the schema${wantSeed ? " and the catalogue" : ""}`);
+  step("3 · applying the schema");
   if (!dryRun && runner) {
     let failed = false;
     for (const file of MIGRATIONS) {
@@ -393,17 +391,6 @@ async function main() {
       }
     }
 
-    if (!failed && wantSeed) {
-      try {
-        await runner.run(readFileSync(SEED, "utf8"));
-        const songs = await runner.value("select count(*)::int from public.songs");
-        const publishers = await runner.value("select count(*)::int from public.profiles where kind = 'artist'");
-        ok("supabase/seed.sql", `${songs} nasheeds · ${publishers} publishers · every insert is on-conflict-do-nothing, so seeding twice changes nothing`);
-      } catch (err) {
-        no("supabase/seed.sql", String(err?.hint ?? err?.message ?? err).split("\n")[0]);
-        failed = true;
-      }
-    }
     if (failed) {
       await runner.close();
       process.exit(1);
@@ -501,8 +488,8 @@ async function main() {
 
   step("Done");
   console.log(dim(`  The app in this workspace is already pointed at ${projectRef} (.env). Reload it: the
-  catalogue now comes from Postgres instead of the bundle, the first account you create
-  is staff, and /admin opens.`));
+  catalogue now comes from Postgres, the first account you create is staff, and /admin
+  opens. The shelves are empty until somebody publishes — /studio is where that happens.`));
   console.log();
 }
 

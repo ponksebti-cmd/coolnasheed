@@ -1,7 +1,7 @@
 /**
  * The Supabase client, and the four things the rest of the app needs from it.
  *
- *   `hasSupabase`  — are we wired to a project, or running on the bundled catalogue?
+ *   `hasSupabase`  — are we wired to a project, or running with an empty catalogue?
  *   `sb()`         — the browser client (auth, PostgREST, storage, functions)
  *   `invoke()`     — call an Edge Function and get JSON or a real error back
  *   `upload()`     — put a file in a bucket under your own folder
@@ -10,8 +10,8 @@
  * browser is meant to hold, and Row Level Security is what decides what it may do.
  * The service-role key lives only in the Edge Functions, never here.
  *
- * With no credentials configured nothing throws at import time — the app boots into
- * demo mode, the bundled catalogue plays, and any write raises `DemoModeError`, which
+ * With no credentials configured nothing throws at import time — the app boots with an
+ * empty catalogue and says so on the page, and any write raises `DemoModeError`, which
  * the interface turns into "connect a project" instead of a failure.
  */
 
@@ -205,5 +205,5 @@ export async function accessToken(): Promise<string | null> {
 
 /** Where the app is pointed, in one line, for the boot log and the dashboard. */
 export function backendLabel(): string {
-  return hasSupabase ? `supabase:${projectRef}` : "demo (bundled catalogue)";
+  return hasSupabase ? `supabase:${projectRef}` : "no project configured";
 }

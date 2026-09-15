@@ -11,7 +11,7 @@ import { CommandPalette } from "../CommandPalette";
 import { ShortcutsSheet } from "../ShortcutsSheet";
 import { AuthModal } from "../auth/AuthModal";
 import { Icon } from "../ui/Icons";
-import { engine } from "../../lib/audio/engine";
+import { player as audio } from "../../lib/audio/player";
 import { useLibrary } from "../../store/library";
 import { usePlayer } from "../../store/player";
 import { useUi } from "../../store/ui";
@@ -47,24 +47,16 @@ export function AppShell() {
     if (meta) meta.setAttribute("content", settings.theme === "night" ? "#07100D" : "#F4EFE3");
   }, [settings.theme]);
 
-  /* push persisted audio settings into the engine once */
+  /* push the persisted volume into the audio element once */
   useEffect(() => {
-    engine.setVolume(settings.volume);
-    engine.setDuff(settings.duff);
-    engine.setSpace(settings.space);
+    audio.setVolume(settings.volume);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* keep the engine in step with later setting changes made elsewhere */
+  /* keep it in step with later changes made elsewhere */
   useEffect(() => {
-    engine.setVolume(settings.volume);
+    audio.setVolume(settings.volume);
   }, [settings.volume]);
-  useEffect(() => {
-    engine.setDuff(settings.duff);
-  }, [settings.duff]);
-  useEffect(() => {
-    engine.setSpace(settings.space);
-  }, [settings.space]);
 
   /* scroll to top on navigation */
   useEffect(() => {
@@ -101,7 +93,6 @@ export function AppShell() {
     n: () => player.next(),
     b: () => player.prev(),
     i: () => player.setImmersive(!player.immersive),
-    d: () => player.setDuff(!settings.duff),
     m: () => player.setVolume(settings.volume > 0 ? 0 : 0.85),
     l: () => {
       const id = player.trackId;
@@ -144,8 +135,8 @@ export function AppShell() {
         <div ref={scroller} className="scroll-slim relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
           <TopBar onMenu={() => setMobileNav(true)} />
 
-          {/* The backend answering badly is worth one line on the page. The bundled
-              catalogue keeps playing underneath it, so this is a notice, not a wall. */}
+          {/* The backend answering badly is worth one line on the page. The pages
+              themselves stay usable, so this is a notice, not a wall. */}
           {boot?.error && !noticeClosed ? (
             <div
               role="status"
@@ -158,7 +149,7 @@ export function AppShell() {
                   <p className="mt-1">
                     One command fixes it: <code className="rounded bg-bg/70 px-1.5 py-0.5 font-mono text-[11.5px] text-goldsoft">npm run setup</code>{" "}
                     — or paste <code className="rounded bg-bg/70 px-1.5 py-0.5 font-mono text-[11.5px]">supabase/setup.sql</code> into Studio&apos;s SQL
-                    editor. Until then the bundled catalogue is what you hear.
+                    editor. Until then there is nothing to play.
                   </p>
                 ) : null}
               </div>

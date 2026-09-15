@@ -1,69 +1,44 @@
 /**
- * The studio: the draft you are writing, and what you have published.
+ * The studio: the recording you are publishing, and what you have published.
  *
- * Publishing here can mean two things, and both end up as a real nasheed on the server:
+ * A nasheed here is a real recording — an mp3, wav, m4a or flac you upload to Supabase
+ * Storage — with its title, its maqām, its tags, the lines of poetry it sings and,
+ * when you have them, the second each line starts. That is what streaming means in
+ * this app: the browser downloads the file and plays it. No synthesis, no schedule.
  *
- *   1. a composition — a maqām, a tempo, a voice arrangement and some lines of poetry.
- *      The browser's synthesis engine performs it, and because the lyric timings come
- *      from the same schedule the engine plays, the karaoke view cannot drift.
- *   2. a recording — an mp3 or wav you attach. It is uploaded to storage, streamed back
- *      with range support so seeking works, and sung over by nobody: your voices, your
- *      take. The composition you wrote alongside it still drives the lyric timeline.
- *
- * The draft itself is kept on this device, so a half-written nasheed survives a reload.
- * The moment you publish, it belongs to your account and follows you everywhere.
+ * The draft is kept on this device, so half a nasheed survives a reload. The moment
+ * you publish, it belongs to your account and follows you everywhere.
  */
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { api, errorMessage } from "../lib/api";
 import { applySong, forgetSong, getTrack } from "../data/catalog";
-import type { Accent, Artist, LyricLine, Track } from "../data/types";
+import { artworkUrl, audioUrl } from "../lib/supabase";
+import type { Artist, LyricLine, Track } from "../data/types";
 import type { MaqamName } from "../lib/theory";
 import { MAQAMAT } from "../lib/theory";
 import { currentUser, useSession, type Account } from "./session";
 import type { Song, SongInput, SongStatus } from "../../shared/types";
 
-export const DUFF_PATTERNS: { id: string; label: string; pattern: string }[] = [
-  { id: "malfuf", label: "Malfūf — rolling", pattern: "D..T..D.T..T.D.." },
-  { id: "simple", label: "Simple — dum and tak", pattern: "D...T...D...T..." },
-  { id: "ayyub", label: "Ayyūb — driving", pattern: "D..TD..TD.T.D..T" },
-  { id: "roll", label: "Roll — busy tak", pattern: "D..TD..TD..TD..T" },
-  { id: "sparse", label: "Sparse — two a bar", pattern: "D.......D...T..." },
-];
-
-export type DraftLine = { tr: string; ar: string; en: string; note: string };
+export type DraftLine = { tr: string; ar: string; en: string; note: string; t: string };
 
 export type Draft = {
   title: string;
   titleAr: string;
   note: string;
   maqam: MaqamName;
-  root: number;
-  bpm: number;
-  voices: Track["voices"];
-  duff: string | null;
-  duffEnter: "intro" | "verse";
-  passes: number;
-  accent: Accent;
   tags: string[];
   lines: DraftLine[];
 };
 
-export const EMPTY_LINE: DraftLine = { tr: "", ar: "", en: "", note: "" };
+export const EMPTY_LINE: DraftLine = { tr: "", ar: "", en: "", note: "", t: "" };
 
 export const DEFAULT_DRAFT: Draft = {
   title: "",
   titleAr: "",
   note: "",
   maqam: "bayati",
-  root: 57,
-  bpm: 68,
-  voices: "solo",
-  duff: null,
-  duffEnter: "verse",
-  passes: 2,
-  accent: "jade",
   tags: ["original"],
   lines: [{ ...EMPTY_LINE }, { ...EMPTY_LINE }],
 };
@@ -77,7 +52,10 @@ export type PublishedEntry = Omit<Draft, "lines"> & {
   ownerHandle?: string;
   publishedAt: number;
   lines: LyricLine[];
-  /** an uploaded recording exists, so this plays your voices rather than the engine */
+  /** the uploaded recording, streamed from storage */
+  audioUrl: string | null;
+  artworkUrl: string | null;
+  durationMs: number | null;
   hasAudio: boolean;
   hasArtwork: boolean;
   status: SongStatus;
@@ -117,6 +95,8 @@ export function draftToLines(lines: DraftLine[]): LyricLine[] {
       ar: l.ar.trim() || undefined,
       en: l.en.trim() || undefined,
       note: l.note.trim() || undefined,
+      // a timing is optional; the lyric view spreads untimed lines evenly instead
+      t: l.t.trim() ? (Number(l.t) >= 0 ? Number(l.t) : undefined) : undefined,
     }))
     .filter((l) => l.tr || l.ar || l.en);
 }
@@ -129,11 +109,9 @@ export function validateDraft(draft: Draft, account: Account | null, audio?: Att
   if (draftToLines(draft.lines).length === 0)
     return { ok: false, field: "lines", msg: "Add at least one line. Transliteration or Arabic is what gets sung." };
   if (draftToLines(draft.lines).length > 40) return { ok: false, field: "lines", msg: "Forty lines is a book, not a nasheed." };
-  if (draft.bpm < 40 || draft.bpm > 180) return { ok: false, field: "form", msg: "Tempo has to sit between 40 and 180 bpm." };
-  if (draft.root < 36 || draft.root > 84) return { ok: false, field: "form", msg: "Pick a tonic between C2 and C6." };
-  if (draft.passes < 1 || draft.passes > 6) return { ok: false, field: "form", msg: "Between one and six repetitions." };
-  if (draft.duff && !/^[DT.]{16}$/.test(draft.duff)) return { ok: false, field: "form", msg: "A duff pattern is 16 steps of D, T or ." };
-  if (audio && audio.bytes <= 0) return { ok: false, field: "audio", msg: "That audio file is empty." };
+  // a nasheed is a recording: without one there is nothing to stream
+  if (!audio) return { ok: false, field: "audio", msg: "Attach the recording — mp3, wav, m4a, ogg or flac." };
+  if (audio.bytes <= 0) return { ok: false, field: "audio", msg: "That audio file is empty." };
   return null;
 }
 
@@ -144,13 +122,6 @@ export function songInputFromDraft(draft: Draft, extra: Partial<SongInput> = {})
     titleAr: draft.titleAr.trim() || null,
     note: draft.note.trim() || null,
     maqam: draft.maqam,
-    root: draft.root,
-    bpm: draft.bpm,
-    voices: draft.voices,
-    duff: draft.duff,
-    duffEnter: draft.duffEnter,
-    passes: draft.passes,
-    accent: draft.accent,
     tags: draft.tags.length ? draft.tags.slice(0, 8) : ["original"],
     lines: draftToLines(draft.lines),
     ...extra,
@@ -167,15 +138,11 @@ export function entryFromSong(song: Song): PublishedEntry {
     titleAr: song.titleAr ?? "",
     note: song.note,
     maqam: song.maqam,
-    root: song.root,
-    bpm: song.bpm,
-    voices: song.voices,
-    duff: song.duff,
-    duffEnter: song.duffEnter,
-    passes: song.passes,
-    accent: song.accent,
     tags: song.tags,
     lines: song.lines.map((l) => ({ ...l })),
+    audioUrl: audioUrl(song.audioPath),
+    artworkUrl: artworkUrl(song.artworkPath),
+    durationMs: song.durationMs ?? null,
     hasAudio: !!song.audioPath,
     hasArtwork: !!song.artworkPath,
     status: song.status,
@@ -196,20 +163,13 @@ export function trackForEntry(entry: PublishedEntry, account: Account | null): T
     collections: [],
     tags: entry.tags.length ? entry.tags : ["original"],
     maqam: entry.maqam,
-    root: entry.root,
-    bpm: entry.bpm,
-    voices: entry.voices,
-    duff: entry.duff ?? undefined,
-    duffEnter: entry.duff ? entry.duffEnter : undefined,
-    introBars: entry.duff && entry.duffEnter === "intro" ? 2 : 1,
-    passes: entry.passes,
-    blurb:
-      entry.note.trim() ||
-      `Published by ${who}. ${maqam?.name ?? entry.maqam} at ${entry.bpm} bpm, ${entry.voices}${entry.duff ? " with duff" : ", vocals only"}.`,
+    note: entry.note.trim() || `Published by ${who}. ${maqam?.name ?? entry.maqam}.`,
     year: new Date(entry.publishedAt).getFullYear(),
     seed: `published-${entry.id}`,
-    accent: entry.accent,
     lines: entry.lines,
+    audioUrl: entry.audioUrl,
+    artworkUrl: entry.artworkUrl,
+    durationMs: entry.durationMs,
     ownerId: entry.ownerId,
     stats: { plays: entry.plays, likes: entry.likes, notes: entry.notes },
     status: entry.status,
@@ -218,8 +178,7 @@ export function trackForEntry(entry: PublishedEntry, account: Account | null): T
 }
 
 /** A publisher page for yourself, until the server's own copy is loaded. */
-export function artistForAccount(account: Account, entries: PublishedEntry[]): Artist {
-  const first = entries[0];
+export function artistForAccount(account: Account): Artist {
   return {
     id: account.id,
     name: account.name,
@@ -227,15 +186,22 @@ export function artistForAccount(account: Account, entries: PublishedEntry[]): A
     origin: account.city || "—",
     bio: account.bio.trim() || `@${account.handle} publishes on CoolNasheed.`,
     seed: account.seed,
-    accent: first?.accent ?? "jade",
     verified: false,
   };
 }
 
-/** The same, for a draft that has not been published yet — used by the preview player. */
-export function draftTrack(draft: Draft, account: Account | null): Track | null {
+/**
+ * The same, for a draft that has not been published yet — used by the preview player.
+ * The recording is a blob URL for the file still sitting in the form, so you can hear
+ * exactly what you are about to publish.
+ */
+export function draftTrack(
+  draft: Draft,
+  account: Account | null,
+  audio?: { url: string; durationMs: number | null } | null,
+): Track | null {
   const lines = draftToLines(draft.lines);
-  if (!account || !lines.length || draft.title.trim().length < 2) return null;
+  if (!account || !lines.length || draft.title.trim().length < 2 || !audio?.url) return null;
   const entry: PublishedEntry = {
     ...draft,
     id: `draft-${account.id}`,
@@ -243,7 +209,10 @@ export function draftTrack(draft: Draft, account: Account | null): Track | null 
     ownerHandle: account.handle,
     publishedAt: Date.now(),
     lines,
-    hasAudio: false,
+    audioUrl: audio.url,
+    artworkUrl: null,
+    durationMs: audio.durationMs,
+    hasAudio: true,
     hasArtwork: false,
     status: "live",
     plays: 0,

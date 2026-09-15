@@ -191,7 +191,7 @@ export function ArtThumb({ track, size = 44, className, rounded = "rounded-lg" }
       className={clsx("relative shrink-0 overflow-hidden border border-line", rounded, className)}
       style={{ width: size, height: size }}
     >
-      <PatternArt seed={track.seed} accent={track.accent} />
+      <PatternArt seed={track.seed} />
     </div>
   );
 }
@@ -206,12 +206,7 @@ export function TrackMeta({ track, className, showMaqam = true }: { track: Track
         {artist.name}
       </Link>
       <span aria-hidden>·</span>
-      {showMaqam ? (
-        <span className="tabular-nums">
-          {maqamLabel(track.maqam)}
-          {track.duff ? "" : " · vocals only"}
-        </span>
-      ) : null}
+      {showMaqam ? <span className="tabular-nums">{maqamLabel(track.maqam)}</span> : null}
       <span aria-hidden>·</span>
       <span className="tabular-nums">{formatTime(durationOf(track))}</span>
     </div>

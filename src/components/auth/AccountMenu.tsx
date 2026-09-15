@@ -52,7 +52,7 @@ export function AccountMenu() {
           title={`@${account.handle}`}
           className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full ring-1 ring-line2 transition-shadow hover:ring-jade/50 no-hover:ring-jade/40"
         >
-          <PatternArt seed={account.seed} accent="jade" showVignette={false} />
+          <PatternArt seed={account.seed} showVignette={false} />
           <span className="absolute inset-x-0 bottom-0 h-[3px] bg-jade/80" aria-hidden />
         </button>
       )}

@@ -9,7 +9,6 @@
  */
 
 import { chance, intRange, mulberry32, hashString, pick, range, type Rng } from "../prng";
-import type { Accent } from "../../data/types";
 
 export type ArtMotif = "rosette" | "girih" | "mashrabiya" | "zellige" | "mihrab" | "kufic";
 
@@ -32,13 +31,13 @@ type Palette = {
   glow: string;
 };
 
-const PALETTES: Record<Accent, Palette> = {
-  jade: { bg0: "#05120E", bg1: "#0F3126", ink: "#3FD3A0", accent: "#E6CB8B", glow: "#2FBF8F" },
-  gold: { bg0: "#130D04", bg1: "#31250D", ink: "#E6CB8B", accent: "#3FD3A0", glow: "#D9B871" },
-  turq: { bg0: "#03141A", bg1: "#0C3039", ink: "#4FD6CE", accent: "#F0DCA8", glow: "#35B7B0" },
-  madder: { bg0: "#170906", bg1: "#35150E", ink: "#E08363", accent: "#F0DCA8", glow: "#C4644A" },
-  cobalt: { bg0: "#060B19", bg1: "#132348", ink: "#7FA3E8", accent: "#E6CB8B", glow: "#4A76C9" },
-};
+const PALETTES: Palette[] = [
+  { bg0: "#05120E", bg1: "#0F3126", ink: "#3FD3A0", accent: "#E6CB8B", glow: "#2FBF8F" },
+  { bg0: "#130D04", bg1: "#31250D", ink: "#E6CB8B", accent: "#3FD3A0", glow: "#D9B871" },
+  { bg0: "#03141A", bg1: "#0C3039", ink: "#4FD6CE", accent: "#F0DCA8", glow: "#35B7B0" },
+  { bg0: "#170906", bg1: "#35150E", ink: "#E08363", accent: "#F0DCA8", glow: "#C4644A" },
+  { bg0: "#060B19", bg1: "#132348", ink: "#7FA3E8", accent: "#E6CB8B", glow: "#4A76C9" },
+];
 
 export type Shape = {
   d: string;
@@ -262,13 +261,18 @@ const BUILDERS: Record<ArtMotif, (rng: Rng) => { shapes: Shape[]; dots: Dot[] }>
   kufic,
 };
 
-export function planArt(seed: string, accent: Accent, motif?: ArtMotif): ArtPlan {
+/**
+ * Draw a cover. The palette is chosen from the seed rather than stored against the
+ * nasheed: the same nasheed always gets the same colours, and nothing has to keep a
+ * colour in the database.
+ */
+export function planArt(seed: string, motif?: ArtMotif): ArtPlan {
   const rng = mulberry32(hashString(`art:${seed}`));
   const chosen = motif ?? pick(rng, MOTIFS);
   const built = BUILDERS[chosen](rng);
   return {
     motif: chosen,
-    palette: PALETTES[accent],
+    palette: PALETTES[hashString(`palette:${seed}`) % PALETTES.length]!,
     shapes: built.shapes,
     dots: built.dots,
     rotation: chance(rng, 0.5) ? range(rng, -8, 8) : 0,

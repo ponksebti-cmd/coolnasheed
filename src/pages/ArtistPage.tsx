@@ -28,7 +28,7 @@ export default function ArtistPage() {
       <EmptyState
         icon="user"
         title="No such reciter"
-        msg="Everyone in this catalogue is fictional, but even they have correct URLs."
+        msg="That publisher is not in the catalogue — nothing here is invented, so an empty shelf is empty."
         action={
           <Link to="/" className="btn btn-primary mt-2 !px-4 !py-2.5">
             <Icon name="home" size={14} /> Home
@@ -50,7 +50,7 @@ export default function ArtistPage() {
       {/* artist hero */}
       <section className="relative overflow-hidden rounded-3xl border border-line">
         <div className="absolute inset-0 scale-[1.6] opacity-60 blur-[3px]">
-          <PatternArt seed={artist.seed} accent={artist.accent} motif="rosette" intensity={1} />
+          <PatternArt seed={artist.seed} motif="rosette" intensity={1} />
         </div>
         <div className="absolute inset-0 bg-gradient-to-t from-bg via-[rgba(4,11,9,0.72)] to-[rgba(4,11,9,0.5)]" />
         <div className="grain absolute inset-0" />
@@ -58,7 +58,7 @@ export default function ArtistPage() {
         <div className="relative flex flex-col gap-6 p-6 md:flex-row md:items-end md:p-9">
           <Reveal className="shrink-0">
             <div className="relative h-[150px] w-[150px] overflow-hidden rounded-full ring-1 ring-line2 shadow-[0_30px_80px_-30px_rgba(0,0,0,1)] md:h-[186px] md:w-[186px]">
-              <PatternArt seed={artist.seed} accent={artist.accent} motif="rosette" />
+              <PatternArt seed={artist.seed} motif="rosette" />
               <span className="absolute inset-0 rounded-full shadow-[inset_0_0_50px_rgba(0,0,0,0.6)]" />
               {artist.verified ? (
                 <span className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line2 bg-elev/90 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wider text-jade backdrop-blur">

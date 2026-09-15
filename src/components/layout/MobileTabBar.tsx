@@ -80,7 +80,7 @@ export function MobileTabBar() {
               aria-label="Your profile"
             >
               <span className="grid h-6 w-6 place-items-center overflow-hidden rounded-full ring-1 ring-line2">
-                <PatternArt seed={account.seed} accent="jade" showVignette={false} />
+                <PatternArt seed={account.seed} showVignette={false} />
               </span>
               <span className="text-[9.5px] font-bold uppercase tracking-[0.12em]">You</span>
             </NavLink>

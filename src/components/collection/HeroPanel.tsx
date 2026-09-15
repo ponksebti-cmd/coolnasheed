@@ -3,7 +3,7 @@ import { PatternArt } from "../art/PatternArt";
 import { Icon, type IconName } from "../ui/Icons";
 import { Reveal } from "../ui/Primitives";
 import { PlayFab } from "../track/TrackBits";
-import type { Accent, Track } from "../../data/types";
+import type { Track } from "../../data/types";
 import { durationOf } from "../../data/catalog";
 import { formatTotal } from "../../lib/format";
 
@@ -16,7 +16,6 @@ export function HeroPanel({
   curator,
   blurb,
   seed,
-  accent,
   tracks,
   playing,
   onPlay,
@@ -32,7 +31,6 @@ export function HeroPanel({
   curator?: string;
   blurb?: string;
   seed: string;
-  accent: Accent;
   tracks: Track[];
   playing: boolean;
   onPlay: () => void;
@@ -48,7 +46,7 @@ export function HeroPanel({
   return (
     <section className={clsx("relative overflow-hidden rounded-2xl border border-line", big ? "min-h-[380px]" : "min-h-[280px]")}>
       <div className="absolute inset-0 scale-[1.35] blur-[2px] opacity-70">
-        <PatternArt seed={seed} accent={accent} intensity={1} />
+        <PatternArt seed={seed} intensity={1} />
       </div>
       <div className="absolute inset-0 bg-gradient-to-r from-[rgba(4,11,9,0.94)] via-[rgba(4,11,9,0.82)] to-[rgba(4,11,9,0.5)]" />
       <div className="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-transparent" />
@@ -62,7 +60,7 @@ export function HeroPanel({
               big ? "h-[164px] w-[164px] md:h-[208px] md:w-[208px]" : "h-[132px] w-[132px] md:h-[164px] md:w-[164px]",
             )}
           >
-            <PatternArt seed={seed} accent={accent} />
+            <PatternArt seed={seed} />
             <div className="absolute inset-0 ring-1 ring-inset ring-white/10" />
           </div>
         </Reveal>

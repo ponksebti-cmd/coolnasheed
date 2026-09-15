@@ -8,7 +8,7 @@ import { useUi } from "../../store/ui";
 import { useCommunity, timeAgoLabel, COMMENT_MAX, type UserComment } from "../../store/community";
 import { useSession } from "../../store/session";
 import type { Track } from "../../data/types";
-import type { Song } from "../../lib/song";
+import type { LyricLine } from "../../data/types";
 import { usePlayer } from "../../store/player";
 
 const REPORT_REASONS = [
@@ -22,17 +22,15 @@ const REPORT_REASONS = [
  * The thread under a nasheed.
  *
  * Every note here is a row on the server, written by an account, with an amīn count that
- * counts real amīns. When the server cannot be reached the thread shows generated notes
- * instead and says so — an offline visit should look like a room, not pretend to be one.
+ * counts real amīns. When the server cannot be reached the thread says so rather than
+ * inventing a roomful of people who never wrote anything.
  */
 export function CommentThread({
   track,
-  song,
   compact = false,
   startAtLine,
 }: {
   track: Track;
-  song?: Song;
   compact?: boolean;
   /** pre-fill "on line N" — the immersive player passes the line you are on */
   startAtLine?: number;
@@ -71,11 +69,11 @@ export function CommentThread({
   }, [thread, compact]);
 
   const jumpToLine = (n: number) => {
-    const line = song?.lines[Math.min((song?.lines.length ?? 1) - 1, n - 1)];
+    const line = track.lines[Math.min(track.lines.length - 1, n - 1)];
     if (!line) return;
     const isCurrent = player.trackId === track.id;
     if (!isCurrent) player.playTrack(track.id, { kind: "home", label: track.title });
-    window.setTimeout(() => player.seek(line.t + 0.05), isCurrent ? 0 : 260);
+    window.setTimeout(() => player.seek((line.t ?? 0) + 0.05), isCurrent ? 0 : 260);
   };
 
   const submit = async () => {
@@ -131,7 +129,7 @@ export function CommentThread({
         <div className="rounded-xl border border-line bg-surface/60 p-3">
           <div className="flex gap-3">
             <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full ring-1 ring-line2">
-              <PatternArt seed={account.seed} accent="jade" showVignette={false} />
+              <PatternArt seed={account.seed} showVignette={false} />
             </span>
             <div className="min-w-0 flex-1">
               <textarea
@@ -144,12 +142,12 @@ export function CommentThread({
                 aria-label="Leave a note"
               />
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                {song ? (
+                {track.lines.length ? (
                   <button
                     type="button"
                     className={clsx("chip", atLine ? "" : "hover:border-line2 hover:text-text")}
                     data-active={!!atLine}
-                    onClick={() => setAtLine((v) => (v ? undefined : (currentLine(song) ?? 1)))}
+                    onClick={() => setAtLine((v) => (v ? undefined : currentLine(track.lines)))}
                     aria-pressed={!!atLine}
                     title="Pin this note to the line playing now"
                   >
@@ -222,7 +220,7 @@ export function CommentThread({
               className={clsx("flex gap-3 rounded-xl border p-3.5", mine ? "border-jade/28 bg-jade/[0.05]" : "border-line bg-surface/50")}
             >
               <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full ring-1 ring-line2">
-                <PatternArt seed={c.authorSeed} accent={track.accent} showVignette={false} />
+                <PatternArt seed={c.authorSeed} showVignette={false} />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px]">
@@ -237,7 +235,7 @@ export function CommentThread({
                     <Icon name={c.generated ? "sparkle" : "check"} size={9} strokeWidth={3} /> {mine ? "you" : c.generated ? "generated" : "listener"}
                   </span>
                   <span className="text-muted">{timeAgoLabel(c.at)}</span>
-                  {c.atLine && song ? (
+                  {c.atLine ? (
                     <button
                       className="ml-auto flex items-center gap-1 rounded-full border border-line px-2 py-1 text-[10px] text-muted transition-colors hover:border-line2 hover:text-text2"
                       onClick={() => jumpToLine(c.atLine!)}
@@ -358,12 +356,12 @@ export function CommentThread({
 }
 
 /** The line the voice is on right now, 1-based — what "pin to a line" pins to. */
-function currentLine(song: Song): number {
+function currentLine(lines: LyricLine[]): number {
   const t = usePlayer.getState().time;
   let idx = 0;
-  for (let i = 0; i < song.lines.length; i++) {
-    if (song.lines[i]!.t <= t) idx = i;
+  for (let i = 0; i < lines.length; i++) {
+    if ((lines[i]!.t ?? 0) <= t) idx = i;
     else break;
   }
-  return Math.min(song.lines.length, idx + 1);
+  return Math.min(lines.length, idx + 1);
 }

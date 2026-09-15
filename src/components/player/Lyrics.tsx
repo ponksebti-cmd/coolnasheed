@@ -1,10 +1,11 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { Icon } from "../ui/Icons";
-import type { Song } from "../../lib/song";
+import type { TimedLyrics } from "../../lib/lyrics";
 import type { LyricScript } from "../../store/library";
 import { useLibrary } from "../../store/library";
 import { currentTime, usePlayer } from "../../store/player";
+import { lineAt } from "../../lib/lyrics";
 
 const SCRIPT_TABS: { id: LyricScript; label: string }[] = [
   { id: "tr", label: "Transliteration" },
@@ -12,31 +13,12 @@ const SCRIPT_TABS: { id: LyricScript; label: string }[] = [
   { id: "en", label: "English" },
 ];
 
-/** A nasheed sings its words more than once; label the repetitions so they read as structure. */
-const PASS_LABELS = ["", "the answer — a step higher", "the return — settled", "once more", "and again"];
-const passLabel = (pass: number) => PASS_LABELS[pass] ?? `pass ${pass + 1}`;
-
-function findLine(lines: Song["lines"], t: number): number {
-  let lo = 0;
-  let hi = lines.length - 1;
-  let found = -1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    const l = lines[mid]!;
-    if (t >= l.t) {
-      found = mid;
-      lo = mid + 1;
-    } else hi = mid - 1;
-  }
-  return found;
-}
-
 export function Lyrics({
-  song,
+  lyrics,
   variant = "immersive",
   className,
 }: {
-  song: Song;
+  lyrics: TimedLyrics;
   variant?: "immersive" | "inline" | "compact";
   className?: string;
 }) {
@@ -55,7 +37,7 @@ export function Lyrics({
   const seek = usePlayer((s) => s.seek);
   const playing = usePlayer((s) => s.playing);
 
-  const lines = song.lines;
+  const lines = lyrics.lines;
 
   const scrollTo = useCallback((idx: number, smooth = true) => {
     const el = lineRefs.current[idx];
@@ -74,7 +56,7 @@ export function Lyrics({
 
     const frame = () => {
       const t = currentTime();
-      const idx = findLine(lines, t);
+      const idx = lineAt(lines, t);
 
       if (idx !== activeRef.current) {
         // settle the line we just left
@@ -119,10 +101,10 @@ export function Lyrics({
       if (typeof box.scrollTo === "function") box.scrollTo({ top: 0 });
       else box.scrollTop = 0;
     }
-    const first = findLine(lines, currentTime());
+    const first = lineAt(lines, currentTime());
     if (first >= 0) scrollTo(first, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [song.trackId]);
+  }, [lyrics.trackId]);
 
   const registerWord = (key: string) => (el: HTMLSpanElement | null) => {
     if (el) wordRefs.current.set(key, el);
@@ -138,6 +120,7 @@ export function Lyrics({
   };
 
   const big = variant === "immersive";
+  const timed = lines.some((l) => typeof l.line.t === "number");
   const compact = variant === "compact";
 
   const primary = useMemo(() => settings.lyricScript, [settings.lyricScript]);
@@ -202,7 +185,7 @@ export function Lyrics({
           <div className="relative hidden w-6 shrink-0 py-6 sm:block" aria-hidden>
             <div className="absolute bottom-6 left-1/2 top-6 w-px -translate-x-1/2 bg-line2" />
             {lines.map((l, i) => {
-              const pct = l.t / Math.max(1, song.duration);
+              const pct = l.t / Math.max(1, lyrics.duration);
               const isActive = i === active;
               return (
                 <button
@@ -244,17 +227,6 @@ export function Lyrics({
 
             return (
               <Fragment key={i}>
-                {i > 0 && lines[i - 1] && l.pass > lines[i - 1]!.pass ? (
-                  <div
-                    className="mt-6 flex items-center gap-3 px-2 pb-3 text-[9.5px] font-bold uppercase tracking-[0.2em] text-muted/60"
-                    aria-hidden
-                  >
-                    <span className="h-px flex-1 bg-line" />
-                    <Icon name="repeat" size={11} />
-                    <span>{passLabel(l.pass)}</span>
-                    <span className="h-px flex-1 bg-line" />
-                  </div>
-                ) : null}
                 <button
                 ref={(el) => {
                   lineRefs.current[i] = el;
@@ -345,7 +317,11 @@ export function Lyrics({
           <div className={clsx("flex items-center gap-2 px-3 pb-2 pt-6 text-[11px] text-muted", big && "mt-6")}>
             <Icon name="info" size={13} />
             <span>
-              {playing ? "Timing follows the synthesized voice — every syllable is scheduled, so nothing drifts." : "Press play and the words will follow the voice."}
+              {playing
+                ? timed
+                  ? "Timing follows the recording — the publisher set where each line starts."
+                  : "No timings were published for this one, so the lines are spread evenly across the recording."
+                : "Press play and the words will follow the voice."}
             </span>
           </div>
         </div>
@@ -355,18 +331,18 @@ export function Lyrics({
 }
 
 /** A small teaser of the opening lines, used on track pages and cards. */
-export function LyricPreview({ song, count = 3, className }: { song: Song; count?: number; className?: string }) {
+export function LyricPreview({ lyrics, count = 3, className }: { lyrics: TimedLyrics; count?: number; className?: string }) {
   return (
     <div className={clsx("space-y-2", className)}>
-      {song.lines.slice(0, count).map((l, i) => (
+      {lyrics.lines.slice(0, count).map(({ line: l }, i) => (
         <div key={i} className="border-l border-line2 pl-3">
-          {l.line.ar ? (
+          {l.ar ? (
             <div className="arabic text-[1.02rem] text-goldsoft/80" dir="rtl">
-              {l.line.ar}
+              {l.ar}
             </div>
           ) : null}
-          <div className="font-display text-[15px] leading-snug text-text2">{l.line.tr ?? l.line.en}</div>
-          {l.line.en && l.line.tr ? <div className="text-xs italic text-muted">{l.line.en}</div> : null}
+          <div className="font-display text-[15px] leading-snug text-text2">{l.tr ?? l.en}</div>
+          {l.en && l.tr ? <div className="text-xs italic text-muted">{l.en}</div> : null}
         </div>
       ))}
     </div>

@@ -3,14 +3,14 @@ import { Link } from "react-router-dom";
 import { Icon } from "../components/ui/Icons";
 import { PatternArt, AmbientBackdrop } from "../components/art/PatternArt";
 import { Chip, Reveal, SectionHeader, useToast } from "../components/ui/Primitives";
-import { ArtistCard, CollectionCard, MiniTrack, MoodTile, Rail, RailItem } from "../components/collection/Cards";
+import { ArtistCard, CollectionCard, MiniTrack, Rail, RailItem } from "../components/collection/Cards";
+import { EmptyState } from "../components/ui/Primitives";
 import { TrackCardGrid } from "../components/track/TrackViews";
 import { Equalizer, PlayFab } from "../components/track/TrackBits";
 import { RadialSpectrum } from "../components/player/Visualizer";
 import {
   ARTISTS,
   COLLECTIONS,
-  MOODS,
   TRACKS,
   artistOf,
   durationOf,
@@ -28,21 +28,19 @@ import { useUi } from "../store/ui";
 import { generateNurMix } from "../lib/nur";
 import type { Track } from "../data/types";
 
-/** The featured nasheed changes with the hour — the app has a body clock. */
-const HOUR_PICKS: { from: number; to: number; id: string; why: string }[] = [
-  { from: 0, to: 4, id: "laylat-al-qadr", why: "the odd nights are the good ones" },
-  { from: 4, to: 7, id: "city-of-fajr", why: "the minarets are already awake" },
-  { from: 7, to: 12, id: "alhamdulillah", why: "gratitude, before the day gets loud" },
-  { from: 12, to: 16, id: "talaa-al-badru", why: "the oldest welcome song we have" },
-  { from: 16, to: 19, id: "asma-al-husna", why: "the hour between ʿAṣr and Maghrib" },
-  { from: 19, to: 22, id: "nur-ala-nur", why: "light upon light, after ʿIshāʾ" },
-  { from: 22, to: 24, id: "sakina", why: "put the day down" },
+/** The greeting changes with the hour; the featured nasheed is simply the most played. */
+const HOUR_GREETING: { from: number; to: number; why: string }[] = [
+  { from: 0, to: 4, why: "the odd nights are the good ones" },
+  { from: 4, to: 7, why: "the minarets are already awake" },
+  { from: 7, to: 12, why: "gratitude, before the day gets loud" },
+  { from: 12, to: 16, why: "the middle of the day" },
+  { from: 16, to: 19, why: "the hour between ʿAṣr and Maghrib" },
+  { from: 19, to: 22, why: "after ʿIshāʾ" },
+  { from: 22, to: 24, why: "put the day down" },
 ];
 
-function featuredForHour(hour: number): { track: Track; why: string } {
-  const pick = HOUR_PICKS.find((p) => hour >= p.from && hour < p.to) ?? HOUR_PICKS[6]!;
-  return { track: getTrack(pick.id) ?? TRACKS[0]!, why: pick.why };
-}
+const noteForHour = (hour: number): string =>
+  (HOUR_GREETING.find((p) => hour >= p.from && hour < p.to) ?? HOUR_GREETING[6]!).why;
 
 export default function Home() {
   const now = useNow(60_000);
@@ -53,33 +51,49 @@ export default function Home() {
   const setNur = useUi((s) => s.setNur);
   const toast = useToast();
 
-  const { track: featured, why } = useMemo(() => featuredForHour(now.getHours()), [now]);
-  const isFeatured = player.trackId === featured.id;
-
+  const why = noteForHour(now.getHours());
   const trending = useMemo(
     () => [...TRACKS].sort((a, b) => statsFor(b).plays - statsFor(a).plays).slice(0, 8),
     [],
   );
-  const fresh = useMemo(() => [...TRACKS].sort((a, b) => b.year - a.year || b.bpm - a.bpm).slice(0, 10), []);
-  const vocalsOnly = useMemo(() => TRACKS.filter((t) => !t.duff), []);
+  const fresh = useMemo(
+    () => [...TRACKS].sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0)).slice(0, 10),
+    [],
+  );
+  const featured = trending[0] ?? TRACKS[0];
   const recent = useMemo(() => history.slice(0, 10).map((h) => ({ h, track: getTrack(h.id) })).filter((r) => !!r.track) as { h: (typeof history)[number]; track: Track }[], [history]);
 
   const nurPreview = useMemo(() => generateNurMix({ liked, history, size: 5, seedKey: `home-${now.toDateString()}` }), [liked, history, now]);
 
   const lovedTracks = useMemo(() => liked.map((id) => getTrack(id)).filter((t): t is Track => !!t), [liked]);
-  const featuredLoved = useLibrary((s) => s.liked.includes(featured.id));
+  const featuredLoved = useLibrary((s) => (featured ? s.liked.includes(featured.id) : false));
   const toggleLike = useLibrary((s) => s.toggleLike);
+
+  if (!featured) {
+    return (
+      <div className="space-y-8">
+        <SectionHeader label="the catalogue" title="Nothing here yet" />
+        <EmptyState
+          icon="library"
+          title="No nasheeds in the catalogue"
+          msg="This app holds no music of its own — every nasheed is published by an account and streamed from storage. Connect a Supabase project in .env, or publish the first one from the Studio."
+        />
+      </div>
+    );
+  }
+
+  const isFeatured = player.trackId === featured.id;
 
   return (
     <div className="space-y-11">
       {/* ---------------------------------------------------------- hero */}
       <section className="relative overflow-hidden rounded-3xl border border-line">
         <div className="absolute inset-0 scale-[1.5] opacity-80 blur-[2px]">
-          <PatternArt seed={featured.seed} accent={featured.accent} intensity={1.1} />
+          <PatternArt seed={featured.seed} intensity={1.1} />
         </div>
         <div className="absolute inset-0 bg-gradient-to-r from-[rgba(4,11,9,0.95)] via-[rgba(4,11,9,0.82)] to-[rgba(4,11,9,0.35)]" />
         <div className="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-transparent" />
-        <AmbientBackdrop accent={featured.accent} seed="hero" />
+        <AmbientBackdrop seed="hero" />
 
         <div className="relative grid gap-8 p-6 md:p-10 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:items-center">
           <div className="min-w-0">
@@ -106,14 +120,12 @@ export default function Home() {
               <div className="mt-4 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[13px] text-text2">
                 <Link to={`/a/${featured.artistId}`} className="flex items-center gap-2 font-semibold text-text hover:text-jadesoft">
                   <span className="h-6 w-6 overflow-hidden rounded-full ring-1 ring-line2">
-                    <PatternArt seed={artistOf(featured).seed} accent={artistOf(featured).accent} showVignette={false} />
+                    <PatternArt seed={artistOf(featured).seed} showVignette={false} />
                   </span>
                   {artistOf(featured).name}
                 </Link>
                 <span aria-hidden className="text-muted">·</span>
                 <span className="text-muted">{maqamLabel(featured.maqam)}</span>
-                <span aria-hidden className="text-muted">·</span>
-                <span className="text-muted">{featured.bpm} bpm</span>
                 <span aria-hidden className="text-muted">·</span>
                 <span className="text-muted">{formatTime(durationOf(featured))}</span>
                 <span aria-hidden className="text-muted">·</span>
@@ -121,7 +133,7 @@ export default function Home() {
                   <Icon name="waveform" size={12} /> {formatCount(statsFor(featured).plays)} plays
                 </span>
               </div>
-              <p className="mt-4 max-w-[54ch] text-[13.5px] leading-relaxed text-text2/85 text-balance-pretty">{featured.blurb}</p>
+              <p className="mt-4 max-w-[54ch] text-[13.5px] leading-relaxed text-text2/85 text-balance-pretty">{featured.note}</p>
             </Reveal>
 
             <Reveal delay={140}>
@@ -158,14 +170,14 @@ export default function Home() {
               <RadialSpectrum radius={0.66} />
             </div>
             <div className="relative aspect-square overflow-hidden rounded-2xl border border-line2 shadow-[0_50px_110px_-40px_rgba(0,0,0,1)]">
-              <PatternArt seed={featured.seed} accent={featured.accent} intensity={1} />
+              <PatternArt seed={featured.seed} intensity={1} />
               <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-[rgba(3,9,7,0.94)] to-transparent p-4">
                 <div>
                   <div className="label mb-1 flex items-center gap-1.5">
                     {isFeatured && player.playing ? <Equalizer bars={3} className="text-jade" /> : <Icon name="mic" size={11} />}
                     {isFeatured && player.playing ? "on air" : "featured"}
                   </div>
-                  <div className="text-[12px] text-text2">{featured.voices} · {featured.duff ? "with duff" : "vocals only"}</div>
+                  <div className="text-[12px] text-text2">{maqamLabel(featured.maqam)} · {featured.year}</div>
                 </div>
                 <PlayFab
                   playing={isFeatured && player.playing}
@@ -197,7 +209,7 @@ export default function Home() {
                 onClick={() => player.playTrack(track.id, { kind: "home", label: "Recently played" }, recent.map((r) => r.track.id))}
               >
                 <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg ring-1 ring-line">
-                  <PatternArt seed={track.seed} accent={track.accent} showVignette={false} />
+                  <PatternArt seed={track.seed} showVignette={false} />
                   <span className="absolute inset-0 grid place-items-center bg-[rgba(3,10,8,0.6)] opacity-0 transition-opacity group-hover:opacity-100">
                     <Icon name="play" size={15} className="text-text" />
                   </span>
@@ -215,25 +227,11 @@ export default function Home() {
         </Rail>
       ) : null}
 
-      {/* --------------------------------------------------------- moods */}
-      <section>
-        <SectionHeader
-          label="eight ways in"
-          title="What are you listening for?"
-          subtitle="Moods filter the whole catalogue by tempo, maqām and intent."
-        />
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {MOODS.map((m, i) => (
-            <MoodTile key={m.id} mood={m} index={i} />
-          ))}
-        </div>
-      </section>
-
       {/* ---------------------------------------------------------- Nūr */}
       <Reveal>
         <section className="relative overflow-hidden rounded-2xl border border-line2">
           <div className="absolute inset-0 opacity-45">
-            <PatternArt seed={nurPreview.seed} accent={nurPreview.accent} motif="rosette" />
+            <PatternArt seed={nurPreview.seed} motif="rosette" />
           </div>
           <div className="absolute inset-0 bg-gradient-to-r from-[rgba(4,11,9,0.96)] via-[rgba(4,11,9,0.86)] to-[rgba(4,11,9,0.6)]" />
           <div className="relative grid gap-6 p-5 md:p-7 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-center">
@@ -295,7 +293,7 @@ export default function Home() {
         <SectionHeader
           label="this week"
           title="Most played nasheeds"
-          subtitle="Counted across the whole library of listeners, which is to say: made up, but stable."
+          subtitle="Plays counted by the database, one row per listen."
           action={
             <Link to="/search" className="btn btn-ghost !px-3 !py-1.5">
               All tracks <Icon name="chevronRight" size={13} />
@@ -328,7 +326,7 @@ export default function Home() {
 
       {/* -------------------------------------------------- new releases */}
       <section>
-        <SectionHeader label="fresh" title="New from the reciters" subtitle="Sorted by year, then by tempo — the loudest first." />
+        <SectionHeader label="fresh" title="New from the reciters" subtitle="The most recently published first." />
         <TrackCardGrid tracks={fresh} context={{ kind: "home", label: "New releases" }} />
       </section>
 
@@ -340,16 +338,6 @@ export default function Home() {
           </RailItem>
         ))}
       </Rail>
-
-      {/* --------------------------------------------------- vocals only */}
-      <section>
-        <SectionHeader
-          label="no drum, no strings"
-          title="Vocals only"
-          subtitle="For listeners who prefer the voice unaccompanied — every track here has the duff switched off at the source."
-        />
-        <TrackCardGrid tracks={vocalsOnly} context={{ kind: "home", label: "Vocals only" }} />
-      </section>
 
       {/* ---------------------------------------------------- your stuff */}
       {lovedTracks.length || playlists.length ? (
@@ -371,7 +359,7 @@ export default function Home() {
               return (
                 <Link key={pl.id} to={`/p/${pl.id}`} className="card group flex items-center gap-4 p-4">
                   <span className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl ring-1 ring-line2">
-                    <PatternArt seed={pl.seed} accent={pl.accent} motif="girih" />
+                    <PatternArt seed={pl.seed} motif="girih" />
                   </span>
                   <span className="min-w-0">
                     <span className="block truncate text-[14px] font-semibold text-text">{pl.name}</span>
@@ -392,9 +380,8 @@ export default function Home() {
         <div className="hairline mb-5" />
         <div className="flex flex-col gap-3 text-[11.5px] leading-relaxed text-muted sm:flex-row sm:items-center sm:justify-between">
           <p className="max-w-[70ch]">
-            CoolNasheed synthesises every performance in your browser from maqām, tempo and syllables — nothing is streamed,
-            nothing is uploaded, and no one's recording was touched. Qurʾānic lines are marked and their English renderings are
-            meanings, not scripture.
+            Every nasheed here was published by an account: the recording streams from storage and the words come with it.
+            Qurʾānic lines are marked, and their English renderings are meanings, not scripture.
           </p>
           <div className="flex shrink-0 items-center gap-2">
             <Chip>

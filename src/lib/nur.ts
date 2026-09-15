@@ -2,7 +2,7 @@
  * Nūr — the on-device curator.
  *
  * A small, honest recommender: it builds a taste vector from your likes and
- * recent plays (tags, maqām, tempo, artist), scores the catalogue against it,
+ * recent plays (tags, maqām, publisher), scores the catalogue against it,
  * then greedily picks a mix with diversity constraints and writes a reason for
  * every choice. Everything runs locally and deterministically from a seed, so
  * the same night produces the same mix.
@@ -12,10 +12,11 @@
  */
 
 import { TRACKS, artistOf, durationOf, getTrack, statsFor } from "../data/catalog";
-import type { Accent, Track } from "../data/types";
+import type { Track } from "../data/types";
 import type { HistoryEntry } from "../store/library";
 import { MAQAMAT, maqamLabel, type MaqamName } from "./theory";
 import { hashString, mulberry32, pick, shuffle } from "./prng";
+import { formatTime } from "./format";
 
 export type NurPick = { track: Track; reason: string; score: number };
 
@@ -25,7 +26,6 @@ export type NurMix = {
   titleAr: string;
   blurb: string;
   mood: string;
-  accent: Accent;
   seed: string;
   picks: NurPick[];
   trackIds: string[];
@@ -45,30 +45,29 @@ const TITLES = [
   { en: "Green Hour", ar: "الساعة الخضراء" },
   { en: "After the Guests Leave", ar: "بعد أن يغادر الضيوف" },
   { en: "Ninety-Nine Quiet Things", ar: "تسعة وتسعون شيئًا هادئًا" },
-  { en: "The Drum Stays Home", ar: "الدفّ يبقى في البيت" },
+  { en: "Voices Only", ar: "أصوات فقط" },
 ];
 
 const MOODS = [
-  { id: "still", label: "stillness", accent: "turq" as Accent, want: (t: Track) => t.bpm <= 72 || t.tags.includes("stillness") },
-  { id: "longing", label: "longing", accent: "madder" as Accent, want: (t: Track) => ["hijaz", "bayati", "saba", "kurd"].includes(t.maqam) },
-  { id: "praise", label: "praise", accent: "jade" as Accent, want: (t: Track) => t.tags.includes("salawat") || t.tags.includes("praise") },
-  { id: "dhikr", label: "repetition", accent: "gold" as Accent, want: (t: Track) => t.tags.includes("dhikr") },
-  { id: "dawn", label: "dawn", accent: "cobalt" as Accent, want: (t: Track) => t.tags.includes("dawn") || t.tags.includes("morning") },
-  { id: "night", label: "night", accent: "cobalt" as Accent, want: (t: Track) => t.tags.includes("night") || t.tags.includes("sleep") },
-  { id: "joy", label: "ʿīd energy", accent: "jade" as Accent, want: (t: Track) => t.bpm >= 90 || t.tags.includes("celebration") },
-  { id: "quran", label: "āyāt", accent: "turq" as Accent, want: (t: Track) => t.tags.includes("quran") },
+  { id: "still", label: "stillness", want: (t: Track) => t.tags.includes("stillness") || t.tags.includes("calm") },
+  { id: "longing", label: "longing", want: (t: Track) => ["hijaz", "bayati", "saba", "kurd"].includes(t.maqam) },
+  { id: "praise", label: "praise", want: (t: Track) => t.tags.includes("salawat") || t.tags.includes("praise") },
+  { id: "dhikr", label: "repetition", want: (t: Track) => t.tags.includes("dhikr") },
+  { id: "dawn", label: "dawn", want: (t: Track) => t.tags.includes("dawn") || t.tags.includes("morning") },
+  { id: "night", label: "night", want: (t: Track) => t.tags.includes("night") || t.tags.includes("sleep") },
+  { id: "joy", label: "ʿīd energy", want: (t: Track) => t.tags.includes("celebration") || t.tags.includes("eid") },
+  { id: "quran", label: "āyāt", want: (t: Track) => t.tags.includes("quran") },
 ];
 
 export type Taste = {
   tags: Record<string, number>;
   maqam: Record<string, number>;
   artists: Record<string, number>;
-  bpm: { sum: number; weight: number };
   plays: number;
 };
 
 export function buildTaste(liked: string[], history: HistoryEntry[]): Taste {
-  const taste: Taste = { tags: {}, maqam: {}, artists: {}, bpm: { sum: 0, weight: 0 }, plays: 0 };
+  const taste: Taste = { tags: {}, maqam: {}, artists: {}, plays: 0 };
   const bump = (map: Record<string, number>, key: string, amount: number) => {
     map[key] = (map[key] ?? 0) + amount;
   };
@@ -79,8 +78,6 @@ export function buildTaste(liked: string[], history: HistoryEntry[]): Taste {
     bump(taste.artists, t.artistId, 1.6);
     bump(taste.maqam, t.maqam, 1.4);
     t.tags.forEach((tag) => bump(taste.tags, tag, 1));
-    taste.bpm.sum += t.bpm * 1.2;
-    taste.bpm.weight += 1.2;
     taste.plays += 1.2;
   });
 
@@ -94,8 +91,6 @@ export function buildTaste(liked: string[], history: HistoryEntry[]): Taste {
     bump(taste.artists, t.artistId, w * 0.9);
     bump(taste.maqam, t.maqam, w);
     t.tags.forEach((tag) => bump(taste.tags, tag, w * 0.7));
-    taste.bpm.sum += t.bpm * w;
-    taste.bpm.weight += w;
     taste.plays += w;
   });
 
@@ -123,10 +118,6 @@ function scoreTrack(t: Track, taste: Taste, mood: (typeof MOODS)[number]): numbe
   score += (taste.maqam[t.maqam] ?? 0) * 0.85;
   score += (taste.artists[t.artistId] ?? 0) * 0.45;
 
-  if (taste.bpm.weight > 0) {
-    const target = taste.bpm.sum / taste.bpm.weight;
-    score += Math.max(0, 2.2 - Math.abs(target - t.bpm) / 9);
-  }
   if (mood.want(t)) score += 1.9;
 
   // a little novelty: unheard artists get a nudge, mega-heard ones get a rest
@@ -135,7 +126,7 @@ function scoreTrack(t: Track, taste: Taste, mood: (typeof MOODS)[number]): numbe
   if (artistWeight > 6) score -= 1.2;
 
   const stats = statsFor(t);
-  score += Math.log10(stats.plays / 10_000) * 0.22;
+  score += Math.log10((stats.plays + 10) / 10_000) * 0.22;
   return score;
 }
 
@@ -156,17 +147,9 @@ function reasonFor(t: Track, taste: Taste, mood: (typeof MOODS)[number], rng: ()
   } else {
     options.push(`Your listening leans ${maqam}; this is ${MAQAMAT[t.maqam].mood}.`);
   }
-  if (taste.bpm.weight > 0) {
-    const target = Math.round(taste.bpm.sum / taste.bpm.weight);
-    const delta = t.bpm - target;
-    options.push(
-      `${t.bpm} bpm against your average of ${target} — ${Math.abs(delta) <= 3 ? "right where you live" : delta > 0 ? "a little faster than you usually go" : "slower than you usually go"}.`,
-    );
-  }
   if (mood.want(t)) options.push(`Matches the ${mood.label} you have been circling all week.`);
-  if (!t.duff) options.push("No duff at all. Only voices, which is how you have been playing things lately.");
-  if (t.voices === "choir") options.push(`Full choir from ${artist.name}, ${t.bpm} bpm — good for a room with too much furniture.`);
-  if (t.voices === "solo") options.push(`One voice, no duff, ${durationOf(t) > 150 ? "longer than you might expect" : "short enough to repeat"} — ${artist.name} at their plainest.`);
+  if (durationOf(t) > 0 && durationOf(t) < 180) options.push(`Short enough to repeat — ${formatTime(durationOf(t))} from ${artist.name}.`);
+  if (durationOf(t) >= 360) options.push(`Long enough to sit inside: ${formatTime(durationOf(t))}.`);
   const line = t.lines.find((l) => l.note?.startsWith("Qurʾān"));
   if (line) options.push(`Line ${t.lines.indexOf(line) + 1} is ${line.note}, sung rather than recited.`);
   options.push(`Because ${pick(rng, t.tags)} is doing a lot of work in your history right now.`);
@@ -181,12 +164,12 @@ function mixBlurb(mood: (typeof MOODS)[number], taste: Taste, count: number, rng
   const openers = [
     `${count} tracks leaning ${mood.label}, built from ${taste.plays < 1 ? "almost nothing — you are new here" : `a taste that keeps choosing ${topTag}`}.`,
     `Assembled around ${mood.label} and ${maqamText}. Nothing here is loud about itself.`,
-    `A ${mood.label} set in ${maqamText}, ordered so the tempo falls rather than rises.`,
+    `A ${mood.label} set in ${maqamText}.`,
   ];
   const closers = [
     "Play it while the house is still awake.",
     "Best after ʿIshāʾ, worse while driving.",
-    "The drum enters late and apologises.",
+    "Ordered so the quiet ones land last.",
     "Nothing here needs you to feel something on schedule.",
   ];
   return `${pick(rng, openers)} ${pick(rng, closers)}`;
@@ -236,10 +219,7 @@ export function generateNurMix(opts: {
     picks.push({ track: t, score: 0.4, reason: "One wildcard. I am a small model and I like surprises." });
   }
 
-  // order the mix so the tempo arc settles downward
-  const ordered = picks
-    .slice()
-    .sort((a, b) => b.track.bpm - a.track.bpm);
+  const ordered = picks;
 
   const title = pick(rng, TITLES);
   const duration = ordered.reduce((sum, p) => sum + durationOf(p.track), 0);
@@ -250,7 +230,6 @@ export function generateNurMix(opts: {
     titleAr: title.ar,
     blurb: mixBlurb(mood, taste, ordered.length, rng),
     mood: mood.label,
-    accent: mood.accent,
     seed: `nur-${seedKey}`,
     picks: ordered,
     trackIds: ordered.map((p) => p.track.id),
@@ -266,10 +245,10 @@ export function whyThis(track: Track, liked: string[], history: HistoryEntry[]):
   return reasonFor(track, taste, dominantMood(taste), rng);
 }
 
-export const NUR_MOODS = MOODS.map((m) => ({ id: m.id, label: m.label, accent: m.accent }));
+export const NUR_MOODS = MOODS.map((m) => ({ id: m.id, label: m.label }));
 
 export const NUR_VOICE = [
   "I am Nūr. I keep your listening in a small notebook and I am very pleased with it.",
   "Everything I know about your taste lives in this browser. It is not much. It is enough.",
-  "I cannot hear the tracks — I synthesise them for you and then take the credit.",
+  "I only know what you have played, what you loved, and the maqām of each of them.",
 ];

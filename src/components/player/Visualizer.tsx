@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
 import { clsx } from "clsx";
-import { engine } from "../../lib/audio/engine";
+import { player } from "../../lib/audio/player";
 import { usePlayer } from "../../store/player";
 
 /**
- * Live spectrum drawn from the engine's AnalyserNode — the bars are the actual
- * synthesized voices, not a fake animation.
+ * Live spectrum drawn from the AnalyserNode on the audio element — the bars are the
+ * recording that is playing, not a fake animation.
  */
 export function RadialSpectrum({ className, bars = 84, radius = 0.72 }: { className?: string; bars?: number; radius?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -35,7 +35,7 @@ export function RadialSpectrum({ className, bars = 84, radius = 0.72 }: { classN
     ro?.observe(canvas);
 
     const draw = () => {
-      const spec = engine.readSpectrum();
+      const spec = player.readSpectrum();
       const cx = w / 2;
       const cy = h / 2;
       const base = (Math.min(w, h) / 2) * radius;
@@ -130,7 +130,7 @@ export function BarSpectrum({ className, bars = 48 }: { className?: string; bars
     ro?.observe(canvas);
 
     const draw = () => {
-      const spec = engine.readSpectrum();
+      const spec = player.readSpectrum();
       const w = canvas.width;
       const h = canvas.height;
       ctx.clearRect(0, 0, w, h);

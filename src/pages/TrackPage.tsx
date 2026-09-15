@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
-import { clsx } from "clsx";
 import { Icon } from "../components/ui/Icons";
 import { PatternArt } from "../components/art/PatternArt";
 import { EmptyState, Reveal, SectionHeader, useToast } from "../components/ui/Primitives";
@@ -8,11 +7,10 @@ import { RadialSpectrum } from "../components/player/Visualizer";
 import { Lyrics, LyricPreview } from "../components/player/Lyrics";
 import { TrackCardGrid } from "../components/track/TrackViews";
 import { Equalizer, LikeButton, PlayFab } from "../components/track/TrackBits";
-import { SpaceMenu } from "../components/player/Transport";
 import { MOTIF_LABEL, planArt } from "../lib/art/pattern";
 import { TRACKS, artistOf, collectionsOf, durationOf, formatCount, getTrack, statsFor } from "../data/catalog";
-import { songFor } from "../lib/song";
-import { MAQAMAT, hasQuarterTones, maqamLabel, noteName } from "../lib/theory";
+import { timedLyrics } from "../lib/lyrics";
+import { MAQAMAT, hasQuarterTones, maqamLabel } from "../lib/theory";
 import { formatTime, plural, relativeTime } from "../lib/format";
 import { CommentThread } from "../components/track/CommentThread";
 import { useCommunity } from "../store/community";
@@ -28,15 +26,15 @@ export default function TrackPage() {
   const thread = useCommunity((s) => (id ? s.threads[id] : undefined));
   const toast = useToast();
 
-  const song = useMemo(() => (track ? songFor(track) : null), [track]);
-  const plan = useMemo(() => (track ? planArt(track.seed, track.accent) : null), [track]);
+  const lyrics = useMemo(() => (track ? timedLyrics(track.id, track.lines, durationOf(track)) : null), [track]);
+  const plan = useMemo(() => (track ? planArt(track.seed) : null), [track]);
 
-  if (!track || !song || !plan) {
+  if (!track || !lyrics || !plan) {
     return (
       <EmptyState
         icon="waveform"
         title="No such nasheed"
-        msg="The link points at something that was never recorded, synthesised or imagined."
+        msg="The link points at a nasheed that is not in the catalogue."
         action={
           <Link to="/" className="btn btn-primary mt-2 !px-4 !py-2.5">
             <Icon name="home" size={14} /> Home
@@ -87,17 +85,17 @@ export default function TrackPage() {
                 <RadialSpectrum radius={0.68} />
               </div>
               <div className="relative aspect-square overflow-hidden rounded-2xl border border-line2 shadow-[0_40px_100px_-40px_rgba(0,0,0,1)]">
-                <PatternArt seed={track.seed} accent={track.accent} intensity={1} />
+                <PatternArt seed={track.seed} intensity={1} />
                 <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-[rgba(3,9,7,0.94)] to-transparent p-4">
                   <div className="min-w-0">
                     <div className="label mb-1">{MOTIF_LABEL[plan.motif]}</div>
                     <div className="truncate text-[12px] text-text2">
                       {isCurrent && player.playing ? (
                         <span className="flex items-center gap-1.5 text-jade">
-                          <Equalizer bars={3} /> synthesising live
+                          <Equalizer bars={3} /> playing
                         </span>
                       ) : (
-                        `${song.notes.length} notes · ${song.lines.length} lines`
+                        `${plural(lyrics.lines.length, "line")} · ${formatTime(durationOf(track))}`
                       )}
                     </div>
                   </div>
@@ -117,13 +115,13 @@ export default function TrackPage() {
               ) : null}
               <Link to={`/a/${artist.id}`} className="mt-2.5 flex items-center gap-2.5 text-[14px] font-semibold text-text2 hover:text-text">
                 <span className="h-7 w-7 overflow-hidden rounded-full ring-1 ring-line2">
-                  <PatternArt seed={artist.seed} accent={artist.accent} showVignette={false} />
+                  <PatternArt seed={artist.seed} showVignette={false} />
                 </span>
                 {artist.name}
                 <span className="text-[11.5px] font-normal text-muted">{artist.role}</span>
               </Link>
 
-              <p className="mt-3 text-[13px] leading-relaxed text-muted text-balance-pretty">{track.blurb}</p>
+              <p className="mt-3 text-[13px] leading-relaxed text-muted text-balance-pretty">{track.note}</p>
 
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 <button className="btn btn-primary !px-5 !py-3" onClick={play}>
@@ -159,19 +157,17 @@ export default function TrackPage() {
               </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-2">
-                <button
-                  className={clsx("btn !px-3 !py-2", library.settings.duff ? "btn-gold" : "btn-ghost")}
-                  onClick={() => player.setDuff(!library.settings.duff)}
-                  aria-pressed={library.settings.duff}
-                  title="Toggle the frame drum"
-                >
-                  <Icon name="drum" size={14} />
-                  {library.settings.duff ? "Duff on" : "Vocals only"}
-                </button>
-                <SpaceMenu />
                 <span className="chip !normal-case !tracking-normal">
-                  <Icon name="mic" size={11} /> {track.voices}
+                  <Icon name="compass" size={11} /> {maqamLabel(track.maqam)}
                 </span>
+                <span className="chip !normal-case !tracking-normal">
+                  <Icon name="clock" size={11} /> {formatTime(durationOf(track))}
+                </span>
+                {track.audioUrl ? null : (
+                  <span className="chip !normal-case !tracking-normal text-madder">
+                    <Icon name="info" size={11} /> no recording attached
+                  </span>
+                )}
               </div>
             </div>
           </Reveal>
@@ -182,10 +178,8 @@ export default function TrackPage() {
               <Cell k="Plays" v={formatCount(stats.plays)} />
               <Cell k="Loved by" v={formatCount(stats.likes)} />
               <Cell k="Maqām" v={maqamLabel(track.maqam)} />
-              <Cell k="Tonic" v={noteName(track.root)} />
-              <Cell k="Tempo" v={`${track.bpm} bpm`} />
+              <Cell k="Notes" v={formatCount(stats.notes)} />
               <Cell k="Length" v={formatTime(durationOf(track))} />
-              <Cell k="Bars" v={String(song.bars)} />
               <Cell k="Year" v={String(track.year)} />
             </dl>
           </Reveal>
@@ -194,8 +188,8 @@ export default function TrackPage() {
             <p className="mt-3 flex items-start gap-2 rounded-xl border border-gold/25 bg-gold/[0.06] px-3.5 py-2.5 text-[11.5px] leading-relaxed text-text2">
               <Icon name="info" size={13} className="mt-px shrink-0 text-gold" />
               <span>
-                {MAQAMAT[track.maqam].name} uses quarter tones. The synthesiser tunes to fractional semitones, so what you hear
-                is not a piano's approximation of it.
+                {MAQAMAT[track.maqam].name} uses quarter tones — intervals a piano cannot play, which is why this mode sounds
+                the way it does.
               </span>
             </p>
           ) : null}
@@ -207,7 +201,7 @@ export default function TrackPage() {
             <SectionHeader
               label="line by line"
               title="Lyrics"
-              subtitle={`${plural(song.lines.length, "line")} · follow the voice, or click any line to jump there`}
+              subtitle={`${plural(lyrics.lines.length, "line")} · follow the voice, or click any line to jump there`}
               action={
                 <button className="btn btn-ghost !px-3 !py-1.5" onClick={() => player.setImmersive(true)}>
                   <Icon name="expand" size={13} /> Immersive
@@ -216,10 +210,10 @@ export default function TrackPage() {
             />
             <div className="panel relative overflow-hidden rounded-2xl p-4 sm:p-5">
               <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 opacity-[0.10]">
-                <PatternArt seed={`${track.seed}-lyrics`} accent={track.accent} motif="mihrab" />
+                <PatternArt seed={`${track.seed}-lyrics`} motif="mihrab" />
               </div>
               <div className="relative h-[min(66vh,560px)]">
-                <Lyrics song={song} variant="inline" />
+                <Lyrics lyrics={lyrics} variant="inline" />
               </div>
             </div>
           </section>
@@ -229,7 +223,7 @@ export default function TrackPage() {
             <Reveal>
               <section className="rounded-2xl border border-line bg-surface/50 p-5">
                 <div className="label mb-3">how it opens</div>
-                <LyricPreview song={song} count={3} />
+                <LyricPreview lyrics={lyrics} count={3} />
                 <button className="btn btn-ghost mt-4 !px-4 !py-2" onClick={play}>
                   <Icon name="play" size={14} strokeWidth={2.2} /> Hear these lines
                 </button>
@@ -241,10 +235,10 @@ export default function TrackPage() {
           <section>
             <SectionHeader
               label="notes"
-              title={`${plural(noteCount + stats.comments, "note")}`}
-              subtitle="Notes from accounts are real and stay on this device. The rest are generated for the demo, and say so."
+              title={`${plural(noteCount, "note")}`}
+              subtitle="Every note here was written by an account. Nothing is invented."
             />
-            <CommentThread track={track} song={song} />
+            <CommentThread track={track} />
           </section>
 
           {sets.length ? (
@@ -254,7 +248,7 @@ export default function TrackPage() {
                 {sets.map((c) => (
                   <Link key={c.id} to={`/c/${c.id}`} className="card flex items-center gap-3 !rounded-xl px-3 py-2.5">
                     <span className="h-9 w-9 shrink-0 overflow-hidden rounded-lg ring-1 ring-line">
-                      <PatternArt seed={c.seed} accent={c.accent} showVignette={false} />
+                      <PatternArt seed={c.seed} showVignette={false} />
                     </span>
                     <span className="min-w-0">
                       <span className="block max-w-[22ch] truncate text-[12.5px] font-semibold text-text">{c.title}</span>

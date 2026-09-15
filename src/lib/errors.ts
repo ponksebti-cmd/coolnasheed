@@ -28,7 +28,7 @@ export class ApiUnreachable extends ApiError {
 }
 
 /**
- * The app is running with no Supabase credentials, so the bundled catalogue is all
+ * The app is running with no Supabase credentials, so an empty catalogue is all
  * there is. Listening and searching work; anything that writes cannot. The UI turns
  * this into "connect a project" rather than a red failure.
  */

@@ -17,8 +17,6 @@ import { hasServiceKey, serviceClient } from "../_shared/db.ts";
 import { HttpError, json, readBody, serve } from "../_shared/json.ts";
 import { ARTWORK_BUCKET, AUDIO_BUCKET, type ProfileInput } from "../../../shared/types.ts";
 
-const ACCENTS = ["jade", "gold", "turq", "madder", "cobalt"] as const;
-
 /** Everything in both buckets that belongs to one uid folder. */
 async function ownedFiles(client: ReturnType<typeof serviceClient>, ownerId: string) {
   const found: { bucket: string; paths: string[] }[] = [];
@@ -68,13 +66,6 @@ Deno.serve(
       const city = clean(body.city, "city", 60);
       if (city !== undefined) update.city = city;
 
-      if (body.accent !== undefined) {
-        if (typeof body.accent !== "string" || !ACCENTS.includes(body.accent as (typeof ACCENTS)[number])) {
-          throw new HttpError(`An accent is one of: ${ACCENTS.join(", ")}.`, 400, "accent");
-        }
-        update.accent = body.accent;
-      }
-
       if (body.handle !== undefined) {
         const handle = String(body.handle).trim().toLowerCase();
         if (!/^[a-z0-9._]{3,20}$/.test(handle)) {
@@ -96,7 +87,7 @@ Deno.serve(
         .from("profiles")
         .update(update)
         .eq("id", caller.id)
-        .select("id, handle, name, name_ar, tagline, bio, city, seed, accent, role, kind, verified, created_at")
+        .select("id, handle, name, name_ar, tagline, bio, city, seed, role, kind, verified, created_at")
         .single();
       if (error) throw new HttpError(`That would not save: ${error.message}`, 400);
 

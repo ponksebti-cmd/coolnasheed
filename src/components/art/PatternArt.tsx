@@ -1,6 +1,5 @@
 import { useId, useMemo } from "react";
 import { planArt, type ArtMotif, MOTIF_LABEL } from "../../lib/art/pattern";
-import type { Accent } from "../../data/types";
 import { clsx } from "clsx";
 
 const MAX_SHAPES = 240;
@@ -8,7 +7,6 @@ const MAX_DOTS = 240;
 
 type Props = {
   seed: string;
-  accent: Accent;
   motif?: ArtMotif;
   className?: string;
   /** 0 = flat, 1 = full glow */
@@ -17,9 +15,9 @@ type Props = {
   title?: string;
 };
 
-export function PatternArt({ seed, accent, motif, className, intensity = 0.85, showVignette = true }: Props) {
+export function PatternArt({ seed, motif, className, intensity = 0.85, showVignette = true }: Props) {
   const uid = useId().replace(/[:]/g, "");
-  const plan = useMemo(() => planArt(seed, accent, motif), [seed, accent, motif]);
+  const plan = useMemo(() => planArt(seed, motif), [seed, motif]);
   const p = plan.palette;
   const shapes = plan.shapes.slice(0, MAX_SHAPES);
   const dots = plan.dots.slice(0, MAX_DOTS);
@@ -108,8 +106,8 @@ export function StarMark({ size = 30, className }: { size?: number; className?: 
 }
 
 /** Full-bleed ambient backdrop: two slow-drifting glows + a faint tile field. */
-export function AmbientBackdrop({ accent = "jade", seed = "home" }: { accent?: Accent; seed?: string }) {
-  const plan = useMemo(() => planArt(`backdrop-${seed}`, accent, "girih"), [accent, seed]);
+export function AmbientBackdrop({ seed = "home" }: { seed?: string }) {
+  const plan = useMemo(() => planArt(`backdrop-${seed}`, "girih"), [seed]);
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
       <div

@@ -5,7 +5,7 @@ import { EmptyState, Reveal, SectionHeader } from "../components/ui/Primitives";
 import { HeroPanel } from "../components/collection/HeroPanel";
 import { CollectionCard, Rail, RailItem } from "../components/collection/Cards";
 import { TrackList } from "../components/track/TrackViews";
-import { COLLECTIONS, artistOf, formatCount, getCollection, statsFor, tracksOf } from "../data/catalog";
+import { COLLECTIONS, artistOf, formatCount, getCollection, statsFor, totalDuration, tracksOf } from "../data/catalog";
 import { maqamLabel } from "../lib/theory";
 import { plural } from "../lib/format";
 import { usePlayer } from "../store/player";
@@ -53,7 +53,6 @@ export default function CollectionPage() {
         curator={collection.curator}
         blurb={collection.blurb}
         seed={collection.seed}
-        accent={collection.accent}
         tracks={tracks}
         playing={inSet && player.playing}
         onPlay={() => {
@@ -104,10 +103,10 @@ export default function CollectionPage() {
           <Stat label="Reciters" value={artists.length} detail={artists.slice(0, 3).join(" · ")} icon="user" />
           <Stat label="Modes used" value={maqams.length} detail={maqams.slice(0, 4).join(" · ")} icon="compass" />
           <Stat
-            label="With duff"
-            value={tracks.filter((t) => t.duff).length}
-            detail={`${tracks.filter((t) => !t.duff).length} vocals only`}
-            icon="drum"
+            label="Length"
+            value={Math.round(totalDuration(tracks) / 60)}
+            detail="minutes end to end"
+            icon="clock"
           />
         </section>
       </Reveal>
@@ -125,7 +124,7 @@ export default function CollectionPage() {
   );
 }
 
-function Stat({ label, value, detail, icon }: { label: string; value: number; detail: string; icon: "user" | "compass" | "drum" }) {
+function Stat({ label, value, detail, icon }: { label: string; value: number; detail: string; icon: "user" | "compass" | "clock" }) {
   return (
     <div>
       <div className="label mb-1.5 flex items-center gap-1.5">

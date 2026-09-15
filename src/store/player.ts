@@ -1,8 +1,14 @@
+/**
+ * The transport.
+ *
+ * One nasheed at a time, streamed from Supabase Storage by the `<audio>` element in
+ * `lib/audio/player.ts`. Play, pause, seek, next, previous, shuffle and repeat all
+ * live here; the queue is a list of nasheed ids and the element is the clock.
+ */
+
 import { create } from "zustand";
-import { engine } from "../lib/audio/engine";
-import type { SpacePreset } from "../lib/audio/engine";
+import { player } from "../lib/audio/player";
 import { getTrack } from "../data/catalog";
-import { songFor } from "../lib/song";
 import { clamp } from "../lib/prng";
 import { useLibrary } from "./library";
 import { beaconComplete, beaconStart, beaconTick } from "../lib/beacon";
@@ -39,8 +45,6 @@ type PlayerState = {
   cycleRepeat: () => void;
   setImmersive: (v: boolean) => void;
   setVolume: (v: number) => void;
-  setDuff: (v: boolean) => void;
-  setSpace: (s: SpacePreset) => void;
   setTime: (t: number) => void;
   addToQueue: (id: string) => void;
   removeFromQueue: (i: number) => void;
@@ -61,7 +65,7 @@ function startTicker(set: (p: Partial<PlayerState>) => void) {
     lastFrame = now;
     if (now - lastPush > 90) {
       lastPush = now;
-      set({ time: engine.getTime() });
+      set({ time: player.getTime() });
     }
     ticker = requestAnimationFrame(loop);
   };
@@ -76,30 +80,37 @@ function stopTicker() {
   }
 }
 
-async function loadAndPlay(id: string, set: (p: Partial<PlayerState>) => void) {
+/** The recorded length of a nasheed, in seconds: what the publisher stored, or 0. */
+function lengthOf(id: string): number {
   const track = getTrack(id);
-  if (!track) return;
+  return track?.durationMs ? track.durationMs / 1000 : 0;
+}
+
+function loadAndPlay(id: string, set: (p: Partial<PlayerState>) => void) {
+  const track = getTrack(id);
+  if (!track?.audioUrl) {
+    // nothing to stream: say so in the transport rather than pretending to play
+    set({ trackId: id, duration: lengthOf(id), time: 0, playing: false, ready: true });
+    return;
+  }
   // whatever was playing has now been listened to as far as it goes: report it
   beaconStart(id);
-  const song = songFor(track);
-  set({ trackId: id, duration: song.duration, time: 0, playing: true, ready: true });
-  try {
-    await engine.load(song, 0);
-    await engine.play();
-  } catch {
-    set({ playing: false });
-  }
+  player.load(track.audioUrl, 0);
+  set({ trackId: id, duration: lengthOf(id), time: 0, playing: true, ready: true });
+  void player.play().then(() => {
+    set({ playing: player.playing, duration: player.getDuration(lengthOf(id)) });
+  });
   startTicker(set);
 }
 
 export const usePlayer = create<PlayerState>((set, get) => {
-  engine.handlers.onStateChange = (playing) => {
+  player.handlers.onStateChange = (playing) => {
     set({ playing });
     if (!playing) stopTicker();
     else startTicker(set);
   };
 
-  engine.handlers.onEnded = () => {
+  player.handlers.onEnded = () => {
     beaconComplete();
     const { repeat } = get();
     if (repeat === "one" && get().trackId) {
@@ -107,6 +118,16 @@ export const usePlayer = create<PlayerState>((set, get) => {
       return;
     }
     get().next(true);
+  };
+
+  player.handlers.onError = () => {
+    stopTicker();
+    set({ playing: false });
+  };
+
+  const jump = (id: string, set: (p: Partial<PlayerState>) => void, record = true) => {
+    loadAndPlay(id, set);
+    if (record) useLibrary.getState().recordPlay(id);
   };
 
   return {
@@ -135,16 +156,14 @@ export const usePlayer = create<PlayerState>((set, get) => {
         index = 0;
       }
       set({ queue, index, context: context ?? get().context });
-      void loadAndPlay(queue[index]!, set);
-      useLibrary.getState().recordPlay(queue[index]!);
+      jump(queue[index]!, set);
     },
 
     playTrack: (id, context, queue) => {
       const list = queue && queue.length ? queue : get().queue.includes(id) ? get().queue : [id];
       const index = Math.max(0, list.indexOf(id));
       set({ queue: list, index, context: context ?? get().context });
-      void loadAndPlay(id, set);
-      useLibrary.getState().recordPlay(id);
+      jump(id, set);
     },
 
     toggle: () => {
@@ -154,12 +173,12 @@ export const usePlayer = create<PlayerState>((set, get) => {
         return;
       }
       if (playing) {
-        engine.pause();
+        player.pause();
         stopTicker();
-        set({ playing: false, time: engine.getTime() });
+        set({ playing: false, time: player.getTime() });
       } else {
-        void engine.play().then(() => {
-          set({ playing: true });
+        void player.play().then(() => {
+          set({ playing: player.playing, duration: player.getDuration(lengthOf(trackId)) });
           startTicker(set);
         });
       }
@@ -172,42 +191,43 @@ export const usePlayer = create<PlayerState>((set, get) => {
         if (repeat === "all" || !auto) {
           const ni = 0;
           set({ index: ni });
-          void loadAndPlay(queue[ni]!, set);
-          useLibrary.getState().recordPlay(queue[ni]!);
+          jump(queue[ni]!, set);
           return;
         }
         if (trackId) {
-          engine.pause();
+          player.pause();
+          player.seek(0);
           set({ playing: false, time: 0 });
-          void engine.seek(0);
         }
         stopTicker();
         return;
       }
       const ni = index + 1;
       set({ index: ni });
-      void loadAndPlay(queue[ni]!, set);
-      useLibrary.getState().recordPlay(queue[ni]!);
+      jump(queue[ni]!, set);
     },
 
     prev: () => {
-      const { time, queue, index } = get();
+      const { time, queue, index, trackId } = get();
       if (time > 4 || !queue.length) {
-        void engine.seek(0);
+        player.seek(0);
         set({ time: 0 });
         return;
       }
       const pi = index <= 0 ? queue.length - 1 : index - 1;
       set({ index: pi });
-      void loadAndPlay(queue[pi]!, set);
+      jump(queue[pi]!, set);
+      if (trackId) set({ duration: lengthOf(queue[pi]!) });
     },
 
     seek: (t) => {
-      void engine.seek(t);
-      set({ time: clamp(t, 0, get().duration) });
+      const { duration, trackId } = get();
+      const target = clamp(t, 0, duration || 0);
+      player.seek(target);
+      set({ time: target, duration: duration || (trackId ? lengthOf(trackId) : 0) });
     },
 
-    nudge: (delta) => get().seek(clamp(engine.getTime() + delta, 0, get().duration)),
+    nudge: (delta) => get().seek(player.getTime() + delta),
 
     setShuffle: (v) => {
       const { queue, trackId } = get();
@@ -227,18 +247,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
     setImmersive: (v) => set({ immersive: v }),
 
     setVolume: (v) => {
-      engine.setVolume(v);
+      player.setVolume(v);
       useLibrary.getState().setSetting("volume", v);
-    },
-
-    setDuff: (v) => {
-      engine.setDuff(v);
-      useLibrary.getState().setSetting("duff", v);
-    },
-
-    setSpace: (s) => {
-      engine.setSpace(s);
-      useLibrary.getState().setSetting("space", s);
     },
 
     setTime: (t) => set({ time: t }),
@@ -271,7 +281,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
   };
 });
 
-/** Smooth time, read straight from the audio clock — for karaoke fills and progress bars. */
+/** Smooth time, read straight from the audio element — for progress bars and lyrics. */
 export function currentTime(): number {
-  return engine.getTime();
+  return player.getTime();
 }

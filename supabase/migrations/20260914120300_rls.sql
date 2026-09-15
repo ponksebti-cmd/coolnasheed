@@ -350,14 +350,12 @@ grant usage, select on all sequences in schema public to anon, authenticated;
 
 revoke insert, update on public.songs from authenticated;
 grant insert (
-  owner_id, title, title_ar, note, maqam, root, bpm, voices, duff, duff_enter,
-  passes, accent, year, tags, lines, motif_bank, audio_path, audio_mime,
-  audio_bytes, duration_ms, artwork_path, status
+  owner_id, title, title_ar, note, maqam, year, tags, lines, audio_path,
+  audio_mime, audio_bytes, duration_ms, artwork_path, status
 ) on public.songs to authenticated;
 grant update (
-  title, title_ar, note, maqam, root, bpm, voices, duff, duff_enter, passes,
-  accent, year, tags, lines, motif_bank, audio_path, audio_mime, audio_bytes,
-  duration_ms, artwork_path, status
+  title, title_ar, note, maqam, year, tags, lines, audio_path, audio_mime,
+  audio_bytes, duration_ms, artwork_path, status
 ) on public.songs to authenticated;
 -- id, owner_id, plays, likes, notes, published_at and created_at are not writable
 

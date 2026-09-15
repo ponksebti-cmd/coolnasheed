@@ -16,7 +16,7 @@
  *
  * In demo mode (no VITE_SUPABASE_URL) nothing here is reachable, and every method
  * raises `DemoModeError` — which the interface renders as "connect a project" rather
- * than as a failure. The bundled catalogue still plays; that path never comes here.
+ * than as a failure. The catalogue stays empty; that path never comes here.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -47,8 +47,6 @@ import {
   playlistFromRow,
   reportFromRow,
   songFromRow,
-  songInputFromRow,
-  songRowFromInput,
   trendingFromRow,
   userFromRow,
   type ArtistRow,
@@ -62,7 +60,6 @@ import {
 import {
   ARTWORK_BUCKET,
   AUDIO_BUCKET,
-  type Accent,
   type AdminSummary,
   type ArtistCard,
   type BootstrapResponse,
@@ -291,6 +288,17 @@ async function viaFunction<T>(name: string, init: InvokeInit, direct: () => Prom
   }
 }
 
+/**
+ * Call an Edge Function and let its errors stand. Publishing goes through here
+ * rather than through `viaFunction`: there is deliberately no browser-side copy of
+ * the publish rules, so there is nothing to fall back to.
+ */
+async function invokeOrThrow<T>(name: string, init: InvokeInit): Promise<T> {
+  const result = await invoke<T>(name, init);
+  functionsUp = true;
+  return result;
+}
+
 /** Give the storage back when a nasheed goes. Best effort — the row is what matters. */
 async function removeOwnedFiles(
   client: SupabaseClient,
@@ -336,7 +344,6 @@ async function readCatalog(fresh = false): Promise<CatalogResponse> {
     collections: payload?.collections ?? [],
     tags: payload?.tags ?? [],
     generatedAt: payload?.generatedAt ?? Date.now(),
-    seeded: Boolean(payload?.seeded),
   };
   catalogCache = { at: Date.now(), payload: normalized };
   return normalized;
@@ -352,7 +359,6 @@ export function invalidateCatalog(): void {
 export type SongQuery = {
   q?: string;
   maqam?: string;
-  voices?: string;
   tag?: string;
   /** a handle, a uuid, or "me" */
   owner?: string;
@@ -449,7 +455,6 @@ export const api = {
 
     select = select.eq("status", query.status ?? "live");
     if (query.maqam) select = select.eq("maqam", query.maqam);
-    if (query.voices) select = select.eq("voices", query.voices);
     if (query.tag) select = select.contains("tags", [query.tag]);
     if (query.uploaded) select = select.not("audio_path", "is", null);
     if (query.q) {
@@ -526,13 +531,13 @@ export const api = {
     };
   },
 
-  /** Same maqām first, then the room it belongs to. Cheap, and it sounds curated. */
+  /** Same maqām first, then a tag in common. Cheap, and it sounds curated. */
   related: async (id: string, limit = 8): Promise<{ items: Song[] }> => {
     const client = sb("find something similar");
     const row = unwrapMaybe(
-      await client.from("songs").select("maqam, accent, tags").eq("id", id).maybeSingle(),
+      await client.from("songs").select("maqam, tags").eq("id", id).maybeSingle(),
       "that nasheed",
-    ) as { maqam: string; accent: string; tags: string[] | null } | null;
+    ) as { maqam: string; tags: string[] | null } | null;
     if (!row) return { items: [] };
 
     const sameMaqam = list(
@@ -548,13 +553,13 @@ export const api = {
     ) as SongRow[];
 
     let rows = sameMaqam;
-    if (rows.length < limit) {
+    if (rows.length < limit && row.tags?.length) {
       const more = list(
         await client
           .from("songs")
           .select(SONG_COLUMNS)
           .eq("status", "live")
-          .eq("accent", row.accent)
+          .overlaps("tags", row.tags)
           .neq("id", id)
           .not("id", "in", `(${rows.map((r) => `"${r.id}"`).join(",") || '""'})`)
           .order("plays", { ascending: false })
@@ -577,7 +582,7 @@ export const api = {
     const limit = Math.min(Math.max(query.limit ?? 60, 1), 200);
     const uid = await currentUid();
 
-    const select = `id, song_id, author_id, text, at_line, edited_at, amens, reports, removed, created_at, author:profiles!comments_author_id_fkey(id, handle, name, seed, accent, verified)`;
+    const select = `id, song_id, author_id, text, at_line, edited_at, amens, reports, removed, created_at, author:profiles!comments_author_id_fkey(id, handle, name, seed, verified)`;
     const { data, count, error } = await client
       .from("comments")
       .select(select, { count: "exact" })
@@ -601,7 +606,7 @@ export const api = {
   /** Every note this account has written, newest first — a profile page's "notes" tab. */
   myComments: async (limit = 100): Promise<Comment[]> => {
     const { client, uid } = await requireUid("read your notes");
-    const select = `${COMMENT_COLUMNS}, author:profiles!comments_author_id_fkey(id, handle, name, seed, accent, verified)`;
+    const select = `${COMMENT_COLUMNS}, author:profiles!comments_author_id_fkey(id, handle, name, seed, verified)`;
     const { data, error } = await client
       .from("comments")
       .select(select)
@@ -623,7 +628,7 @@ export const api = {
     if (!clean) throw new ApiError("Say something first.", 400, "text");
     if (clean.length > 600) throw new ApiError("A note is at most 600 characters.", 400, "text");
 
-    const select = `id, song_id, author_id, text, at_line, edited_at, amens, reports, removed, created_at, author:profiles!comments_author_id_fkey(id, handle, name, seed, accent, verified)`;
+    const select = `id, song_id, author_id, text, at_line, edited_at, amens, reports, removed, created_at, author:profiles!comments_author_id_fkey(id, handle, name, seed, verified)`;
     const row = unwrap(
       await client
         .from("comments")
@@ -640,7 +645,7 @@ export const api = {
     const clean = text.trim();
     if (!clean) throw new ApiError("Say something first.", 400, "text");
 
-    const select = `${COMMENT_COLUMNS}, author:profiles!comments_author_id_fkey(id, handle, name, seed, accent, verified)`;
+    const select = `${COMMENT_COLUMNS}, author:profiles!comments_author_id_fkey(id, handle, name, seed, verified)`;
     const row = unwrapMaybe(
       await client.from("comments").update({ text: clean }).eq("id", id).select(select).maybeSingle(),
       "that note",
@@ -807,7 +812,6 @@ export const api = {
           name: name.slice(0, 80),
           blurb: (input.blurb ?? "").slice(0, 280),
           seed: input.seed || `playlist-${name.toLowerCase().replace(/\s+/g, "-")}-${uid.slice(0, 8)}`,
-          accent: input.accent ?? "jade",
           song_ids: (input.songIds ?? []).slice(0, 500),
         })
         .select(PLAYLIST_COLUMNS)
@@ -819,14 +823,13 @@ export const api = {
 
   updatePlaylist: async (
     id: string,
-    patch: Partial<{ name: string; blurb: string; songIds: string[]; accent: string }>,
+    patch: Partial<{ name: string; blurb: string; songIds: string[] }>,
   ): Promise<{ playlist: Playlist | null }> => {
     const { client } = await requireUid("edit a set");
     const update: Record<string, unknown> = {};
     if (patch.name !== undefined) update.name = patch.name.trim().slice(0, 80);
     if (patch.blurb !== undefined) update.blurb = patch.blurb.slice(0, 280);
     if (patch.songIds !== undefined) update.song_ids = patch.songIds.slice(0, 500);
-    if (patch.accent !== undefined) update.accent = patch.accent;
     if (Object.keys(update).length === 0) throw new ApiError("Nothing to change.", 400);
 
     const row = unwrapMaybe(
@@ -933,26 +936,10 @@ export const api = {
       durationMs: files?.durationMs ?? input.durationMs ?? null,
     };
 
-    const result = await viaFunction<{ ok: true; song: Song }>(
-      "publish",
-      { method: "POST", body: payload },
-      async () => {
-        // No function deployed: the browser writes the identical row. What decides
-        // whether it lands is the same as it ever was — `owner_id = auth.uid()` in
-        // the insert policy, and the table's check constraints on every column.
-        const client = sb("publish a nasheed");
-        const row = songRowFromInput(payload, uid);
-        const { data, error } = await client
-          .from("songs")
-          .insert({ ...row, owner_id: uid })
-          .select(SONG_COLUMNS)
-          .single();
-        if (error) throw dbError(error, "that nasheed");
-        const stored = data as SongRow;
-        const [withHandle] = await withOwnerHandles(client, [stored]);
-        return { ok: true as const, song: songFromRow(withHandle ?? stored) };
-      },
-    );
+    // The function is the only writer: it is what checks the upload really landed
+    // in your own folder and really fits the bucket. Publishing without the
+    // functions deployed is not supported, so the validation lives in one place.
+    const result = await invokeOrThrow<{ ok: true; song: Song }>("publish", { method: "POST", body: payload });
 
     invalidateCatalog();
     return {
@@ -979,59 +966,19 @@ export const api = {
       body.artworkPath = await upload(uid, "cover", files.artwork, { bucket: ARTWORK_BUCKET });
     }
 
-    const result = await viaFunction<{ ok: true; song: Song }>("publish", { method: "PATCH", body }, async () => {
-      const client = sb("edit a nasheed");
-      const found = unwrapMaybe(
-        await client.from("songs").select(SONG_COLUMNS).eq("id", id).maybeSingle(),
-        "that nasheed",
-      ) as SongRow | null;
-      if (!found) throw new ApiError("There is no nasheed by that id.", 404, "id");
+    const result = await invokeOrThrow<{ ok: true; song: Song }>("publish", { method: "PATCH", body });
 
-      // merge the patch over what is stored, then validate the whole thing once,
-      // so an edit cannot quietly blank a field
-      const { id: _ignored, status, ...changes } = body;
-      const owner = found.owner_id ?? uid;
-      const update: Record<string, unknown> = { ...songRowFromInput({ ...songInputFromRow(found), ...changes }, owner) };
-      if (status !== undefined) {
-        if (status !== "live" && status !== "removed") throw new ApiError("That status does not exist.", 400, "status");
-        update.status = status;
-      }
-
-      const { data, error } = await client
-        .from("songs")
-        .update(update)
-        .eq("id", id)
-        .select(SONG_COLUMNS)
-        .single();
-      if (error) throw dbError(error, "that edit");
-      const stored = data as SongRow;
-      const [withHandle] = await withOwnerHandles(client, [stored]);
-      return { ok: true as const, song: songFromRow(withHandle ?? stored) };
-    });
     invalidateCatalog();
     return { song: result.song };
   },
 
   removeSong: async (id: string, files = false): Promise<{ ok: boolean }> => {
     await requireUid("take a nasheed down");
-    await viaFunction<{ ok: boolean }>(
-      "publish",
-      { method: "DELETE", query: { id, files: files ? 1 : undefined } },
-      async () => {
-        const client = sb("take a nasheed down");
-        const found = unwrapMaybe(
-          await client.from("songs").select("id, audio_path, artwork_path").eq("id", id).maybeSingle(),
-          "that nasheed",
-        ) as { id: string; audio_path: string | null; artwork_path: string | null } | null;
-        if (!found) throw new ApiError("There is no nasheed by that id.", 404, "id");
+    await invokeOrThrow<{ ok: boolean }>("publish", {
+      method: "DELETE",
+      query: { id, files: files ? 1 : undefined },
+    });
 
-        // taking a nasheed down hides it; `files` also gives the storage back
-        const { error } = await client.from("songs").update({ status: "removed" }).eq("id", id);
-        if (error) throw dbError(error, "that nasheed");
-        if (files) await removeOwnedFiles(client, found.audio_path, found.artwork_path);
-        return { ok: true };
-      },
-    );
     invalidateCatalog();
     return { ok: true };
   },
@@ -1495,8 +1442,6 @@ async function moderateDirect(
 
 /* ------------------------------------------------ a profile, direct to SQL */
 
-const PROFILE_ACCENTS: Accent[] = ["jade", "gold", "turq", "madder", "cobalt"];
-
 /** The columns `updateProfile` may write, cleaned the way the `account` function cleans them. */
 async function profileUpdate(
   client: SupabaseClient,
@@ -1526,13 +1471,6 @@ async function profileUpdate(
   if (bio !== undefined) update.bio = bio;
   const city = clean(patch.city, "city", 60);
   if (city !== undefined) update.city = city;
-
-  if (patch.accent !== undefined) {
-    if (!PROFILE_ACCENTS.includes(patch.accent)) {
-      throw new ApiError(`An accent is one of: ${PROFILE_ACCENTS.join(", ")}.`, 400, "accent");
-    }
-    update.accent = patch.accent;
-  }
 
   if (patch.handle !== undefined) {
     const handle = String(patch.handle).trim().toLowerCase();

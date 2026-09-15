@@ -15,7 +15,6 @@ import {
   MAQAM_NAMES,
   MAX_ARTWORK_BYTES,
   MAX_AUDIO_BYTES,
-  type Accent,
   type LyricLine,
   type MaqamName,
   type SongInput,
@@ -23,25 +22,14 @@ import {
 } from "../../../shared/types.ts";
 import { HttpError } from "./json.ts";
 
-const ACCENTS: Accent[] = ["jade", "gold", "turq", "madder", "cobalt"];
-const VOICES = ["solo", "duet", "choir"] as const;
-
 export type SongRow = {
   title: string;
   title_ar: string | null;
   note: string;
   maqam: MaqamName;
-  root: number;
-  bpm: number;
-  voices: "solo" | "duet" | "choir";
-  duff: string | null;
-  duff_enter: "intro" | "verse";
-  passes: number;
-  accent: Accent;
   year: number | null;
   tags: string[];
   lines: LyricLine[];
-  motif_bank: number[] | null;
   audio_path: string | null;
   audio_mime: string | null;
   audio_bytes: number | null;
@@ -143,15 +131,6 @@ function cleanLines(value: unknown): LyricLine[] {
   return lines;
 }
 
-function cleanMotifs(value: unknown): number[] | null {
-  if (!Array.isArray(value)) return null;
-  const out = value
-    .filter((n): n is number => typeof n === "number" && Number.isFinite(n))
-    .map((n) => Math.round(n))
-    .slice(0, 24);
-  return out.length ? out : null;
-}
-
 /** Validate a full publish payload and shape it for an insert. */
 export function songRowFrom(input: SongInput, ownerId: string): SongRow {
   if (!input || typeof input !== "object") throw new HttpError("That was not a nasheed.", 400);
@@ -160,10 +139,6 @@ export function songRowFrom(input: SongInput, ownerId: string): SongRow {
   if (!title) throw new HttpError("A title is required.", 400, "title");
 
   const maqam = oneOf(input.maqam, MAQAM_NAMES, "maqam");
-  const duff = typeof input.duff === "string" && input.duff.trim() ? input.duff.trim() : null;
-  if (duff && !/^[DT.]{16}$/.test(duff)) {
-    throw new HttpError("A drum pattern is 16 steps of D, T or .", 400, "duff");
-  }
 
   const audioPath = ownedPath(input.audioPath, ownerId, "audioPath");
   const artworkPath = ownedPath(input.artworkPath, ownerId, "artworkPath");
@@ -173,20 +148,12 @@ export function songRowFrom(input: SongInput, ownerId: string): SongRow {
     title_ar: text(input.titleAr, "titleAr", 1, 120, true),
     note: text(input.note ?? "", "note", 0, 480, true) ?? "",
     maqam,
-    root: whole(input.root, "root", 24, 96),
-    bpm: whole(input.bpm, "bpm", 30, 240),
-    voices: oneOf(input.voices, VOICES, "voices"),
-    duff,
-    duff_enter: oneOf(input.duffEnter, ["intro", "verse"] as const, "duffEnter", "verse"),
-    passes: whole(input.passes, "passes", 1, 6, 2),
-    accent: oneOf(input.accent, ACCENTS, "accent", "jade"),
     year:
       input.year === null || input.year === undefined
         ? null
         : whole(input.year, "year", 600, 2200),
     tags: cleanTags(input.tags),
     lines: cleanLines(input.lines),
-    motif_bank: cleanMotifs(input.motifBank),
     audio_path: audioPath,
     audio_mime:
       typeof input.audioMime === "string" && input.audioMime.startsWith("audio/")

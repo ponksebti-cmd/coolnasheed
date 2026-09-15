@@ -53,7 +53,6 @@ export default function PlaylistPage() {
         title={playlist.name}
         blurb={playlist.blurb}
         seed={playlist.seed}
-        accent={playlist.accent}
         tracks={tracks}
         playing={inSet && player.playing}
         onPlay={() => {

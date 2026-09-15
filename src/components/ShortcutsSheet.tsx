@@ -12,7 +12,6 @@ const GROUPS: { title: string; rows: [string, string][] }[] = [
       ["Shift + ← / →", "Previous / next track"],
       ["I", "Open the immersive player"],
       ["L", "Love the current nasheed"],
-      ["D", "Duff on / vocals only"],
       ["M", "Mute / unmute"],
     ],
   },

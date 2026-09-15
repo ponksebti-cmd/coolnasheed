@@ -99,7 +99,6 @@ create or replace function public.trending(p_window text default '7d', p_limit i
 returns table (
   song_id text,
   title text,
-  accent text,
   maqam text,
   owner_name text,
   plays bigint,
@@ -120,14 +119,14 @@ as $$
       else (now() at time zone 'utc')::date - 7
     end as since
   )
-  select s.id, s.title, s.accent, s.maqam, p.name,
+  select s.id, s.title, s.maqam, p.name,
          sum(d.plays)::bigint, sum(d.listeners)::bigint, sum(d.seconds)::bigint, s.likes
   from public.song_stats_daily d
   join public.songs s on s.id = d.song_id and s.status = 'live'
   left join public.profiles p on p.id = s.owner_id
   cross join bounds b
   where d.day >= b.since
-  group by s.id, s.title, s.accent, s.maqam, p.name, s.likes
+  group by s.id, s.title, s.maqam, p.name, s.likes
   order by sum(d.plays) desc, s.likes desc
   limit least(greatest(coalesce(p_limit, 10), 1), 50);
 $$;
@@ -204,7 +203,6 @@ begin
     from (
       select e.song_id as "songId",
              s.title as "title",
-             s.accent as "accent",
              p.name as "ownerName",
              count(*)::int as "plays",
              sum(e.seconds)::int as "seconds",
@@ -214,8 +212,8 @@ begin
       left join public.profiles p on p.id = s.owner_id
       where (v_profile is not null and e.profile_id = v_profile)
          or (v_profile is null and e.client_id = nullif(p_client_id, ''))
-      group by e.song_id, s.title, s.accent, p.name
-      order by 7 desc
+      group by e.song_id, s.title, p.name
+      order by max(e.created_at) desc
       limit v_limit
     ) t
   ), '[]'::jsonb);
@@ -271,14 +269,13 @@ as $$
         'origin', coalesce(nullif(p.city, ''), '—'),
         'bio', p.bio,
         'seed', p.seed,
-        'accent', p.accent,
         'verified', p.verified,
         'kind', p.kind,
         'songs', (select count(*)::int from public.songs s where s.owner_id = p.id and s.status = 'live'),
         'followers', (select count(*)::int from public.follows f where f.artist_id = p.id)
       ) order by p.name)
       from public.profiles p
-      -- anybody with a live nasheed is a publisher, whether they arrived in the seed
+      -- anybody with a live nasheed is a publisher, however they got here
       -- (kind = 'artist') or signed up and used the studio (kind = 'listener')
       where exists (select 1 from public.songs s where s.owner_id = p.id and s.status = 'live')
     ), '[]'::jsonb),
@@ -291,17 +288,9 @@ as $$
         'titleAr', s.title_ar,
         'note', s.note,
         'maqam', s.maqam,
-        'root', s.root,
-        'bpm', s.bpm,
-        'voices', s.voices,
-        'duff', s.duff,
-        'duffEnter', s.duff_enter,
-        'passes', s.passes,
-        'accent', s.accent,
         'year', s.year,
         'tags', to_jsonb(s.tags),
         'lines', s.lines,
-        'motifBank', to_jsonb(s.motif_bank),
         'audioPath', s.audio_path,
         'audioMime', s.audio_mime,
         'durationMs', s.duration_ms,
@@ -324,7 +313,6 @@ as $$
         'curator', c.curator,
         'blurb', c.blurb,
         'seed', c.seed,
-        'accent', c.accent,
         'tags', to_jsonb(c.tags),
         'year', c.year,
         'songIds', to_jsonb(c.song_ids)
@@ -335,8 +323,7 @@ as $$
       select jsonb_agg(jsonb_build_object('tag', t.tag, 'count', t.count) order by t.count desc, t.tag)
       from (select unnest(tags) as tag, count(*)::int from public.songs where status = 'live' group by 1) t
     ), '[]'::jsonb),
-    'generatedAt', floor(extract(epoch from now()) * 1000)::bigint,
-    'seeded', exists (select 1 from public.profiles where kind = 'artist' and verified)
+    'generatedAt', floor(extract(epoch from now()) * 1000)::bigint
   );
 $$;
 
@@ -375,7 +362,6 @@ begin
       'bio', v_profile.bio,
       'city', v_profile.city,
       'seed', v_profile.seed,
-      'accent', v_profile.accent,
       'role', v_profile.role,
       'kind', v_profile.kind,
       'verified', v_profile.verified,
@@ -396,7 +382,7 @@ begin
     'playlists', coalesce((
       select jsonb_agg(jsonb_build_object(
         'id', p.id, 'ownerId', p.owner_id, 'name', p.name, 'blurb', p.blurb,
-        'seed', p.seed, 'accent', p.accent, 'songIds', to_jsonb(p.song_ids),
+        'seed', p.seed, 'songIds', to_jsonb(p.song_ids),
         'createdAt', floor(extract(epoch from p.created_at) * 1000)::bigint
       ) order by p.created_at desc)
       from public.playlists p where p.owner_id = v_id
@@ -406,9 +392,8 @@ begin
         'id', s.id, 'ownerId', s.owner_id,
         'ownerHandle', (select handle from public.profiles where id = s.owner_id),
         'title', s.title, 'titleAr', s.title_ar,
-        'note', s.note, 'maqam', s.maqam, 'root', s.root, 'bpm', s.bpm, 'voices', s.voices,
-        'duff', s.duff, 'duffEnter', s.duff_enter, 'passes', s.passes, 'accent', s.accent,
-        'year', s.year, 'tags', to_jsonb(s.tags), 'lines', s.lines, 'motifBank', to_jsonb(s.motif_bank),
+        'note', s.note, 'maqam', s.maqam,
+        'year', s.year, 'tags', to_jsonb(s.tags), 'lines', s.lines,
         'audioPath', s.audio_path, 'audioMime', s.audio_mime, 'durationMs', s.duration_ms,
         'artworkPath', s.artwork_path, 'status', s.status,
         'publishedAt', floor(extract(epoch from s.published_at) * 1000)::bigint,
@@ -450,7 +435,7 @@ begin
       'id', v_profile.handle, 'profileId', v_profile.id,
       'handle', v_profile.handle, 'name', v_profile.name,
       'nameAr', v_profile.name_ar, 'tagline', v_profile.tagline, 'bio', v_profile.bio, 'city', v_profile.city,
-      'seed', v_profile.seed, 'accent', v_profile.accent, 'role', v_profile.role,
+      'seed', v_profile.seed, 'role', v_profile.role,
       'kind', v_profile.kind, 'verified', v_profile.verified,
       'createdAt', floor(extract(epoch from v_profile.created_at) * 1000)::bigint
     ),
@@ -463,9 +448,8 @@ begin
         'id', s.id, 'ownerId', s.owner_id,
         'ownerHandle', (select handle from public.profiles where id = s.owner_id),
         'title', s.title, 'titleAr', s.title_ar,
-        'note', s.note, 'maqam', s.maqam, 'root', s.root, 'bpm', s.bpm, 'voices', s.voices,
-        'duff', s.duff, 'duffEnter', s.duff_enter, 'passes', s.passes, 'accent', s.accent,
-        'year', s.year, 'tags', to_jsonb(s.tags), 'lines', s.lines, 'motifBank', to_jsonb(s.motif_bank),
+        'note', s.note, 'maqam', s.maqam,
+        'year', s.year, 'tags', to_jsonb(s.tags), 'lines', s.lines,
         'audioPath', s.audio_path, 'audioMime', s.audio_mime, 'durationMs', s.duration_ms,
         'artworkPath', s.artwork_path, 'status', s.status,
         'publishedAt', floor(extract(epoch from s.published_at) * 1000)::bigint,
