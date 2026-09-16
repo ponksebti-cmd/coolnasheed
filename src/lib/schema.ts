@@ -16,7 +16,7 @@
 import { maybeSb, hasSupabase } from "./supabase";
 
 /** The version this build of the client writes against. Keep in step with the migration. */
-export const EXPECTED_SCHEMA_VERSION = "profile-pictures-1";
+export const EXPECTED_SCHEMA_VERSION = "catalogue-window-1";
 
 export type SchemaState =
   /** no project configured: nothing to check, and the app says so elsewhere */

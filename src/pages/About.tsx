@@ -63,7 +63,7 @@ export default function About() {
           style={{ background: "radial-gradient(110% 120% at 10% 0%, color-mix(in oklab, var(--c-gold) 30%, transparent), transparent 62%)" }}
           aria-hidden
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-[rgba(4,11,9,0.96)] via-[rgba(4,11,9,0.86)] to-[rgba(4,11,9,0.55)]" />
+        <div className="art-scrim-side absolute inset-0" />
         <div className="grain absolute inset-0" />
         <div className="relative flex flex-col items-start gap-5 p-6 md:p-10">
           <span className="grid h-14 w-14 place-items-center rounded-xl border border-line2 bg-elev/70 backdrop-blur">

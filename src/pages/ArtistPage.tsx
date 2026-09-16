@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import { clsx } from "clsx";
 import { Icon } from "../components/ui/Icons";
@@ -8,6 +8,8 @@ import { ArtistCard, CollectionCard, Rail, RailItem } from "../components/collec
 import { TrackList } from "../components/track/TrackViews";
 import { ARTISTS, COLLECTIONS, durationOf, formatCount, getArtist, statsFor, tracksByArtist, tracksOf } from "../data/catalog";
 import { formatTotal, plural } from "../lib/format";
+import { ensureArtistSongs } from "../lib/boot";
+import { useCatalogVersion } from "../lib/hooks";
 import { seededShuffle } from "../lib/math";
 import { usePlayer } from "../store/player";
 import { useLibrary } from "../store/library";
@@ -19,7 +21,17 @@ export default function ArtistPage() {
   const followed = useLibrary((s) => (id ? s.followedArtists.includes(id) : false));
   const toggleArtist = useLibrary((s) => s.toggleArtist);
 
-  const tracks = useMemo(() => (id ? tracksByArtist(id) : []), [id]);
+  /* A reciter's back catalogue may reach past the catalogue window; ask the server for
+     all of it before drawing the page's lists. */
+  const version = useCatalogVersion();
+  useEffect(() => {
+    if (id) void ensureArtistSongs(id);
+  }, [id]);
+
+  const tracks = useMemo(
+    () => (id ? tracksByArtist(id) : []),
+    [id, version],
+  );
   const ids = tracks.map((t) => t.id);
 
   if (!artist) {
@@ -58,7 +70,7 @@ export default function ArtistPage() {
           }}
           aria-hidden
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-[rgba(6,15,12,0.98)] via-[rgba(4,11,9,0.78)] to-[rgba(4,11,9,0.5)]" />
+        <div className="art-scrim-up absolute inset-0" />
         <div className="grain absolute inset-0" />
 
         <div className="relative flex flex-col gap-6 p-6 md:flex-row md:items-end md:p-9">

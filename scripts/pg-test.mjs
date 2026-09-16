@@ -246,11 +246,11 @@ try {
   /* The database names its own version. The client reads this at boot and refuses to
      guess from a constraint name when a project is a build behind. */
   const version = await one("select version from public.app_schema where id = 1");
-  check("the database says which version of the app it is", version === "profile-pictures-1", String(version));
+  check("the database says which version of the app it is", version === "catalogue-window-1", String(version));
 
   await asAnon();
   const anonVersion = await one("select version from public.app_schema where id = 1");
-  check("and anyone may read it, signed in or not", anonVersion === "profile-pictures-1", String(anonVersion));
+  check("and anyone may read it, signed in or not", anonVersion === "catalogue-window-1", String(anonVersion));
   await refused("but nobody may write it",
     () => sql("insert into public.app_schema (id, version) values (2, 'forged')"), "42501");
   await asPostgres();
@@ -864,7 +864,7 @@ try {
   );
   const state = upgraded.rows[0] ?? {};
   check("the old column is gone and the version marker is there",
-    state.maqam === 0 && state.version === "profile-pictures-1",
+    state.maqam === 0 && state.version === "catalogue-window-1",
     `maqam columns=${state.maqam} · version=${state.version}`);
   check("and the file knows what it applied, so it need not do it twice",
     state.applied === MIGRATIONS.length,
@@ -886,7 +886,7 @@ try {
     "(select count(*)::int from pg_tables where schemaname = 'public') as tables",
   );
   const now_ = afterSecond.rows[0] ?? {};
-  check("and it changed nothing", now_.version === "profile-pictures-1" && now_.applied === MIGRATIONS.length,
+  check("and it changed nothing", now_.version === "catalogue-window-1" && now_.applied === MIGRATIONS.length,
     `version=${now_.version} · ${now_.applied} recorded · ${now_.tables} tables`);
 
   section("What a person pastes, onto a project that has never been set up");
@@ -904,7 +904,7 @@ try {
     "(select count(*)::int from pg_tables where schemaname = 'public') as tables",
   )).rows[0] ?? {};
   check("with the version marker and every table",
-    freshState.version === "profile-pictures-1" && freshState.tables >= 18,
+    freshState.version === "catalogue-window-1" && freshState.tables >= 18,
     `version=${freshState.version} · ${freshState.tables} tables`);
   await empty.close();
   await behind.close();
@@ -962,6 +962,117 @@ try {
     `${beforePaste.tables} tables → ${afterPaste.tables} · ${beforePaste.columns} columns → ${afterPaste.columns} · ${beforePaste.policies} policies → ${afterPaste.policies}`);
   await pushed.close();
 
+  /* ------------------------------------------------- the night nobody asked for */
+
+  section("The night nobody asked for");
+  await asPostgres();
+  const prefsRow = async (id, theme, chosen) => {
+    await sql("insert into public.profiles (id, handle, name) values ($1, $2, $3)",
+      [id, `pref${id.slice(0, 6)}`.toLowerCase().replace(/[^a-z0-9._]/g, "x").slice(0, 20).padEnd(3, "x"), "Prefs Tester"]);
+    await sql("update public.user_prefs set theme = $2, theme_chosen_at = $3 where profile_id = $1",
+      [id, theme, chosen]);
+  };
+  /* a choice: the client writes the marker with it, and the row must survive anything */
+  const chosenId = "11111111-2222-3333-4444-555555555555";
+  await prefsRow(chosenId, "night", new Date().toISOString());
+  const kept = (await sql("select theme, theme_chosen_at is not null as marked from public.user_prefs where profile_id = $1", [chosenId])).rows[0];
+  check("a night book somebody actually chose keeps its marker",
+    kept?.theme === "night" && kept?.marked === true,
+    `theme=${kept?.theme} marked=${kept?.marked}`);
+
+  /* the heal itself runs once, on rows written under the old column default — proved
+     against a database built without the newest migration, the way a real one would be */
+  const older = new PGlite({ extensions: { pg_trgm, pgcrypto } });
+  await older.exec(SHIM);
+  let olderProblem = "";
+  for (const name of MIGRATIONS.filter((n) => !n.includes("catalogue_window"))) {
+    try {
+      await older.exec(readFileSync(join(ROOT, "supabase/migrations", name), "utf8"));
+    } catch (err) {
+      olderProblem = `${name}: ${String(err.message).split("\n")[0]}`;
+    }
+  }
+  const oldId = "99999999-8888-7777-6666-555555555555";
+  await older.query("insert into public.profiles (id, handle, name) values ($1, 'oldnight', 'Old Night')", [oldId]);
+  await older.query("update public.user_prefs set theme = 'night' where profile_id = $1", [oldId]);
+  const heldNight = (await older.query("select theme from public.user_prefs where profile_id = $1", [oldId])).rows[0];
+  check("a project an older client left holding night",
+    olderProblem === "" && heldNight?.theme === "night",
+    olderProblem || `theme=${heldNight?.theme} before the paste`);
+
+  try {
+    await older.exec(readFileSync(join(ROOT, "supabase/setup.sql"), "utf8"));
+  } catch (err) {
+    olderProblem = String(err.message).split("\n")[0];
+  }
+  const healed = (await older.query("select theme, theme_chosen_at from public.user_prefs where profile_id = $1", [oldId])).rows[0];
+  check("and the paste puts that row back on the house default, once",
+    olderProblem === "" && healed?.theme === "dawn" && healed?.theme_chosen_at === null,
+    olderProblem || `theme=${healed?.theme}`);
+  await older.close();
+
+  /* ------------------------------------------------------- the catalogue window */
+
+  section("The catalogue is a window, not the whole table");
+  await asPostgres();
+  const payloadFn = String(await one(
+    "select pg_get_functiondef('public.catalog_payload()'::regprocedure)"));
+  check(
+    "the payload function is bounded in the database itself",
+    payloadFn.includes("limit 300") && payloadFn.includes("limit 200"),
+    payloadFn.includes("limit 300") ? "300 nasheeds · 200 publishers" : "no limit in the body",
+  );
+
+  /* Ten thousand nasheeds must not arrive at boot. The window keeps the newest 300 —
+     and the check has to prove the *newest* ones are the ones kept, not an arbitrary
+     300, because the home page is built from them. */
+  const windowed = await sql(`
+    insert into public.songs (id, owner_id, title, audio_path, status, published_at)
+    select 'win_' || lpad(i::text, 4, '0'), $1::uuid, 'Window ' || i,
+           $2::text || '/win-' || i || '.mp3', 'live',
+           now() - (i || ' minutes')::interval
+    from generate_series(1, 320) i`, [owner, owner]);
+  check("a publisher can have more nasheeds than the window holds", windowed.affectedRows === 320,
+    `${windowed.affectedRows} rows`);
+
+  const liveRows = Number(await one("select count(*) from public.songs where status = 'live'"));
+  const bootSongs = (await sql("select public.catalog_payload()->'songs' as s")).rows[0].s ?? [];
+  check("and the boot payload hands over the newest 300, not all of them",
+    bootSongs.length === 300 && liveRows > 300,
+    `${bootSongs.length} of ${liveRows} live nasheeds travel at boot`);
+
+  /* The newest 300 — the home page's page — not an arbitrary 300. */
+  const oldestKept = Number(bootSongs[bootSongs.length - 1]?.publishedAt ?? 0);
+  const beyondNewest = Number(await one(`
+    select floor(extract(epoch from coalesce(max(s.published_at), to_timestamp(0))) * 1000)::bigint
+    from public.songs s
+    where s.status = 'live'
+      and not exists (
+        select 1 from jsonb_array_elements(public.catalog_payload()->'songs') e
+        where e->>'id' = s.id
+      )`));
+  check("the window is the newest ones, so home is still the recent page",
+    beyondNewest <= oldestKept,
+    `oldest kept ${oldestKept} · newest left out ${beyondNewest}`);
+
+  /* Everything the window left out is still public and still reachable by asking:
+     search reads the table, so the window is a delivery choice, not a hiding place. */
+  const outsideWindow = Number(await one(`
+    select count(*) from public.songs s
+    where s.status = 'live'
+      and not exists (
+        select 1 from jsonb_array_elements(public.catalog_payload()->'songs') e
+        where e->>'id' = s.id
+      )`));
+  const searchable = Number(await one(
+    "select count(*) from public.songs where title ilike '%Window 31%' and status = 'live'"));
+  check("what the window leaves out is still in the table and still searchable",
+    outsideWindow === liveRows - 300 && searchable === 11,
+    `${outsideWindow} beyond the window · ${searchable} found by a title search`);
+
+  const cleaned = await sql("delete from public.songs where id like 'win\\_%'");
+  check("and the window check leaves the database exactly as it found it",
+    cleaned.affectedRows === 320, `${cleaned.affectedRows} rows removed`);
 
 } catch (err) {
   exitCode = 1;

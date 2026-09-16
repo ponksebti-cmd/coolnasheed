@@ -70,6 +70,10 @@ ${extra}--
  * simply applied: a file that says nothing about itself runs, which is the right default.
  */
 const EVIDENCE = [
+  /* the catalogue window is the newest shape `catalog_payload()` can have; the function
+     body itself is the evidence, since nothing else about the payload changed */
+  ["catalogue_window",
+    "case when to_regprocedure('public.catalog_payload()') is null then false else (select pg_get_functiondef('public.catalog_payload()'::regprocedure) like '%limit 300%') end"],
   /* the profile-picture schema is the one that names itself too */
   ["profile_pictures",
     "exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'avatar_path')"],
@@ -172,13 +176,13 @@ if (checkOnly) {
   /* the paste must actually contain the current schema, not merely match a checksum
      of itself: the tables the client reads at boot have to be in the file */
   const text = readFileSync(bothPath, "utf8");
-  const missing = ["public.app_schema", "profile-pictures-1", "create table if not exists public.songs", "studio_drafts"]
+  const missing = ["public.app_schema", "catalogue-window-1", "create table if not exists public.songs", "studio_drafts"]
     .filter((needle) => !text.includes(needle));
   if (missing.length) {
     console.error(`supabase/setup.sql is missing: ${missing.join(", ")}`);
     process.exit(1);
   }
-  console.log("supabase/setup.sql and setup-schema.sql are current — the paste includes app_schema and the audio-only, profile-pictures schema");
+  console.log("supabase/setup.sql and setup-schema.sql are current — the paste includes app_schema and the audio-only, profile-pictures, catalogue-window schema");
   process.exit(0);
 }
 

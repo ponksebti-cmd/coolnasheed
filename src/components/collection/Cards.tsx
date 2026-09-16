@@ -132,7 +132,7 @@ export function CollectionCard({
                 rounded="sm"
               />
             </div>
-            <div className="absolute inset-0 bg-gradient-to-t from-[rgba(3,10,8,0.9)] via-[rgba(3,10,8,0.15)] to-transparent" />
+            <div className="art-scrim absolute inset-0" />
             {collection.titleAr ? (
               <div
                 className="arabic absolute right-3 top-2 text-[15px] text-goldsoft/70"
@@ -282,11 +282,14 @@ export function MiniTrack({
   index,
   queue,
   context,
+  /** a tighter row, for a chart that should not own the page */
+  dense = false,
 }: {
   track: Track;
   index: number;
   queue: string[];
   context?: PlayContext;
+  dense?: boolean;
 }) {
   const { trackId, playing, toggle, playIds } = usePlayer();
   const isCurrent = trackId === track.id;
@@ -294,7 +297,8 @@ export function MiniTrack({
   return (
     <div
       className={clsx(
-        "group flex items-center gap-3 rounded-xl border px-2.5 py-2 transition-colors",
+        "group flex items-center gap-3 rounded-xl border transition-colors",
+        dense ? "px-2 py-1" : "px-2.5 py-2",
         isCurrent
           ? "border-jade/25 bg-jade/[0.07]"
           : "border-transparent hover:border-line hover:bg-surface2/50",
@@ -308,7 +312,12 @@ export function MiniTrack({
       >
         {index + 1}
       </span>
-      <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg ring-1 ring-line">
+      <div
+        className={clsx(
+          "relative shrink-0 overflow-hidden rounded-lg ring-1 ring-line",
+          dense ? "h-8 w-8" : "h-10 w-10",
+        )}
+      >
         <CoverArt
           path={track.artworkPath}
           title={track.title}
@@ -316,7 +325,7 @@ export function MiniTrack({
           rounded="sm"
         />
         <button
-          className="over-art absolute inset-0 grid place-items-center bg-[rgba(3,10,8,0.66)] opacity-0 transition-opacity group-hover:opacity-100"
+          className="over-art art-wash absolute inset-0 grid place-items-center opacity-0 transition-opacity group-hover:opacity-100"
           onClick={() =>
             isCurrent ? toggle() : playIds(queue, index, context)
           }
@@ -333,7 +342,8 @@ export function MiniTrack({
       <div className="min-w-0 flex-1">
         <div
           className={clsx(
-            "truncate text-[13px] font-semibold",
+            "truncate font-semibold",
+            dense ? "text-[12.5px]" : "text-[13px]",
             isCurrent ? "text-jadesoft" : "text-text",
           )}
         >

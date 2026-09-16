@@ -952,7 +952,7 @@ async function main() {
   const schemaLib = await import("../src/lib/schema");
   assert(
     "the client knows what it writes against",
-    schemaLib.EXPECTED_SCHEMA_VERSION === "profile-pictures-1",
+    schemaLib.EXPECTED_SCHEMA_VERSION === "catalogue-window-1",
   );
   assert(
     "a database that is behind is not usable",
@@ -1002,7 +1002,7 @@ async function main() {
 
   stubFetch((url) =>
     url.includes("/rest/v1/app_schema")
-      ? json([{ version: "profile-pictures-1" }])
+      ? json([{ version: "catalogue-window-1" }])
       : json([]),
   );
   const fresh = await schemaLib.checkSchema(true);
@@ -1344,7 +1344,8 @@ async function main() {
   assert(
     "and it contains the table the app asks about its schema",
     canonical.includes("public.app_schema") &&
-      canonical.includes("profile-pictures-1"),
+      canonical.includes("profile-pictures-1") &&
+      canonical.includes("catalogue-window-1"),
   );
   assert(
     "and the picture schema travels in the same paste",
@@ -2177,13 +2178,35 @@ async function main() {
     themeLib.resolveTheme("night", "dawn") === "night" &&
       themeLib.resolveTheme("dawn", "night") === "dawn",
   );
+  /* A value the app wrote while showing it is not a decision. This is the bug that made
+     "light is the default" false in practice: the app stored whatever it resolved, an
+     account row carrying the old `night` column default resolved to night, and the device
+     then insisted on it forever. */
   themeLib.storeTheme("night");
   assert(
-    "and it is remembered where the first paint can find it",
+    "a theme the app was merely showing is not a choice",
     w.localStorage.getItem("coolnasheed.theme") === "night" &&
-      themeLib.readStoredTheme() === "night",
+      themeLib.readStoredTheme() === null,
   );
-  w.localStorage.removeItem("coolnasheed.theme");
+  themeLib.storeTheme("night", { explicit: true });
+  assert(
+    "but a theme somebody picked is remembered where the first paint can find it",
+    themeLib.readStoredTheme() === "night" &&
+      w.localStorage.getItem("coolnasheed.theme.chosen") === "1",
+  );
+  assert(
+    "and picking one in the settings store is a decision too",
+    (() => {
+      w.localStorage.clear();
+      libraryStore.useLibrary.getState().setSetting("theme", "night");
+      const ok =
+        w.localStorage.getItem("coolnasheed.theme.chosen") === "1" &&
+        themeLib.readStoredTheme() === "night";
+      libraryStore.useLibrary.getState().setSetting("theme", "dawn");
+      return ok;
+    })(),
+  );
+  w.localStorage.clear();
 
   const indexHtml = readFileSync(join(process.cwd(), "index.html"), "utf8");
   assert(
@@ -2194,18 +2217,109 @@ async function main() {
     indexHtml.slice(0, 120),
   );
   assert(
+    "and it only lets a chosen theme change that, never a leftover one",
+    indexHtml.includes("coolnasheed.theme.chosen"),
+  );
+  const apiSrcForPrefs = readFileSync(join(process.cwd(), "src/lib/api.ts"), "utf8");
+  assert(
+    "the account learns which themes were choices",
+    /theme_chosen_at = new Date\(\)\.toISOString\(\)/.test(apiSrcForPrefs),
+  );
+  assert(
+    "and the paste heals rows written under the old night default, once",
+    canonical.includes("theme_chosen_at") &&
+      /set theme = 'dawn'\s*\n\s*where theme = 'night'\s*\n\s*and theme_chosen_at is null/.test(
+        canonical,
+      ),
+  );
+  assert(
     "and it does not advertise a synthesis engine any more",
     !/synthesis|synthesi[sz]ed/i.test(indexHtml),
   );
 
-  /* Anything that lays words over artwork has to say so: the scrim stays dark in both
-     themes, so the tokens inside it are pinned back to the night book by `over-art`. */
+  /* Words over artwork sit on a veil, and the veil is a token: charcoal with ivory
+     words in the night book, cream with ink words in the day book. A photograph does
+     not get darker because the page got lighter. */
   const css = readFileSync(join(process.cwd(), "src/index.css"), "utf8");
   assert(
-    "the stylesheet pins the tokens inside an over-art container",
-    /\.over-art \{[^}]*--c-text: #f2ece0/s.test(css) &&
-      /\.over-art \{[^}]*--c-jade: #2fbf8f/s.test(css),
+    "every veil over artwork is a token, not a black gradient",
+    /\.art-scrim \{[^}]*var\(--art-strong\)/s.test(css) &&
+      /\.art-scrim-side \{[^}]*var\(--art-strong\)/s.test(css) &&
+      /\.art-wash-deep \{[^}]*var\(--art-strong\)/s.test(css) &&
+      /\.art-chip \{[^}]*var\(--art-chip\)/s.test(css) &&
+      /\.art-fade-top \{[^}]*var\(--art-strong\)/s.test(css),
   );
+  assert(
+    "and the two books draw a different veil",
+    /:root\[data-theme="night"\] \{[^}]*--art-strong: rgba\(3, 9, 7/s.test(css) &&
+      /:root\[data-theme="dawn"\] \{[^}]*--art-strong: rgba\(247, 242, 232/s.test(css),
+  );
+
+  /* Contrast is arithmetic, so it is checked rather than eyeballed. Every token that
+     puts words on a surface has to clear 4.5:1 against the *darkest* surface of its own
+     book: text-muted appears 200-odd times and much of it is 11px. This is the check
+     that caught the light book being unreadable. */
+  const themeOf = (selector: string): Record<string, string> => {
+    const at = css.indexOf(selector);
+    if (at < 0) return {};
+    const open = css.indexOf("{", at);
+    const body = css.slice(open + 1, css.indexOf("}", open));
+    const found: Record<string, string> = {};
+    for (const line of body.split("\n")) {
+      const m = /^\s*--c-([a-z0-9-]+):\s*(#[0-9a-fA-F]{6})\s*;/.exec(line);
+      if (m) found[m[1]] = m[2];
+    }
+    return found;
+  };
+  const channel = (c: number) =>
+    c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  const luminance = (hex: string) => {
+    const n = parseInt(hex.slice(1), 16);
+    const r = channel(((n >> 16) & 255) / 255);
+    const g = channel(((n >> 8) & 255) / 255);
+    const b = channel((n & 255) / 255);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a: string, b: string) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  const WORD_TOKENS = [
+    "text",
+    "text-2",
+    "muted",
+    "jade",
+    "jade-soft",
+    "gold",
+    "gold-soft",
+    "turq",
+    "madder",
+    "cobalt",
+  ];
+  for (const [book, selector] of [
+    ["night", ':root[data-theme="night"] {'],
+    ["dawn", ':root[data-theme="dawn"] {'],
+  ] as const) {
+    const t = themeOf(selector);
+    const surfaces = ["bg", "surface", "surface-2", "surface-3", "elev"].map(
+      (key) => t[key],
+    );
+    const thin: string[] = [];
+    for (const token of WORD_TOKENS) {
+      const value = t[token];
+      if (!value) {
+        thin.push(`${token} (missing)`);
+        continue;
+      }
+      const worst = Math.min(...surfaces.map((s) => contrast(value, s)));
+      if (worst < 4.5) thin.push(`${token} ${worst.toFixed(2)}:1`);
+    }
+    assert(
+      `every word token in the ${book} book clears 4.5:1`,
+      thin.length === 0,
+      thin.join(", "),
+    );
+  }
   assert(
     "and a cover's shadow is a token, not a black bloom",
     /--shadow-art:/.test(css) &&
@@ -2217,6 +2331,36 @@ async function main() {
     "the light book lifts with its own colour too",
     /:root\[data-theme="night"\] \{[^}]*--shadow-lift: rgba\(0, 0, 0/s.test(css) &&
       /:root\[data-theme="dawn"\] \{[^}]*--shadow-lift: rgba\(20, 44, 34/s.test(css),
+  );
+  assert(
+    "gold ink is a token too, because gold is bright at night and dark in daylight",
+    /:root\[data-theme="night"\] \{[^}]*--c-gold-ink: #241a06/s.test(css) &&
+      /:root\[data-theme="dawn"\] \{[^}]*--c-gold-ink: #fdf8ec/s.test(css) &&
+      /\.btn-gold \{[^}]*color: var\(--c-gold-ink\)/s.test(css),
+  );
+  assert(
+    "and the ink over each book's gold is readable",
+    (() => {
+      const dawnT = themeOf(':root[data-theme="dawn"] {');
+      const nightT = themeOf(':root[data-theme="night"] {');
+      const ratioOf = (a: string, b: string) => {
+        const lum = (hex: string) => {
+          const n = parseInt(hex.slice(1), 16);
+          const ch = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+          return (
+            0.2126 * ch(((n >> 16) & 255) / 255) +
+            0.7152 * ch(((n >> 8) & 255) / 255) +
+            0.0722 * ch((n & 255) / 255)
+          );
+        };
+        const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+        return (hi + 0.05) / (lo + 0.05);
+      };
+      return (
+        ratioOf(dawnT["gold-ink"], dawnT["gold-soft"]) >= 4.5 &&
+        ratioOf(nightT["gold-ink"], nightT["gold-soft"]) >= 4.5
+      );
+    })(),
   );
   assert(
     "and no rule outside the night book still blooms black",
@@ -2275,6 +2419,88 @@ async function main() {
     "every surface that writes over artwork carries the class",
     missingOverArt.length === 0,
     missingOverArt.join(", "),
+  );
+
+  /* ------------------------------------------------------- a crash is not a blank page */
+
+  const boundarySrc = readFileSync(
+    join(process.cwd(), "src/components/layout/ErrorBoundary.tsx"),
+    "utf8",
+  );
+  assert(
+    "a render that throws is caught rather than left as a white screen",
+    /getDerivedStateFromError/.test(boundarySrc) &&
+      /componentDidCatch/.test(boundarySrc),
+  );
+  assert(
+    "and the way out is a retry, a home link and a reload — not a stack trace",
+    /Try again/.test(boundarySrc) &&
+      /Go home/.test(boundarySrc) &&
+      /window\.location\.reload\(\)/.test(boundarySrc),
+  );
+  const shellSrc = readFileSync(
+    join(process.cwd(), "src/components/layout/AppShell.tsx"),
+    "utf8",
+  );
+  const mainSrc = readFileSync(join(process.cwd(), "src/main.tsx"), "utf8");
+  assert(
+    "it is mounted around the page and around the whole app, so the tab bar survives",
+    /<ErrorBoundary label="this page">/.test(shellSrc) &&
+      /<ErrorBoundary label="the app"/.test(mainSrc),
+  );
+
+  /* ------------------------------------------------- starting over leaves nothing behind */
+
+  const apiSrcForCleanup = readFileSync(join(process.cwd(), "src/lib/api.ts"), "utf8");
+  assert(
+    "a discarded draft takes its uploads with it",
+    /removeUploads: async/.test(apiSrcForCleanup),
+  );
+  const studioSrc = readFileSync(join(process.cwd(), "src/store/studio.ts"), "utf8");
+  assert(
+    "starting over, clearing the recording and replacing a file all tidy up",
+    (studioSrc.match(/removeUploads\(/g) ?? []).length >= 4 &&
+      /if \(!stillUsed\(entries, discarded\.audioPath\)\)/.test(studioSrc),
+  );
+  assert(
+    "and a file a published nasheed still plays is never deleted",
+    /function stillUsed\(/.test(studioSrc) &&
+      /song\.audioPath === path \|\| song\.artworkPath === path/.test(studioSrc),
+  );
+
+  /* ------------------------------------------- the catalogue is fetched, not carried */
+
+  const searchSrc = readFileSync(join(process.cwd(), "src/pages/Search.tsx"), "utf8");
+  assert(
+    "search asks the database instead of only looking at what booted",
+    /api\.songs\(\{\s*q: needle/.test(searchSrc) &&
+      /offset: remote\.next/.test(searchSrc) &&
+      /searchTracks\(q\)/.test(searchSrc),
+  );
+  assert(
+    "and it says so while it waits, and keeps a way to ask for more",
+    /Searching every nasheed/.test(searchSrc) && /More results/.test(searchSrc),
+  );
+  const bootSrc = readFileSync(join(process.cwd(), "src/lib/boot.ts"), "utf8");
+  assert(
+    "a page that needs a song outside the window can fetch it",
+    /export async function ensureSongs/.test(bootSrc) &&
+      /export async function ensureArtistSongs/.test(bootSrc) &&
+      /api\.songs\(\{ ids: missing \}\)/.test(bootSrc),
+  );
+  const catalogSrc = readFileSync(join(process.cwd(), "src/data/catalog.ts"), "utf8");
+  assert(
+    "and the registry can take late arrivals without losing what it has",
+    /export function adoptSongs/.test(catalogSrc),
+  );
+  assert(
+    "the loved list and a reciter's page ask for what the window left out",
+    /ensureSongs\(library\.liked\)/.test(
+      readFileSync(join(process.cwd(), "src/pages/LibraryPage.tsx"), "utf8"),
+    ) &&
+      /ensureArtistSongs\(id\)/.test(
+        readFileSync(join(process.cwd(), "src/pages/ArtistPage.tsx"), "utf8"),
+      ),
   );
 
   /* ------------------------------------------------------------------ noise */

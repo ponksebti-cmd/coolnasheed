@@ -15,7 +15,13 @@
  */
 
 import { useEffect, useState } from "react";
-import { TRACKS, catalogSyncedAt, hydrateCatalog } from "../data/catalog";
+import {
+  TRACKS,
+  adoptSongs,
+  catalogSyncedAt,
+  getTrack,
+  hydrateCatalog,
+} from "../data/catalog";
 import { api, invalidateCatalog } from "./api";
 import { backendLabel, hasSupabase } from "./supabase";
 import { checkSchema, schemaProblem, type SchemaState } from "./schema";
@@ -143,6 +149,40 @@ export async function bootApp(): Promise<BootStatus> {
   }
 
   return status(source, error, needsSetup, schema);
+}
+
+/**
+ * Fill in what the catalogue window left out.
+ *
+ * The boot payload is bounded on purpose (see `20260917090000_catalogue_window.sql`):
+ * a project with ten thousand nasheeds should still open in a moment. Everything that
+ * can point at a song the window may not hold — a loved one, a reciter's back pages —
+ * calls these and the registry grows to fit.
+ *
+ * Both are quiet: `false`/`0` when the server cannot be reached, because a page that
+ * already has something to show should not be replaced by an error.
+ */
+export async function ensureSongs(ids: string[]): Promise<number> {
+  if (!hasSupabase || !ids.length) return 0;
+  const missing = ids.filter((id) => !getTrack(id)).slice(0, 200);
+  if (!missing.length) return 0;
+  try {
+    const page = await api.songs({ ids: missing });
+    return adoptSongs(page.items);
+  } catch {
+    return 0;
+  }
+}
+
+/** Everything a reciter published, for their page, including what the window missed. */
+export async function ensureArtistSongs(handle: string): Promise<number> {
+  if (!hasSupabase || !handle) return 0;
+  try {
+    const page = await api.songs({ owner: handle, limit: 200 });
+    return adoptSongs(page.items);
+  } catch {
+    return 0;
+  }
 }
 
 /** Re-read the catalogue after publishing, so the new nasheed is everywhere at once. */

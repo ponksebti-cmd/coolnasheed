@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { clsx } from "clsx";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { PlayerBar } from "../player/PlayerBar";
@@ -132,7 +133,7 @@ export function AppShell() {
       {mobileNavOpen ? (
         <div className="fixed inset-0 z-[95] lg:hidden veil-enter">
           <div
-            className="absolute inset-0 bg-[rgba(3,9,7,0.7)] backdrop-blur-sm"
+            className="scrim absolute inset-0 backdrop-blur-sm"
             onClick={() => setMobileNav(false)}
             aria-hidden
           />
@@ -206,7 +207,11 @@ export function AppShell() {
                 "route-in mx-auto w-full max-w-[1400px] px-4 pb-10 pt-5 sm:px-6 lg:px-8",
               )}
             >
-              <Outlet />
+              {/* A page that throws leaves the tab bar, the queue and the player
+                  untouched; the boundary swaps the page for a way out. */}
+              <ErrorBoundary label="this page">
+                <Outlet />
+              </ErrorBoundary>
             </main>
           </div>
 

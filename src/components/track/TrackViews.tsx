@@ -227,20 +227,20 @@ export function TrackCard({
             <div className="absolute inset-0 transition-transform duration-[900ms] ease-out group-hover:scale-[1.06]">
               <CoverArt path={track.artworkPath} title={track.title} className="h-full w-full" rounded="sm" />
             </div>
-            <div className="absolute inset-0 bg-gradient-to-t from-[rgba(3,10,8,0.86)] via-[rgba(3,10,8,0.12)] to-transparent" />
+            <div className="art-scrim absolute inset-0" />
             <div className="absolute left-3 top-3 flex items-center gap-2">
               {isCurrent ? (
-                <span className="flex items-center gap-1.5 rounded-full bg-[rgba(3,10,8,0.7)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-jade backdrop-blur-md">
+                <span className="art-chip flex items-center gap-1.5 rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-jade backdrop-blur-md">
                   <Equalizer active={playing} bars={3} /> {playing ? "playing" : "paused"}
                 </span>
               ) : null}
               {track.lines.some((l) => l.note?.startsWith("Qurʾān")) ? (
-                <span className="rounded-full bg-[rgba(3,10,8,0.7)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-goldsoft backdrop-blur-md">
+                <span className="art-chip rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-goldsoft backdrop-blur-md">
                   āyah
                 </span>
               ) : null}
             </div>
-            <span className="absolute bottom-3 left-3 rounded-md bg-[rgba(3,10,8,0.66)] px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums text-text2 backdrop-blur-md">
+            <span className="art-chip absolute bottom-3 left-3 rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums text-text2 backdrop-blur-md">
               {formatTime(durationOf(track))}
             </span>
           </div>
@@ -281,7 +281,7 @@ export function TrackCard({
           />
         </div>
         <div className="absolute right-2.5 top-2.5 opacity-0 transition-opacity group-hover:opacity-100">
-          <span className="block rounded-full bg-[rgba(3,10,8,0.6)] backdrop-blur-md">
+          <span className="art-chip block rounded-full backdrop-blur-md">
             <LikeButton trackId={track.id} size={15} className="!p-2 !text-goldsoft" />
           </span>
         </div>

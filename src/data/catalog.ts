@@ -75,6 +75,45 @@ export function hydrateCatalog(payload: Partial<CatalogResponse>): number {
   return TRACKS.length;
 }
 
+/**
+ * Add songs the server handed over later, without disturbing what is already here.
+ *
+ * The boot payload is a window — the newest few hundred nasheeds, not necessarily the
+ * whole library of the world — so a page that needs an older one (a loved nasheed from
+ * last year, the back catalogue of a reciter) asks for it and folds the answer in.
+ * Order is kept: the booted window first, the adopted ones appended in arrival order.
+ */
+export function adoptSongs(songs: Song[]): number {
+  if (!songs.length) return version;
+  let added = 0;
+  for (const song of songs) {
+    const at = TRACKS.findIndex((existing) => existing.id === song.id);
+    if (at >= 0) TRACKS[at] = song;
+    else {
+      TRACKS.push(song);
+      added += 1;
+    }
+  }
+  if (added) reindex();
+  return added;
+}
+
+/** Add reciters the server handed over later (an artist page for somebody off-window). */
+export function adoptArtists(artists: ArtistCard[]): number {
+  if (!artists.length) return version;
+  let added = 0;
+  for (const artist of artists) {
+    const at = ARTISTS.findIndex((existing) => existing.id === artist.id);
+    if (at >= 0) ARTISTS[at] = artist;
+    else {
+      ARTISTS.push(artist);
+      added += 1;
+    }
+  }
+  if (added) reindex();
+  return added;
+}
+
 /** Empty the registry — what signing out, or losing the connection, does not do. */
 export function resetCatalog(): void {
   hydrateCatalog({ songs: [], artists: [], collections: [], tags: [], generatedAt: Date.now() });

@@ -16,10 +16,22 @@ export type Theme = "night" | "dawn";
 export const DEFAULT_THEME: Theme = "dawn";
 
 const KEY = "coolnasheed.theme";
+/**
+ * Whether the value in `KEY` is a decision or just what the app happened to be showing.
+ *
+ * The distinction matters because an automatically written value is not a preference.
+ * Every version before this one wrote whatever theme resolved — including one inherited
+ * from an account row whose column default was `night` — and then read it back as though
+ * somebody had asked for it. So the house default was light on paper and dark in
+ * practice. Only a theme the listener actually picked sets the marker; anything else is
+ * ignored, and the app falls back to the account, then to the light book.
+ */
+const CHOSEN = "coolnasheed.theme.chosen";
 
-/** The theme this device last showed, or null if it has never chosen. */
+/** The theme this device actually chose, or null if it has never chosen. */
 export function readStoredTheme(): Theme | null {
   try {
+    if (localStorage.getItem(CHOSEN) !== "1") return null;
     const value = localStorage.getItem(KEY);
     return value === "night" || value === "dawn" ? value : null;
   } catch {
@@ -28,9 +40,17 @@ export function readStoredTheme(): Theme | null {
   }
 }
 
-export function storeTheme(theme: Theme): void {
+/**
+ * Keep the pre-paint value in step.
+ *
+ * `explicit` is the listener pressing the toggle: that is a decision, and it sticks.
+ * Without it the value is only written so the first paint matches what is on screen —
+ * it is not read back as a choice.
+ */
+export function storeTheme(theme: Theme, options?: { explicit?: boolean }): void {
   try {
     localStorage.setItem(KEY, theme);
+    if (options?.explicit) localStorage.setItem(CHOSEN, "1");
   } catch {
     /* the app still switches; it just cannot remember it before the next paint */
   }

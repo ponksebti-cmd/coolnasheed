@@ -1382,6 +1382,39 @@ export const api = {
     await client.storage.from(AVATAR_BUCKET).remove([path]);
   },
 
+  /**
+   * Removes objects the draft put in storage but nobody needs any more.
+   *
+   * `discardDraft` only ever deleted the row, so every discarded recording and cover
+   * stayed in the bucket for good — invisible, and still counted against the quota.
+   * The caller decides which paths are safe to drop: a path a published nasheed still
+   * points at must never be passed here.
+   *
+   * Failures are swallowed: an orphaned object is a housekeeping problem, and it must
+   * not turn "start over" into an error message.
+   */
+  removeUploads: async (
+    paths: { bucket: StorageBucket; path: string }[],
+  ): Promise<void> => {
+    const wanted = paths.filter((entry) => !!entry.path);
+    if (!wanted.length) return;
+    let client: SupabaseClient;
+    try {
+      client = sb("tidy up your uploads");
+    } catch {
+      return;
+    }
+    const byBucket = new Map<StorageBucket, string[]>();
+    for (const entry of wanted) {
+      const list = byBucket.get(entry.bucket) ?? [];
+      list.push(entry.path);
+      byBucket.set(entry.bucket, list);
+    }
+    for (const [bucket, list] of byBucket) {
+      await client.storage.from(bucket).remove(list).catch(() => undefined);
+    }
+  },
+
   /* ------------------------------------------------------------ analytics */
 
   play: async (input: PlayInput): Promise<PlayReceipt> => {
@@ -1797,7 +1830,11 @@ export const api = {
   savePrefs: async (patch: Partial<PlayerPrefs>): Promise<PlayerPrefs> => {
     const { client, uid } = await requireUid("save your settings");
     const update: Record<string, unknown> = {};
-    if (patch.theme !== undefined) update.theme = patch.theme;
+    if (patch.theme !== undefined) {
+      update.theme = patch.theme;
+      /* the timestamp is what tells a real choice from the old column default */
+      update.theme_chosen_at = new Date().toISOString();
+    }
     if (patch.volume !== undefined)
       update.volume = Math.min(Math.max(patch.volume, 0), 1);
     if (patch.muted !== undefined) update.muted = patch.muted;

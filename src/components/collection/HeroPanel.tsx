@@ -55,7 +55,7 @@ export function HeroPanel({
         }}
         aria-hidden
       />
-      <div className="absolute inset-0 bg-gradient-to-r from-[rgba(4,11,9,0.94)] via-[rgba(4,11,9,0.82)] to-[rgba(4,11,9,0.5)]" />
+      <div className="art-scrim-side absolute inset-0" />
       <div className="grain absolute inset-0" />
 
       <div className={clsx("relative flex flex-col gap-6 p-5 md:flex-row md:items-end md:p-8", big ? "md:min-h-[380px]" : "md:min-h-[280px]")}>

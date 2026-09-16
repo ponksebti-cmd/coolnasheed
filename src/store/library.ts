@@ -16,7 +16,7 @@ import { api, errorMessage, type Bootstrap } from "../lib/api";
 import { isPreview } from "../data/preview";
 import { useUi } from "./ui";
 import { isSignedIn } from "./session";
-import { readStoredTheme, resolveTheme } from "../lib/theme";
+import { readStoredTheme, resolveTheme, storeTheme } from "../lib/theme";
 import { DEFAULT_PREFS, type Accent, type DhikrState, type HistoryRow, type LyricScript, type Playlist as ServerPlaylist } from "../../shared/types";
 
 export type Settings = {
@@ -325,6 +325,10 @@ export const useLibrary = create<LibraryState>((set, get) => ({
   async setSetting(key, value) {
     const settings = { ...get().settings, [key]: value };
     set({ settings });
+    /* Choosing a theme is the one setting that also belongs to the device: mark it as a
+       decision, so it outranks the account and the house default on this machine. */
+    if (key === "theme" && (value === "night" || value === "dawn"))
+      storeTheme(value, { explicit: true });
     persistSettings(settings);
   },
 

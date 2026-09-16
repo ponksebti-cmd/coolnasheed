@@ -17,10 +17,17 @@ import {
   tagCounts,
 } from "../data/catalog";
 import { useCatalogVersion } from "../lib/hooks";
+import { api } from "../lib/api";
+import { errorMessage } from "../lib/errors";
+import { hasSupabase } from "../lib/supabase";
+import { adoptSongs } from "../data/catalog";
 import { plural } from "../lib/format";
 import type { Track } from "../data/types";
 
 type Sort = "relevance" | "plays" | "newest" | "longest" | "shortest" | "az";
+
+/** How many nasheeds one page of server search holds. */
+const SEARCH_PAGE = 60;
 
 const SORTS: { id: Sort; label: string }[] = [
   { id: "relevance", label: "Relevance" },
@@ -57,8 +64,83 @@ export default function Search() {
   const tags = useMemo(() => tagCounts(), [version]);
   const suggestions = useMemo(() => tags.slice(0, 9).map((entry) => entry.tag), [tags]);
 
+  /* Searching asks the database, not the window.
+   *
+   * The catalogue the app boots with is bounded — the newest few hundred nasheeds — so a
+   * search that only looked inside it would quietly miss everything older. Typing sends
+   * the words to `songs?q=`, which reads the title, the transliteration, the Arabic and
+   * the note, and pages through the whole catalogue. The local search stays as the
+   * fallback for a project that is not configured or a server that cannot be reached;
+   * without a query the page browses what it already has rather than asking for all of
+   * it. */
+  const [remote, setRemote] = useState<{
+    query: string;
+    items: Track[];
+    next: number | null;
+  } | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [more, setMore] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const needle = q.trim();
+    if (!needle || !hasSupabase) {
+      setRemote(null);
+      setSearchError(null);
+      return;
+    }
+    let live = true;
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const page = await api.songs({ q: needle, limit: SEARCH_PAGE });
+        if (!live) return;
+        adoptSongs(page.items);
+        setRemote({ query: needle, items: page.items, next: page.next });
+        setSearchError(null);
+      } catch (err) {
+        if (!live) return;
+        setRemote(null);
+        setSearchError(errorMessage(err, "Search is not answering."));
+      } finally {
+        if (live) setSearching(false);
+      }
+    }, 220);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [q]);
+
+  const loadMore = async () => {
+    if (!remote?.next) return;
+    setMore(true);
+    try {
+      const page = await api.songs({
+        q: remote.query,
+        limit: SEARCH_PAGE,
+        offset: remote.next,
+      });
+      adoptSongs(page.items);
+      setRemote({
+        query: remote.query,
+        items: [...remote.items, ...page.items],
+        next: page.next,
+      });
+    } catch (err) {
+      setSearchError(errorMessage(err, "More results would not load."));
+    } finally {
+      setMore(false);
+    }
+  };
+
   const results = useMemo<Track[]>(() => {
-    let list = q.trim() ? searchTracks(q) : TRACKS.slice();
+    const fromServer = remote && remote.query === q.trim() ? remote.items : null;
+    let list = fromServer
+      ? fromServer.slice()
+      : q.trim()
+        ? searchTracks(q)
+        : TRACKS.slice();
     if (tag) list = list.filter((track) => track.tags.includes(tag));
 
     const sorted = list.slice();
@@ -82,7 +164,7 @@ export default function Search() {
         break;
     }
     return sorted;
-  }, [q, tag, sort, version]);
+  }, [q, tag, sort, version, remote]);
 
   const artists = useMemo(() => (q.trim() ? searchArtists(q) : []), [q, version]);
   const collections = useMemo(() => (q.trim() ? searchCollections(q) : []), [q, version]);
@@ -196,6 +278,21 @@ export default function Search() {
           }
         />
 
+        {searching && !results.length ? (
+          <div className="panel flex items-center gap-3 rounded-2xl px-4 py-6 text-sm text-muted">
+            <Icon name="search" size={16} className="text-jade" />
+            Searching every nasheed…
+          </div>
+        ) : null}
+
+        {searchError && !results.length ? (
+          <EmptyState
+            icon="cloudOff"
+            title="Search is not answering"
+            msg={`${searchError} The catalogue you already have is still browsable — clear the box to see it.`}
+          />
+        ) : null}
+
         {TRACKS.length === 0 ? (
           <EmptyState
             icon="cloudOff"
@@ -254,6 +351,15 @@ export default function Search() {
               ? ` · ${results.filter((t) => t.lines.some((l) => typeof l.t === "number")).length} with timed lyrics`
               : ""}
           </span>
+          {remote?.next ? (
+            <button
+              className="btn btn-ghost !px-3 !py-1.5"
+              onClick={() => void loadMore()}
+              disabled={more}
+            >
+              {more ? "Loading…" : "More results"}
+            </button>
+          ) : null}
           <Link to="/about" className="ml-auto font-semibold text-jade hover:underline underline-offset-2">
             How the catalogue works
           </Link>

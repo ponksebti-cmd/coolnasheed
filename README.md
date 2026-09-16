@@ -28,18 +28,19 @@ npm run verify            # typecheck + contract + database + bundles + build + 
 
 | | |
 |---|---|
-| **Catalogue** | recordings people published. Empty until somebody uploads one — no seed, no generated rows |
+| **Catalogue** | recordings people published. Empty until somebody uploads one — no seed, no generated rows. Boot reads a bounded window; search, a loved nasheed and a reciter's page fetch whatever the window left out |
 | **Accounts** | Supabase Auth (email + password). Listening, searching and reading never need one; loving, noting, following, publishing and moderating do |
 | **Lyrics** | per-word karaoke fill, three scripts (transliteration / العربية / English), a line rail, translations, and source notes for Qurʾān and public-domain lines |
 | **Studio** | five steps: the recording, the words, the details, the cover, publish. Timings are optional — publishing has never required previewing or marking |
 | **Player** | one reused `<audio>` element, an honest error when a file will not decode, three retries with backoff when the network drops, a transport, a queue, an immersive view, and the words over the cover |
+| **When something breaks** | a render that throws shows a way out instead of a blank page; a discarded draft takes its uploads out of storage with it |
 | **Library** | loved nasheeds, your sets, play history, listening totals — rows in Postgres, so they follow you to the next device |
 | **Profile pictures** | one image you upload, ≤ 1 MB, in its own public bucket. The row stores the path; the circle beside your name shows the picture, and initials when there is none |
 | **Analytics** | play beacons → per-day rollups → charts. Per-nasheed listeners and completion, per-account history, a staff dashboard at `/admin` |
 | **Moderation** | report a note, three reports hide it automatically, staff resolve it — the row stays, so a thread never silently renumbers |
 | **Tasbīḥ** | a dhikr counter in the sidebar — six phrases with 33 / 100 targets |
-| **Search** | titles, lyric text, publishers, tags; ⌘K command palette |
-| **Themes** | *dawn* (the house default) and *night garden*, both fully tokenized |
+| **Search** | titles, lyric text, publishers, tags; ⌘K command palette. A query goes to the database, not to whatever the browser happens to hold |
+| **Themes** | *dawn* (the house default, before React exists) and *night garden*. Only a theme somebody actually picked is remembered as a choice — a leftover value cannot keep a device dark |
 
 Keyboard: `Space` play/pause · `N`/`B` next/previous · `←`/`→` seek · `I` immersive ·
 `L` love · `M` mute · `⌘K` palette · `/` search · `?` every shortcut. Shortcuts are ignored
@@ -98,15 +99,28 @@ Uploads never pass through a function. The browser puts the file straight into
 is then handed a *path*. A 5 MB recording costs no invocation time, no function memory, and no
 rewrite.
 
+### The theme that was never a choice
+
+The house default is the light book — in `index.html` before React exists, in `DEFAULT_PREFS`, and in
+the database. That was not always true, and the old default could not be told apart from a decision:
+`user_prefs.theme` defaulted to `night`, the old client saved the whole settings row on *any* change,
+and every device that had never chosen inherited the row and wrote it down as its own. The result was
+a light default that nobody ever saw.
+
+So a choice is now marked. `coolnasheed.theme.chosen` in `localStorage` marks a device decision, and
+picking a theme writes `theme_chosen_at` on the row; a value the app was merely showing counts for
+nothing. Migration 8 puts the unmarked rows back on the house default once — after that, choosing
+night works and stays.
+
 ### Knowing which version of itself the database is
 
-`public.app_schema` holds one row and one string — `profile-pictures-1` — and the client reads it at
+`public.app_schema` holds one row and one string — `catalogue-window-1` — and the client reads it at
 boot (`src/lib/schema.ts`). A project still running an older shape fails in ways that point
 somewhere else entirely: the old `songs.maqam` is `NOT NULL` and the audio-only client does not
 send it, so publishing dies on a column nobody can see, and `studio_drafts` does not exist yet,
 so drafts save nothing. The same check covers the step from `audio-only-1` to `audio-only-2`:
-`accent` and `year` are columns of a nasheed that no longer exist, so a project one migration
-behind says so rather than half-working. So the app asks the database rather than guessing, and says one of:
+`accent` and `year` are columns of a nasheed that no longer exist, and the boot payload is bounded
+in `catalogue-window-1`, so a project one migration behind says so rather than half-working. So the app asks the database rather than guessing, and says one of:
 
 - **behind** — "This database is an older version of CoolNasheed's schema … part of what this
   build writes has nowhere to go until it is updated", with a button that copies the SQL.
@@ -117,6 +131,22 @@ behind says so rather than half-working. So the app asks the database rather tha
 It is a plain table rather than a function on purpose. A function that does not exist and a
 function that failed look identical from the browser, and that ambiguity is exactly what makes
 this class of bug take an evening to find.
+
+### The catalogue is a window, not the whole world
+
+`catalog_payload()` hands the browser the newest **300 nasheeds and 200 publishers** — enough for
+the home page, the rails and the tag cloud, and bounded, so the first paint does not grow with the
+catalogue. Nothing is hidden: the same rows are public and three things reach past the window.
+
+| What needs more | How it asks |
+| --- | --- |
+| a search | `songs?q=` — `ilike` over the title, the transliteration, the Arabic and the note, through a trigram index, 60 rows at a time with a "More results" tail |
+| a loved nasheed older than the window | `ensureSongs(ids)` in `src/lib/boot.ts`, which folds the answer into the registry (`adoptSongs`) |
+| a reciter's back catalogue | `ensureArtistSongs(handle)`, the same way |
+
+The window is the newest rows, which is the order the home page reads them in, and `npm run sql:test`
+proves that against a database holding 320 nasheeds: 300 travel, the newest ones travel, and
+everything left out is still in the table and still findable.
 
 ### What the database does for itself
 
@@ -151,7 +181,7 @@ this class of bug take an evening to find.
 
 ## Setting it up
 
-**One command builds the database.** It connects, applies the five migrations, and then
+**One command builds the database.** It connects, applies the migrations, and then
 checks its own work from the outside — the way a browser would:
 
 ```bash
@@ -183,7 +213,7 @@ counts the tables over PostgREST, calls `catalog_payload()` the way the client d
 Anything missing is printed with the reason.
 
 **If you would rather not run a script**, `npm run sql:bundle` writes `supabase/setup.sql` —
-all five migrations in one file — and you can paste it into **Supabase Studio → SQL Editor →
+every migration in one file — and you can paste it into **Supabase Studio → SQL Editor →
 New query** and press Run. The app serves that same file at `/setup.sql`, and when it detects a
 database that is missing the schema or one migration behind, it offers a button that copies the
 whole thing to your clipboard. `npm run verify` fails if the bundled files no longer match
@@ -290,24 +320,30 @@ The house is bound in *dawn* — cream ground, deep emerald ink — with the *ni
 (a near-black emerald ground, jade light, aged gold for anything sacred or quoted, ivory for
 text, turquoise and madder held back as accents) one toggle away. `index.html` reads the
 device's choice before React exists, so the first paint is the right one; a device that has
-never chosen gets dawn, whatever the account's saved row says.
+never *chosen* gets dawn, whatever the account's saved row says — the value the app was merely
+showing is not treated as a preference.
 
 ```
-night   bg #070F0C   jade #2FBF8F   gold #D9B871   ivory #F2ECE0   turq #35B7B0   madder #C4644A
-dawn    bg #F4EFE3   jade #148A63   gold #9D7A2C   ink  #16211C
+night   bg #070F0C   jade #2FBF8F   gold #D9B871   ivory #F2ECE0   turq #35B7B0   madder #CD7D67
+dawn    bg #F4EFE3   jade #117453   gold #7D6123   ink  #12241D
 ```
+
+Both books are held to 4.5:1 by a check in the smoke run: every token that carries words has to
+clear it against the darkest surface it can land on, which is how the light book's accents were
+caught being unreadable on `#ece3cf` and brought down.
 
 Colors live as CSS custom properties under `:root[data-theme]` and are exposed to Tailwind v4
 through `@theme`, so components say `text-jade` / `bg-surface2` and the whole app re-skins on
 one attribute. Type pairs a display serif for poetry with a neutral sans for chrome; Arabic is
 set RTL with its own size scale.
 
-**A picture is a dark room in both themes.** Any surface that writes over artwork — a hero
-panel, a cover card, the full-screen player — carries `over-art`, which pins the surface, text
-and accent tokens inside it back to the night book: the scrim under a photograph stays near-black
-because the photograph does not get brighter when the page does. Covers cast `--shadow-art`, which
-is a black bloom at night and a soft green-tinted one in daylight, rather than a hard black smear
-on cream.
+**Words over artwork sit on a veil, and the veil is a token.** Any surface that writes over
+artwork — a hero panel, a cover card, the full-screen player — carries `over-art` and one of the
+`.art-*` veils (`art-scrim`, `art-scrim-side`, `art-wash`, `art-chip`, `art-fade-*`). They used to
+be hard-coded black gradients, which is why a light-mode page had dark smears through it; now
+`--art-strong` and its siblings are charcoal with ivory words in the night book and cream with ink
+words in the daylight book. A photograph does not get darker because the page got lighter. Covers
+cast `--shadow-art`, a black bloom at night and a soft green-tinted one in daylight.
 
 **Elevation is a token too.** Everything that floats — frosted glass, a card on hover, the nav
 pill, the dimmer behind a dialog — takes its shadow and its veil from `--shadow-lift` and `--scrim`.
@@ -340,7 +376,7 @@ turns all of it off.
 supabase/
   migrations/  core schema + triggers · Postgres functions · RLS policies + grants ·
                storage buckets · audio-only shape + app_schema · profile pictures
-               (7 migrations, version profile-pictures-1)
+               (8 migrations, version catalogue-window-1)
   functions/   catalog · analytics · publish · moderate · account · health
     _shared/     cors, json/errors, db clients, auth, validation, cache, song mappers
   seed.sql     intentionally empty — the catalogue is what people upload
@@ -396,7 +432,7 @@ that `app_schema` is readable by anyone and writable by nobody — and then the 
 setup file has to survive: pasted onto a fresh project, onto one that is a migration behind,
 onto one that already has everything (twice, for good measure), and onto one built by the CLI
 where the file has to work out for itself what has already been done.
-Current run: **141 checks.**
+Current run: **151 checks.**
 
 Publishing has two validators, and a pair of hand-written mirrors is a pair that drifts, so
 `npm run contract:test` holds both to `shared/fixtures/publish-cases.json` (24 cases, 2 stored rows):
@@ -423,7 +459,7 @@ tapped, keeps its own dark ground in either theme, and steps back one place on `
 account gates, the keyboard staying out of the way while you type, the focus landing on the
 first field of a dialog rather than its Close button, toasts, upload fitting, and every route
 rendering.
-Current run: **187 checks.**
+Current run: **208 checks.**
 
 `npm run functions:bundle` bundles all six Edge Functions with the esbuild that is already a
 dependency, which proves every file parses and every import resolves on a machine with no Deno

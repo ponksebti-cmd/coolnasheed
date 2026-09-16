@@ -26,8 +26,9 @@ import type {
   Song,
   SongDraft,
   SongStatus,
+  StorageBucket,
 } from "../../shared/types";
-import { DEFAULT_PREFS } from "../../shared/types";
+import { AUDIO_BUCKET, ARTWORK_BUCKET, DEFAULT_PREFS } from "../../shared/types";
 
 export const EMPTY_LINE: DraftLine = {
   tr: "",
@@ -53,6 +54,25 @@ export const EMPTY_DRAFT: SongDraft = {
 };
 
 export type PublishError = { message: string; field?: string };
+
+/**
+ * Whether an object in storage is still spoken for.
+ *
+ * A draft's recording is uploaded under a fresh name every time, and "start over",
+ * "replace the audio" and "replace the cover" all leave the old object behind. Deleting
+ * one is only safe while no published nasheed points at it — editing an existing
+ * nasheed puts *its* paths in the draft, and those files are not the draft's to throw
+ * away.
+ */
+function stillUsed(
+  songEntries: { audioPath: string | null; artworkPath: string | null }[],
+  path: string | null,
+): boolean {
+  if (!path) return true;
+  return songEntries.some(
+    (song) => song.audioPath === path || song.artworkPath === path,
+  );
+}
 
 export type UploadState = {
   /** 0..1 while an upload is running, null when nothing is uploading */
@@ -326,6 +346,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       if (previous) URL.revokeObjectURL(previous);
       set({ previewUrl: URL.createObjectURL(file) });
     }
+    const previousAudio = get().draft.audioPath;
     set({ error: null, preparing: true, uploadProgress: null });
     try {
       /* A recording over the limit is transcoded here, in the browser, before a byte
@@ -339,6 +360,11 @@ export const useStudio = create<StudioState>((set, get) => ({
         audioBytes: uploaded.bytes,
         audioMime: uploaded.mime,
       });
+      /* the file this one replaces is nobody's now */
+      if (!stillUsed(get().entries, previousAudio))
+        void api.removeUploads([
+          { bucket: AUDIO_BUCKET, path: previousAudio! },
+        ]);
       return true;
     } catch (err) {
       set({
@@ -358,11 +384,16 @@ export const useStudio = create<StudioState>((set, get) => ({
       useUi.getState().requestAuth({ label: "Sign in to upload cover art" });
       return false;
     }
+    const previousArtwork = get().draft.artworkPath;
     set({ error: null, preparing: true });
     try {
       /* Cover art over 2 MB is resized here before it is uploaded. */
       const uploaded = await api.uploadArtwork(file);
       get().setDraft({ artworkPath: uploaded.path });
+      if (!stillUsed(get().entries, previousArtwork))
+        void api.removeUploads([
+          { bucket: ARTWORK_BUCKET, path: previousArtwork! },
+        ]);
       return true;
     } catch (err) {
       set({
@@ -380,8 +411,11 @@ export const useStudio = create<StudioState>((set, get) => ({
   clearAudio: () => {
     const url = get().previewUrl;
     if (url && typeof URL !== "undefined") URL.revokeObjectURL(url);
+    const dropped = get().draft.audioPath;
     set({ previewUrl: null });
     get().setDraft({ audioPath: null, audioBytes: null, audioMime: null });
+    if (!stillUsed(get().entries, dropped))
+      void api.removeUploads([{ bucket: AUDIO_BUCKET, path: dropped! }]);
   },
 
   /** The URL the player should use for a preview: the local file first, then storage. */
@@ -503,6 +537,8 @@ export const useStudio = create<StudioState>((set, get) => ({
     const url = get().previewUrl;
     if (url && typeof URL !== "undefined") URL.revokeObjectURL(url);
     clearPreview();
+    /* What the draft was holding, before the draft is emptied. */
+    const discarded = get().draft;
     set({
       draft: { ...EMPTY_DRAFT, updatedAt: Date.now() },
       error: null,
@@ -510,6 +546,15 @@ export const useStudio = create<StudioState>((set, get) => ({
       savedAt: 0,
     });
     await api.discardDraft().catch(() => {});
+    /* The row is gone; the objects behind it go too, unless a published nasheed is
+       still playing them. */
+    const entries = get().entries;
+    const orphans: { bucket: StorageBucket; path: string }[] = [];
+    if (!stillUsed(entries, discarded.audioPath))
+      orphans.push({ bucket: AUDIO_BUCKET, path: discarded.audioPath! });
+    if (!stillUsed(entries, discarded.artworkPath))
+      orphans.push({ bucket: ARTWORK_BUCKET, path: discarded.artworkPath! });
+    await api.removeUploads(orphans);
   },
 }));
 

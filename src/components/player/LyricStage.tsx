@@ -109,7 +109,7 @@ export function LyricStage({ song, onClose }: { song: Song; onClose: () => void 
 
   return (
     <section
-      className="over-art absolute inset-0 z-30 flex flex-col overflow-hidden bg-[#07110e]"
+      className="over-art absolute inset-0 z-30 flex flex-col overflow-hidden bg-bg"
       aria-label="Lyrics over the cover"
     >
       {/* the picture, turned into light */}
@@ -129,11 +129,11 @@ export function LyricStage({ song, onClose }: { song: Song; onClose: () => void 
           aria-hidden
         />
       )}
-      <div className="absolute inset-0 bg-gradient-to-b from-[rgba(3,9,7,0.72)] via-[rgba(3,9,7,0.58)] to-[rgba(4,12,9,0.92)]" aria-hidden />
+      <div className="art-wash-deep absolute inset-0" aria-hidden />
       <div className="grain absolute inset-0" aria-hidden />
 
       {/* progress, a hairline at the top of the screen */}
-      <div className="absolute inset-x-0 top-0 h-[2px] bg-white/10" aria-hidden>
+      <div className="absolute inset-x-0 top-0 h-[2px] bg-line2" aria-hidden>
         <div
           className="h-full bg-jade transition-[width] duration-500 ease-linear"
           style={{ width: `${progress * 100}%` }}
@@ -236,7 +236,7 @@ export function LyricStage({ song, onClose }: { song: Song; onClose: () => void 
                   className={clsx(
                     "font-display leading-[1.3] transition-all duration-500",
                     state === "active"
-                      ? "text-[clamp(1.5rem,4.6vw,2.7rem)] text-text [text-shadow:0_2px_30px_rgba(0,0,0,0.55)]"
+                      ? "text-[clamp(1.5rem,4.6vw,2.7rem)] text-text shadow-[0_2px_30px_var(--art-strong)]"
                       : "text-[clamp(1.05rem,2.4vw,1.5rem)] text-text2",
                     primary === "ar" && "arabic",
                   )}
@@ -264,8 +264,8 @@ export function LyricStage({ song, onClose }: { song: Song; onClose: () => void 
         </div>
 
         {/* the edges dissolve, so the words come out of the dark rather than a box */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-[rgba(3,9,7,0.85)] to-transparent" aria-hidden />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[rgba(3,9,7,0.85)] to-transparent" aria-hidden />
+        <div className="art-fade-top pointer-events-none absolute inset-x-0 top-0 h-24" aria-hidden />
+        <div className="art-fade-bottom pointer-events-none absolute inset-x-0 bottom-0 h-24" aria-hidden />
       </div>
 
       <footer

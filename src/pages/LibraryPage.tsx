@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { clsx } from "clsx";
 import { Icon, type IconName } from "../components/ui/Icons";
@@ -7,6 +7,8 @@ import { EmptyState, Modal, Reveal, SectionHeader, useToast } from "../component
 import { ArtistCard, CollectionCard } from "../components/collection/Cards";
 import { TrackList } from "../components/track/TrackViews";
 import { ARTISTS, COLLECTIONS, durationOf, formatCount, getTrack, statsFor } from "../data/catalog";
+import { ensureSongs } from "../lib/boot";
+import { useCatalogVersion } from "../lib/hooks";
 import { formatTime, formatTotal, plural, relativeTime } from "../lib/format";
 import { usePlayer } from "../store/player";
 import { useLibrary } from "../store/library";
@@ -29,9 +31,17 @@ export default function LibraryPage() {
   const player = usePlayer();
   const toast = useToast();
 
+  /* The catalogue arrives as a window of the newest nasheeds, so a loved one from a
+     while back may not be in it yet. Ask for the ones that are missing; the registry
+     grows and the list fills in on the next render. */
+  const version = useCatalogVersion();
+  useEffect(() => {
+    void ensureSongs(library.liked);
+  }, [library.liked]);
+
   const loved = useMemo(
     () => library.liked.map((id) => getTrack(id)).filter((t): t is Track => !!t),
-    [library.liked],
+    [library.liked, version],
   );
   const lovedDuration = loved.reduce((s, t) => s + durationOf(t), 0);
   const sets = useMemo(
@@ -155,7 +165,7 @@ export default function LibraryPage() {
                             ),
                           )}
                         </div>
-                        <div className="absolute inset-0 bg-gradient-to-t from-[rgba(3,10,8,0.85)] to-transparent" />
+                        <div className="art-scrim absolute inset-0" />
                         <div className="absolute inset-x-3 bottom-2.5">
                           <h3 className="truncate text-[14px] font-semibold text-text">{pl.name}</h3>
                         </div>

@@ -25,7 +25,7 @@
 
   --c-text: #f2ece0;
   --c-text-2: #c6bfaf;
-  --c-muted: #8b8878;
+  --c-muted: #959284;
 
   --c-jade: #2fbf8f;
   --c-jade-soft: #57d8ab;
@@ -35,10 +35,15 @@
   --c-gold: #d9b871;
   --c-gold-soft: #f0dca8;
   --c-gold-deep: #a8823c;
+  /* the ink that sits on a gold fill: dark, because the gold is bright */
+  --c-gold-ink: #241a06;
 
   --c-turq: #35b7b0;
-  --c-madder: #c4644a;
-  --c-cobalt: #4a76c9;
+  /* These two carry small text (a chip, a link inside a line), and the token check in
+     the smoke run holds every accent to 4.5:1 against the darkest surface it can land
+     on — these are the lightest values that clear it. */
+  --c-madder: #cd7d67;
+  --c-cobalt: #7093d5;
 
   --c-glow: 47, 191, 143;
   --c-glow-2: 217, 184, 113;
@@ -56,6 +61,13 @@
      book lifts with the same green the rest of it is drawn in. */
   --shadow-lift: rgba(0, 0, 0, 0.95);
   --scrim: rgba(3, 9, 7, 0.66);
+
+  /* the veil under words drawn over a picture: charcoal at night */
+  --art-strong: rgba(3, 9, 7, 0.94);
+  --art-mid: rgba(3, 10, 8, 0.62);
+  --art-soft: rgba(3, 10, 8, 0.3);
+  --art-chip: rgba(3, 9, 7, 0.74);
+  --art-edge: rgba(255, 255, 255, 0.16);
   --grain-opacity: 0.16;
   color-scheme: dark;
 }
@@ -74,19 +86,22 @@
 
   --c-text: #12241d;
   --c-text-2: #33463e;
-  --c-muted: #6d7a72;
+  --c-muted: #5d6862;
 
-  --c-jade: #148a63;
-  --c-jade-soft: #1ba878;
+  --c-jade: #117453;
+  --c-jade-soft: #137453;
   --c-jade-deep: #0d6247;
   --c-jade-ink: #eafaf3;
 
-  --c-gold: #9d7a2c;
-  --c-gold-soft: #c79f45;
+  --c-gold: #7d6123;
+  --c-gold-soft: #7d6225;
   --c-gold-deep: #7d5f1e;
+  /* and light in daylight, because the sunlight-gold had to come down to be readable
+     as text — so a gold button is a dark button here, and the ink goes with it */
+  --c-gold-ink: #fdf8ec;
 
-  --c-turq: #1a8a84;
-  --c-madder: #a94a30;
+  --c-turq: #15716c;
+  --c-madder: #a74930;
   --c-cobalt: #2c519a;
 
   --c-glow: 20, 138, 99;
@@ -100,44 +115,92 @@
     0 10px 26px -18px rgba(20, 44, 34, 0.18);
   --shadow-lift: rgba(20, 44, 34, 0.34);
   --scrim: rgba(18, 36, 29, 0.44);
+
+  /* and cream in daylight, because a picture does not get darker when the page gets
+     lighter: the words over it are ink, exactly as they are everywhere else */
+  --art-strong: rgba(247, 242, 232, 0.95);
+  --art-mid: rgba(247, 242, 232, 0.74);
+  --art-soft: rgba(247, 242, 232, 0.42);
+  --art-chip: rgba(247, 242, 232, 0.85);
+  --art-edge: rgba(18, 36, 29, 0.14);
   --grain-opacity: 0.07;
   color-scheme: light;
 }
 
 /* ------------------------------------------------------------------
-   Text laid over artwork
+   Words laid over artwork
 
-   A picture is a dark room in both themes: the scrim under it stays near-black because
-   the photograph does not get brighter when the page does. So the tokens that live
-   inside such a container are pinned back to the night book — the page can be dawn,
-   the words on the cover are still ivory. Everything that draws text over artwork
-   carries `over-art`.
+   A picture is a room, and the room is whatever the house is: at night the veil under
+   the words is charcoal and the words are ivory; in daylight the veil is cream and the
+   words are the same ink as the rest of the page. A photograph does not get darker
+   because the page got lighter.
+
+   `over-art` marks such a container (mostly so it can be found and tested), and the
+   `art-*` classes below are the veils themselves. Nothing here is a fixed black
+   gradient: every stop is a token, so the two books draw their own.
 ------------------------------------------------------------------ */
 
 .over-art {
-  --c-surface: #0c1815;
-  --c-surface-2: #10211c;
-  --c-surface-3: #16302a;
-  --c-elev: #0e1c18;
-
-  --c-line: rgba(226, 205, 158, 0.18);
-  --c-line-2: rgba(226, 205, 158, 0.28);
-  --c-line-3: rgba(226, 205, 158, 0.42);
-
-  --c-text: #f2ece0;
-  --c-text-2: #c6bfaf;
-  --c-muted: #9d9a8b;
-
-  --c-jade: #2fbf8f;
-  --c-jade-soft: #57d8ab;
-  --c-jade-ink: #06231a;
-  --c-gold: #d9b871;
-  --c-gold-soft: #f0dca8;
-  --c-turq: #35b7b0;
-  --c-madder: #c4644a;
-  --c-cobalt: #4a76c9;
-
   color: var(--c-text);
+}
+
+/** a flat wash: a hover veil, a dimmed picture */
+.art-wash {
+  background: var(--art-mid);
+}
+
+/** flat, a shade deeper — full-screen rooms */
+.art-wash-deep {
+  background: linear-gradient(
+    to bottom,
+    var(--art-mid),
+    var(--art-strong) 70%
+  );
+}
+
+/** the bottom of a card: words sit on the strong end */
+.art-scrim {
+  background: linear-gradient(
+    to top,
+    var(--art-strong) 0%,
+    var(--art-mid) 44%,
+    transparent 100%
+  );
+}
+
+/** the same idea, turned: a hero with its text on the left */
+.art-scrim-side {
+  background: linear-gradient(
+    to right,
+    var(--art-strong) 0%,
+    var(--art-mid) 58%,
+    var(--art-soft) 100%
+  );
+}
+
+/** a cover's caption bar, opened at the top */
+.art-scrim-up {
+  background: linear-gradient(
+    to top,
+    var(--art-strong) 0%,
+    var(--art-mid) 48%,
+    transparent 100%
+  );
+}
+
+/** a small label or pill drawn on the picture */
+.art-chip {
+  background: var(--art-chip);
+  border: 1px solid var(--art-edge);
+}
+
+/** the edges of a full-screen room dissolve rather than stop */
+.art-fade-top {
+  background: linear-gradient(to bottom, var(--art-strong), transparent);
+}
+
+.art-fade-bottom {
+  background: linear-gradient(to top, var(--art-strong), transparent);
 }
 
 .shadow-art {
@@ -579,7 +642,7 @@
 
   .btn-gold {
     background: linear-gradient(180deg, var(--c-gold-soft), var(--c-gold));
-    color: #241a06;
+    color: var(--c-gold-ink);
     box-shadow: 0 10px 30px -14px rgba(var(--c-glow-2), 0.9);
   }
 

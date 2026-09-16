@@ -78,7 +78,7 @@ export function ImmersivePlayer() {
        and blurred, and the whole thing stays dark in both themes so the chrome over it
        is legible. `over-art` pins every token inside to the night book. */
     <div
-      className="sheet-in over-art fixed inset-0 z-[100] flex flex-col overflow-hidden bg-[#07110e]"
+      className="sheet-in over-art fixed inset-0 z-[100] flex flex-col overflow-hidden bg-bg"
       role="dialog"
       aria-modal="true"
       aria-label="Immersive player"
@@ -104,7 +104,7 @@ export function ImmersivePlayer() {
           />
         )}
       </div>
-      <div className="absolute inset-0 bg-gradient-to-b from-[rgba(4,10,8,0.86)] via-[rgba(4,10,8,0.9)] to-[rgba(6,14,11,1)]" />
+      <div className="art-wash-deep absolute inset-0" />
       <div className="grain absolute inset-0" />
 
       {stage ? <LyricStage song={track} onClose={() => setStage(false)} /> : null}
@@ -169,7 +169,7 @@ export function ImmersivePlayer() {
               aria-label={track.lines.length ? "Show the lyrics over the cover" : track.title}
             >
               <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center opacity-0 transition-opacity duration-300 group-hover:opacity-100">
-                <span className="flex items-center gap-1.5 rounded-full bg-[rgba(3,9,7,0.7)] px-3 py-1.5 text-[11px] font-semibold text-text backdrop-blur-md">
+                <span className="art-chip flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold text-text backdrop-blur-md">
                   <Icon name="expand" size={13} /> words over the cover
                 </span>
               </span>
@@ -179,7 +179,7 @@ export function ImmersivePlayer() {
                 className="h-full w-full"
                 rounded="md"
               />
-              <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-[rgba(3,9,7,0.92)] to-transparent p-4">
+              <div className="art-scrim-up absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 p-4">
                 <div className="min-w-0">
                   <div className="label mb-1">{track.status === "live" ? "recording" : "taken down"}</div>
                   <div className="truncate font-display text-lg text-text">

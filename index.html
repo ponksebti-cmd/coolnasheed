@@ -12,9 +12,14 @@
     <script>
       /* The app's first paint is light. A listener who picked the night book gets it back
          before anything renders — this runs before the stylesheet is applied, so there is
-         no flash of the wrong theme. The app keeps the value in step afterwards. */
+         no flash of the wrong theme. Only a theme that was actually chosen counts: the
+         app also writes the value it is showing, and an inherited night value must not
+         masquerade as a preference on a machine that never made one. */
       try {
-        var savedTheme = localStorage.getItem("coolnasheed.theme");
+        var savedTheme =
+          localStorage.getItem("coolnasheed.theme.chosen") === "1"
+            ? localStorage.getItem("coolnasheed.theme")
+            : null;
         if (savedTheme === "night" || savedTheme === "dawn") {
           document.documentElement.dataset.theme = savedTheme;
         }

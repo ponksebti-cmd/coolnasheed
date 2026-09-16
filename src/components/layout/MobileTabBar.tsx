@@ -4,7 +4,6 @@ import { clsx } from "clsx";
 import { Icon } from "../ui/Icons";
 import { Avatar } from "../art/CoverArt";
 import { useAccount } from "../../lib/hooks";
-import { useStudio } from "../../store/studio";
 
 /**
  * The thumb bar.
@@ -24,20 +23,19 @@ const SLOTS = ["/", "/search", "/studio", "/library", "/me"] as const;
 
 export function MobileTabBar() {
   const account = useAccount();
-  const published = useStudio((s) => s.entries.length);
   const { pathname } = useLocation();
   const listRef = useRef<HTMLUListElement>(null);
   const [lens, setLens] = useState<{ x: number; w: number } | null>(null);
 
-  /* The middle slot is the raised Publish button, which announces itself with colour
-     when it is current; a pill behind it would be one signal too many. */
+  /* Every slot is a slot: Publish is a place you go, not a badge floating over the bar,
+     so it takes the same lens as the other four. */
   const found =
     SLOTS.find((to) =>
       to === "/"
         ? pathname === "/"
         : pathname === to || pathname.startsWith(`${to}/`),
     ) ?? null;
-  const activeTo = found === "/studio" ? null : found;
+  const activeTo = found;
 
   useLayoutEffect(() => {
     const list = listRef.current;
@@ -58,7 +56,7 @@ export function MobileTabBar() {
     const observer = new ResizeObserver(measure);
     observer.observe(list);
     return () => observer.disconnect();
-  }, [activeTo, published]);
+  }, [activeTo]);
 
   return (
     <nav
@@ -84,39 +82,7 @@ export function MobileTabBar() {
           <Tab to="/search" icon="search" label="Search" />
         </li>
         <li className="flex-1" data-slot="/studio">
-          <NavLink
-            to="/studio"
-            className={({ isActive }) =>
-              clsx(
-                "group relative flex min-h-[56px] w-full flex-col items-center justify-center gap-1",
-                isActive ? "text-gold" : "text-muted",
-              )
-            }
-            aria-label="Publish a nasheed"
-          >
-            {({ isActive }) => (
-              <>
-                <span
-                  className={clsx(
-                    "pressable grid h-11 w-11 -translate-y-2 place-items-center rounded-full shadow-[0_10px_26px_-10px_rgba(var(--c-glow-2),0.9)]",
-                    isActive
-                      ? "bg-gradient-to-b from-goldsoft to-gold text-[#241a06]"
-                      : "border border-line2 bg-surface2 text-goldsoft",
-                  )}
-                >
-                  <Icon name="mic" size={19} />
-                </span>
-                <span className="absolute bottom-1.5 text-[9.5px] font-bold uppercase tracking-[0.12em]">
-                  Publish
-                </span>
-                {published ? (
-                  <span className="absolute right-1/2 top-1 translate-x-5 rounded-full bg-jade px-1.5 text-[9px] font-bold text-jadeink">
-                    {published}
-                  </span>
-                ) : null}
-              </>
-            )}
-          </NavLink>
+          <Tab to="/studio" icon="mic" label="Publish" />
         </li>
         <li className="flex-1" data-slot="/library">
           <Tab to="/library" icon="library" label="Library" />

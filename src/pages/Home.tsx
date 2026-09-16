@@ -59,7 +59,11 @@ export default function Home() {
 
   const latest = useMemo(() => latestSongs(10), [version]);
   const featured = useMemo(() => trending[0] ?? latest[0] ?? null, [trending, latest]);
-  const popular = useMemo(() => (trending.length ? trending : popularSongs(8)), [trending, version]);
+  /* six, not eight: the chart says what is being played, it is not the page */
+  const popular = useMemo(
+    () => (trending.length ? trending.slice(0, 6) : popularSongs(6)),
+    [trending, version],
+  );
   const featuredLoved = useLibrary((s) => (featured ? s.liked.includes(featured.id) : false));
   const recent = useMemo(
     () =>
@@ -122,7 +126,7 @@ export default function Home() {
             }}
             aria-hidden
           />
-          <div className="absolute inset-0 bg-gradient-to-r from-[rgba(4,11,9,0.95)] via-[rgba(4,11,9,0.82)] to-[rgba(4,11,9,0.4)]" />
+          <div className="art-scrim-side absolute inset-0" />
           <div className="grain absolute inset-0" />
 
           <div className="relative grid gap-8 p-6 md:p-10 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:items-center">
@@ -195,7 +199,7 @@ export default function Home() {
             <Reveal delay={100} className="relative mx-auto w-full max-w-[340px]">
               <div className="over-art shadow-art relative aspect-square overflow-hidden rounded-2xl border border-line2">
                 <CoverArt path={featured.artworkPath} title={featured.title} className="h-full w-full" rounded="lg" />
-                <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-[rgba(3,9,7,0.94)] to-transparent p-4">
+                <div className="art-scrim-up absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 p-4">
                   <div>
                     <div className="label mb-1 flex items-center gap-1.5">
                       {player.trackId === featured.id && player.playing ? <Equalizer bars={3} className="text-jade" /> : <Icon name="mic" size={11} />}
@@ -237,7 +241,7 @@ export default function Home() {
               >
                 <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg ring-1 ring-line">
                   <CoverArt path={track.artworkPath} title={track.title} className="h-full w-full" rounded="sm" />
-                  <span className="over-art absolute inset-0 grid place-items-center bg-[rgba(3,10,8,0.6)] opacity-0 transition-opacity group-hover:opacity-100">
+                  <span className="over-art art-wash absolute inset-0 grid place-items-center opacity-0 transition-opacity group-hover:opacity-100">
                     <Icon name="play" size={15} className="text-text" />
                   </span>
                 </span>
@@ -267,9 +271,16 @@ export default function Home() {
           }
         />
         {popular.length ? (
-          <div className="panel rounded-2xl p-2 sm:p-3">
+          <div className="panel grid gap-1 rounded-2xl p-2 sm:grid-cols-2 sm:p-3">
             {popular.map((t, i) => (
-              <MiniTrack key={t.id} track={t} index={i} queue={popular.map((x) => x.id)} context={{ kind: "home", label: "Most played" }} />
+              <MiniTrack
+                key={t.id}
+                track={t}
+                index={i}
+                dense
+                queue={popular.map((x) => x.id)}
+                context={{ kind: "home", label: "Most played" }}
+              />
             ))}
           </div>
         ) : (
