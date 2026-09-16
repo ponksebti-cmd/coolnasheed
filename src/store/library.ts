@@ -16,6 +16,7 @@ import { api, errorMessage, type Bootstrap } from "../lib/api";
 import { isPreview } from "../data/preview";
 import { useUi } from "./ui";
 import { isSignedIn } from "./session";
+import { readStoredTheme, resolveTheme } from "../lib/theme";
 import { DEFAULT_PREFS, type Accent, type DhikrState, type HistoryRow, type LyricScript, type Playlist as ServerPlaylist } from "../../shared/types";
 
 export type Settings = {
@@ -368,7 +369,14 @@ export const useLibrary = create<LibraryState>((set, get) => ({
       playlists: boot.playlists ? boot.playlists.map(fromServer) : s.playlists,
       likedCollections: boot.savedCollections ?? s.likedCollections,
       history: boot.history ? mergeHistory(boot.history, s.history) : s.history,
-      settings: boot.prefs ? { ...DEFAULT_SETTINGS, ...boot.prefs } : s.settings,
+      settings: boot.prefs
+        ? {
+            ...DEFAULT_SETTINGS,
+            ...boot.prefs,
+            /* the machine's choice wins over the account's: see src/lib/theme.ts */
+            theme: resolveTheme(readStoredTheme(), boot.prefs.theme),
+          }
+        : s.settings,
       dhikr: boot.dhikr ? { ...DEFAULT_DHIKR, ...boot.dhikr } : s.dhikr,
       lastError: null,
     }));

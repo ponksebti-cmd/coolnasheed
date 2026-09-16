@@ -65,8 +65,11 @@ export function ImmersivePlayer() {
   const total = duration || durationOf(track);
 
   return createPortal(
+    /* The full-screen player is a stage, not a page: the backdrop is the cover blown up
+       and blurred, and the whole thing stays dark in both themes so the chrome over it
+       is legible. `over-art` pins every token inside to the night book. */
     <div
-      className="sheet-in fixed inset-0 z-[100] flex flex-col overflow-hidden bg-bg"
+      className="sheet-in over-art fixed inset-0 z-[100] flex flex-col overflow-hidden bg-[#07110e]"
       role="dialog"
       aria-modal="true"
       aria-label="Immersive player"
@@ -92,7 +95,7 @@ export function ImmersivePlayer() {
           />
         )}
       </div>
-      <div className="absolute inset-0 bg-gradient-to-b from-[rgba(4,10,8,0.86)] via-[rgba(4,10,8,0.9)] to-bg" />
+      <div className="absolute inset-0 bg-gradient-to-b from-[rgba(4,10,8,0.86)] via-[rgba(4,10,8,0.9)] to-[rgba(6,14,11,1)]" />
       <div className="grain absolute inset-0" />
 
       {/* header */}
@@ -133,7 +136,7 @@ export function ImmersivePlayer() {
         {/* left: artwork + transport */}
         <div className="scroll-slim flex min-h-0 flex-col items-center justify-center gap-5 sm:overflow-y-auto lg:pr-2">
           <div className="relative w-full max-w-[min(78vw,430px)]">
-            <div className="relative aspect-square overflow-hidden rounded-2xl border border-line2 shadow-[0_50px_120px_-40px_rgba(0,0,0,1)]">
+            <div className="over-art shadow-art relative aspect-square overflow-hidden rounded-2xl border border-line2">
               <CoverArt
                 path={track.artworkPath}
                 title={track.title}

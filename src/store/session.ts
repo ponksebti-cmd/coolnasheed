@@ -29,6 +29,8 @@ import type { ListenerStats, ProfileInput, User, UserRole } from "../../shared/t
 
 export type Account = {
   id: string;
+  /** the profile's uuid — what a nasheed's `owner_id` and a note's `author_id` carry */
+  profileId: string;
   handle: string;
   name: string;
   bio: string;
@@ -97,6 +99,7 @@ export function validateEmail(raw: string, required = hasSupabase): string | nul
 export function toAccount(user: User): Account {
   return {
     id: user.id,
+    profileId: user.profileId,
     handle: user.handle,
     name: user.name,
     bio: user.bio,

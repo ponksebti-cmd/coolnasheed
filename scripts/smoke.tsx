@@ -793,7 +793,7 @@ async function main() {
 
   assert(
     "settings have defaults even with no account",
-    useLibrary.getState().settings.theme === "night" &&
+    useLibrary.getState().settings.theme === "dawn" &&
       useLibrary.getState().settings.volume > 0,
   );
 
@@ -1821,6 +1821,173 @@ async function main() {
   });
   homeHost.remove();
   void container;
+
+  /* ------------------------------------------------- your own nasheeds, on your profile */
+
+  /* `account.id` is a handle and a nasheed's `owner_id` is a uuid, so the nasheeds tab
+     used to filter every upload out of its own profile. This is that bug, pinned. */
+  section("Your own nasheeds, on your own profile");
+
+  const themeLib = await import("../src/lib/theme");
+  const libraryStore = await import("../src/store/library");
+  const communityStore = await import("../src/store/community");
+  const profileUser = {
+    id: "hafsa.noor",
+    profileId: OWNER,
+    handle: "hafsa.noor",
+    name: "Hafsa Noor",
+    nameAr: null,
+    tagline: "",
+    bio: "",
+    city: "",
+    accent: "jade",
+    role: "Publisher",
+    kind: "artist",
+    verified: false,
+    createdAt: Date.now(),
+    email: null,
+  };
+  session.useSession.setState({
+    user: profileUser as never,
+    currentId: profileUser.id,
+    accounts: [session.toAccount(profileUser as never)],
+  });
+  assert(
+    "an account carries both its handle and its uuid",
+    session.toAccount(profileUser as never).profileId === OWNER,
+  );
+
+  const mineTrack = wire.songFromRow(songRow({ owner_id: OWNER, ownerHandle: "hafsa.noor" }) as never);
+  const theirTrack = wire.songFromRow(
+    songRow({ id: "sng_smoke_0009", title: "Somebody Else's Nasheed", owner_id: SECOND, ownerHandle: "maryam.q" }) as never,
+  );
+  studio.useStudio.setState({ entries: [mineTrack, theirTrack] });
+  communityStore.useCommunity.setState({
+    /* already loaded, so the profile does not go looking for a project that is not there */
+    mineLoaded: true,
+    mine: [
+      {
+        id: "cmt_1",
+        trackId: mineTrack.id,
+        authorId: OWNER,
+        authorName: "Hafsa Noor",
+        authorHandle: "hafsa.noor",
+        authorAccent: "jade" as const,
+        at: Date.now(),
+        text: "recorded after fajr",
+        amens: 0,
+        reports: 0,
+        removed: false,
+      },
+    ],
+  });
+
+  w.history.pushState({}, "", "/me");
+  const profileHost = w.document.createElement("div");
+  w.document.body.appendChild(profileHost);
+  const profileRoot = createRoot(profileHost);
+  await act(async () => {
+    profileRoot.render(createElement(App));
+  });
+  await sleep(60);
+  const profileText = profileHost.textContent ?? "";
+  assert(
+    "the nasheeds tab shows a nasheed whose owner_id is the uuid",
+    profileText.includes(mineTrack.title),
+    profileText.slice(0, 160),
+  );
+  assert(
+    "and it does not claim somebody else's",
+    !profileText.includes("Somebody Else's Nasheed"),
+    profileText.slice(0, 160),
+  );
+  await act(async () => {
+    profileRoot.unmount();
+  });
+  profileHost.remove();
+  session.useSession.setState({ user: signedOutUser, currentId: null, accounts: [] });
+
+  /* ----------------------------------------------------------- the light book */
+
+  section("The house is bound in the light book");
+
+  const prefs = await import("../shared/types");
+  assert(
+    "the default is dawn, not night",
+    prefs.DEFAULT_PREFS.theme === "dawn" &&
+      libraryStore.DEFAULT_SETTINGS.theme === "dawn",
+    `${prefs.DEFAULT_PREFS.theme}`,
+  );
+  assert(
+    "a device that has never chosen shows the default",
+    themeLib.resolveTheme(null, null) === "dawn",
+    themeLib.resolveTheme(null, null),
+  );
+  assert(
+    "an account that saved night, on a device that never chose, is honoured",
+    themeLib.resolveTheme(null, "night") === "night",
+    String(themeLib.resolveTheme(null, "night")),
+  );
+  assert(
+    "but the machine's own choice wins over the account's",
+    themeLib.resolveTheme("night", "dawn") === "night" &&
+      themeLib.resolveTheme("dawn", "night") === "dawn",
+  );
+  themeLib.storeTheme("night");
+  assert(
+    "and it is remembered where the first paint can find it",
+    w.localStorage.getItem("coolnasheed.theme") === "night" &&
+      themeLib.readStoredTheme() === "night",
+  );
+  w.localStorage.removeItem("coolnasheed.theme");
+
+  const indexHtml = readFileSync(join(process.cwd(), "index.html"), "utf8");
+  assert(
+    "index.html paints light before React exists",
+    /<html[^>]*data-theme="dawn"/.test(indexHtml) &&
+      indexHtml.includes("coolnasheed.theme") &&
+      /name="theme-color" content="#F4EFE3"/.test(indexHtml),
+    indexHtml.slice(0, 120),
+  );
+  assert(
+    "and it does not advertise a synthesis engine any more",
+    !/synthesis|synthesi[sz]ed/i.test(indexHtml),
+  );
+
+  /* Anything that lays words over artwork has to say so: the scrim stays dark in both
+     themes, so the tokens inside it are pinned back to the night book by `over-art`. */
+  const css = readFileSync(join(process.cwd(), "src/index.css"), "utf8");
+  assert(
+    "the stylesheet pins the tokens inside an over-art container",
+    /\.over-art \{[^}]*--c-text: #f2ece0/s.test(css) &&
+      /\.over-art \{[^}]*--c-jade: #2fbf8f/s.test(css),
+  );
+  assert(
+    "and a cover's shadow is a token, not a black bloom",
+    /--shadow-art:/.test(css) &&
+      /\.shadow-art \{\s*box-shadow: var\(--shadow-art\)/.test(css),
+  );
+
+  const overArtFiles = [
+    "src/pages/Home.tsx",
+    "src/pages/TrackPage.tsx",
+    "src/pages/About.tsx",
+    "src/pages/ArtistPage.tsx",
+    "src/pages/LibraryPage.tsx",
+    "src/components/collection/Cards.tsx",
+    "src/components/collection/HeroPanel.tsx",
+    "src/components/track/TrackViews.tsx",
+    "src/components/player/PlayerBar.tsx",
+    "src/components/player/ImmersivePlayer.tsx",
+  ];
+  const missingOverArt = overArtFiles.filter(
+    (file) => !readFileSync(join(process.cwd(), file), "utf8").includes("over-art"),
+  );
+  assert(
+    "every surface that writes over artwork carries the class",
+    missingOverArt.length === 0,
+    missingOverArt.join(", "),
+  );
 
   /* ------------------------------------------------------------------ noise */
 

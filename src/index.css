@@ -46,6 +46,11 @@
   --shadow-card:
     0 1px 0 rgba(255, 255, 255, 0.03) inset,
     0 18px 40px -24px rgba(0, 0, 0, 0.9);
+  /* under a cover, a night shadow is a black bloom and in daylight it is a smear:
+     the art gets its own, tinted to whatever ground it is standing on */
+  --shadow-art:
+    0 50px 110px -44px rgba(0, 0, 0, 0.95),
+    0 14px 34px -22px rgba(0, 0, 0, 0.7);
   --grain-opacity: 0.16;
   color-scheme: dark;
 }
@@ -85,8 +90,51 @@
   --shadow-card:
     0 1px 0 rgba(255, 255, 255, 0.7) inset,
     0 14px 30px -22px rgba(20, 40, 32, 0.5);
+  --shadow-art:
+    0 34px 70px -40px rgba(20, 44, 34, 0.34),
+    0 10px 26px -18px rgba(20, 44, 34, 0.18);
   --grain-opacity: 0.07;
   color-scheme: light;
+}
+
+/* ------------------------------------------------------------------
+   Text laid over artwork
+
+   A picture is a dark room in both themes: the scrim under it stays near-black because
+   the photograph does not get brighter when the page does. So the tokens that live
+   inside such a container are pinned back to the night book — the page can be dawn,
+   the words on the cover are still ivory. Everything that draws text over artwork
+   carries `over-art`.
+------------------------------------------------------------------ */
+
+.over-art {
+  --c-surface: #0c1815;
+  --c-surface-2: #10211c;
+  --c-surface-3: #16302a;
+  --c-elev: #0e1c18;
+
+  --c-line: rgba(226, 205, 158, 0.18);
+  --c-line-2: rgba(226, 205, 158, 0.28);
+  --c-line-3: rgba(226, 205, 158, 0.42);
+
+  --c-text: #f2ece0;
+  --c-text-2: #c6bfaf;
+  --c-muted: #9d9a8b;
+
+  --c-jade: #2fbf8f;
+  --c-jade-soft: #57d8ab;
+  --c-jade-ink: #06231a;
+  --c-gold: #d9b871;
+  --c-gold-soft: #f0dca8;
+  --c-turq: #35b7b0;
+  --c-madder: #c4644a;
+  --c-cobalt: #4a76c9;
+
+  color: var(--c-text);
+}
+
+.shadow-art {
+  box-shadow: var(--shadow-art);
 }
 
 /* ------------------------------------------------------------------

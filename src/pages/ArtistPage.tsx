@@ -50,7 +50,7 @@ export default function ArtistPage() {
   return (
     <div className="space-y-10">
       {/* ------------------------------------------------------------ hero */}
-      <section className="relative overflow-hidden rounded-3xl border border-line">
+      <section className="over-art relative overflow-hidden rounded-3xl border border-line">
         <div
           className="absolute inset-0 opacity-70"
           style={{
@@ -58,7 +58,7 @@ export default function ArtistPage() {
           }}
           aria-hidden
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-bg via-[rgba(4,11,9,0.72)] to-[rgba(4,11,9,0.5)]" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[rgba(6,15,12,0.98)] via-[rgba(4,11,9,0.78)] to-[rgba(4,11,9,0.5)]" />
         <div className="grain absolute inset-0" />
 
         <div className="relative flex flex-col gap-6 p-6 md:flex-row md:items-end md:p-9">

@@ -91,7 +91,7 @@ export default function TrackPage() {
         <div className="lg:sticky lg:top-[76px] lg:self-start">
           <Reveal>
             <div className="relative mx-auto w-full max-w-[380px]">
-              <div className="relative aspect-square overflow-hidden rounded-2xl border border-line2 shadow-[0_40px_100px_-40px_rgba(0,0,0,1)]">
+              <div className="over-art shadow-art relative aspect-square overflow-hidden rounded-2xl border border-line2">
                 <CoverArt path={track.artworkPath} title={track.title} className="h-full w-full" rounded="md" />
                 <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-[rgba(3,9,7,0.94)] to-transparent p-4">
                   <div className="min-w-0">

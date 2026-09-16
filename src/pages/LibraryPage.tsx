@@ -143,7 +143,7 @@ export default function LibraryPage() {
                 {sets.map(({ pl, tracks }, i) => (
                   <Reveal key={pl.id} delay={i * 40}>
                     <Link to={`/p/${pl.id}`} className="card group block overflow-hidden">
-                      <div className="relative aspect-[4/3]">
+                      <div className="over-art relative aspect-[4/3]">
                         <div className="absolute inset-0 grid grid-cols-2 grid-rows-2">
                           {(tracks.length ? tracks.slice(0, 4) : [null, null, null, null]).map((t, k) =>
                             t ? (

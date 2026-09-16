@@ -1,14 +1,27 @@
 <!doctype html>
-<html lang="en" data-theme="night">
+<html lang="en" data-theme="dawn">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#07100D" />
+    <meta name="theme-color" content="#F4EFE3" />
     <title>CoolNasheed — vocals of light</title>
     <meta
       name="description"
-      content="CoolNasheed is a streaming home for Islamic nasheeds: curated collections, line-by-line synced lyrics with Arabic and translation, and an in-browser vocal synthesis engine."
+      content="CoolNasheed is a streaming home for Islamic nasheeds: recordings people upload, line-by-line lyrics with Arabic and translation, and cover art from the publisher."
     />
+    <script>
+      /* The app's first paint is light. A listener who picked the night book gets it back
+         before anything renders — this runs before the stylesheet is applied, so there is
+         no flash of the wrong theme. The app keeps the value in step afterwards. */
+      try {
+        var savedTheme = localStorage.getItem("coolnasheed.theme");
+        if (savedTheme === "night" || savedTheme === "dawn") {
+          document.documentElement.dataset.theme = savedTheme;
+        }
+      } catch (err) {
+        /* private mode and blocked storage: the default stands */
+      }
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

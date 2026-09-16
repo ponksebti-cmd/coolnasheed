@@ -85,7 +85,7 @@ export function PlayerBar() {
               rounded="sm"
               className="border-0"
             />
-            <span className="absolute inset-0 grid place-items-center bg-[rgba(4,12,9,0.6)] opacity-0 transition-opacity group-hover:opacity-100">
+            <span className="over-art absolute inset-0 grid place-items-center bg-[rgba(4,12,9,0.6)] opacity-0 transition-opacity group-hover:opacity-100">
               <Icon name="expand" size={16} className="text-text" />
             </span>
           </button>

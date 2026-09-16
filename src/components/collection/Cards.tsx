@@ -123,7 +123,7 @@ export function CollectionCard({
     <Reveal delay={index * 40}>
       <article className="card sheen group relative overflow-hidden">
         <Link to={to ?? `/c/${collection.id}`} className="block">
-          <div className="relative aspect-[4/3] overflow-hidden">
+          <div className="over-art relative aspect-[4/3] overflow-hidden">
             <div className="absolute inset-0 transition-transform duration-[1100ms] ease-out group-hover:scale-[1.07]">
               <CoverArt
                 title={collection.title}
@@ -316,7 +316,7 @@ export function MiniTrack({
           rounded="sm"
         />
         <button
-          className="absolute inset-0 grid place-items-center bg-[rgba(3,10,8,0.66)] opacity-0 transition-opacity group-hover:opacity-100"
+          className="over-art absolute inset-0 grid place-items-center bg-[rgba(3,10,8,0.66)] opacity-0 transition-opacity group-hover:opacity-100"
           onClick={() =>
             isCurrent ? toggle() : playIds(queue, index, context)
           }

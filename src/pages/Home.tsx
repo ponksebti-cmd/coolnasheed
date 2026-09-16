@@ -114,7 +114,7 @@ export default function Home() {
     <div className="space-y-11">
       {/* ---------------------------------------------------------- hero */}
       {featured ? (
-        <section className="relative overflow-hidden rounded-3xl border border-line">
+        <section className="over-art relative overflow-hidden rounded-3xl border border-line">
           <div
             className="absolute inset-0 opacity-70"
             style={{
@@ -123,7 +123,6 @@ export default function Home() {
             aria-hidden
           />
           <div className="absolute inset-0 bg-gradient-to-r from-[rgba(4,11,9,0.95)] via-[rgba(4,11,9,0.82)] to-[rgba(4,11,9,0.4)]" />
-          <div className="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-transparent" />
           <div className="grain absolute inset-0" />
 
           <div className="relative grid gap-8 p-6 md:p-10 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:items-center">
@@ -194,7 +193,7 @@ export default function Home() {
             </div>
 
             <Reveal delay={100} className="relative mx-auto w-full max-w-[340px]">
-              <div className="relative aspect-square overflow-hidden rounded-2xl border border-line2 shadow-[0_50px_110px_-40px_rgba(0,0,0,1)]">
+              <div className="over-art shadow-art relative aspect-square overflow-hidden rounded-2xl border border-line2">
                 <CoverArt path={featured.artworkPath} title={featured.title} className="h-full w-full" rounded="lg" />
                 <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-[rgba(3,9,7,0.94)] to-transparent p-4">
                   <div>
@@ -238,7 +237,7 @@ export default function Home() {
               >
                 <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg ring-1 ring-line">
                   <CoverArt path={track.artworkPath} title={track.title} className="h-full w-full" rounded="sm" />
-                  <span className="absolute inset-0 grid place-items-center bg-[rgba(3,10,8,0.6)] opacity-0 transition-opacity group-hover:opacity-100">
+                  <span className="over-art absolute inset-0 grid place-items-center bg-[rgba(3,10,8,0.6)] opacity-0 transition-opacity group-hover:opacity-100">
                     <Icon name="play" size={15} className="text-text" />
                   </span>
                 </span>

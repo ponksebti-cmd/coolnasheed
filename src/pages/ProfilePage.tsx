@@ -49,11 +49,26 @@ export default function ProfilePage() {
   }, [loadEntries, loadNotes]);
 
 
+  /* `account.id` is the handle; a nasheed's `ownerId` is the profile uuid, and a note's
+     `authorId` is whichever of the two the server happened to answer with. Comparing the
+     handle to a uuid is how a signed-in publisher ended up with an empty nasheeds tab. */
+  const ownedBy = (ownerId: string | null, ownerHandle: string | null) =>
+    !!account &&
+    (ownerId === account.profileId ||
+      ownerId === account.handle ||
+      ownerHandle === account.handle);
+
   const published = useMemo(
-    () => (account ? entries.filter((entry) => entry.ownerId === account.id) : []),
+    () => (account ? entries.filter((entry) => ownedBy(entry.ownerId, entry.ownerHandle)) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [entries, account],
   );
-  const mine = useMemo(() => (account ? myNotes.filter((c) => c.authorId === account.id) : []), [myNotes, account]);
+  const mine = useMemo(
+    () =>
+      account ? myNotes.filter((c) => ownedBy(c.authorId, c.authorHandle)) : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [myNotes, account],
+  );
   const loved = useMemo(() => library.liked.map((id) => getTrack(id)).filter((t): t is Track => !!t), [library.liked]);
   const amensGiven = stats?.amens ?? 0;
   const plays = library.history.reduce((n, h) => n + h.count, 0);

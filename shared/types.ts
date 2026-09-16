@@ -96,7 +96,8 @@ export type PlayerPrefs = {
 };
 
 export const DEFAULT_PREFS: PlayerPrefs = {
-  theme: "night",
+  /* light by default: the night book is a choice, not the house */
+  theme: "dawn",
   volume: 0.85,
   muted: false,
   lyricScript: "tr",

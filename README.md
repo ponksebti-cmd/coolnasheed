@@ -38,7 +38,7 @@ npm run verify            # typecheck + contract + database + bundles + build + 
 | **Moderation** | report a note, three reports hide it automatically, staff resolve it — the row stays, so a thread never silently renumbers |
 | **Tasbīḥ** | a dhikr counter in the sidebar — six phrases with 33 / 100 targets |
 | **Search** | titles, lyric text, publishers, tags; ⌘K command palette |
-| **Themes** | *night garden* (default) and *dawn*, both fully tokenized |
+| **Themes** | *dawn* (the house default) and *night garden*, both fully tokenized |
 
 Keyboard: `Space` play/pause · `N`/`B` next/previous · `←`/`→` seek · `I` immersive ·
 `L` love · `M` mute · `⌘K` palette · `/` search · `?` every shortcut. Shortcuts are ignored
@@ -284,8 +284,11 @@ sentences — "the function answered undefined" and its kind — cannot reach th
 
 ## Design
 
-The palette is a night garden: near-black emerald ground, jade light, aged gold for anything
-sacred or quoted, ivory for text, with turquoise and madder held back as accents.
+The house is bound in *dawn* — cream ground, deep emerald ink — with the *night garden*
+(a near-black emerald ground, jade light, aged gold for anything sacred or quoted, ivory for
+text, turquoise and madder held back as accents) one toggle away. `index.html` reads the
+device's choice before React exists, so the first paint is the right one; a device that has
+never chosen gets dawn, whatever the account's saved row says.
 
 ```
 night   bg #070F0C   jade #2FBF8F   gold #D9B871   ivory #F2ECE0   turq #35B7B0   madder #C4644A
@@ -296,6 +299,13 @@ Colors live as CSS custom properties under `:root[data-theme]` and are exposed t
 through `@theme`, so components say `text-jade` / `bg-surface2` and the whole app re-skins on
 one attribute. Type pairs a display serif for poetry with a neutral sans for chrome; Arabic is
 set RTL with its own size scale.
+
+**A picture is a dark room in both themes.** Any surface that writes over artwork — a hero
+panel, a cover card, the full-screen player — carries `over-art`, which pins the surface, text
+and accent tokens inside it back to the night book: the scrim under a photograph stays near-black
+because the photograph does not get brighter when the page does. Covers cast `--shadow-art`, which
+is a black bloom at night and a soft green-tinted one in daylight, rather than a hard black smear
+on cream.
 
 **Cover art is either uploaded or absent.** When a publisher has not uploaded an image, the
 nasheed gets a plain accent tile with the first letter of its title. Nothing is generated from

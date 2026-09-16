@@ -17,6 +17,7 @@ import { useKeyboard } from "../../lib/hooks";
 import { getTrack } from "../../data/catalog";
 import { useBoot } from "../../lib/boot";
 import { SetupSqlButton } from "../SetupSqlButton";
+import { storeTheme } from "../../lib/theme";
 
 export function AppShell() {
   const settings = useLibrary((s) => s.settings);
@@ -54,6 +55,7 @@ export function AppShell() {
   /* theme */
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
+    storeTheme(settings.theme);
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta)
       meta.setAttribute(
@@ -134,7 +136,7 @@ export function AppShell() {
             onClick={() => setMobileNav(false)}
             aria-hidden
           />
-          <div className="materialize absolute inset-y-0 left-0 w-[86vw] max-w-[320px] border-r border-line2 bg-bg2/98 shadow-[30px_0_90px_-30px_rgba(0,0,0,1)] backdrop-blur-xl">
+          <div className="materialize shadow-art absolute inset-y-0 left-0 w-[86vw] max-w-[320px] border-r border-line2 bg-bg2/98 backdrop-blur-xl">
             <button
               className="btn-icon absolute right-2 top-3 z-10 rounded-full p-2"
               onClick={() => setMobileNav(false)}

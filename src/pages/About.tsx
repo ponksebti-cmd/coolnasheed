@@ -57,7 +57,7 @@ export default function About() {
   return (
     <div className="space-y-12 pb-4">
       {/* header */}
-      <section className="relative overflow-hidden rounded-3xl border border-line">
+      <section className="over-art relative overflow-hidden rounded-3xl border border-line">
         <div
           className="absolute inset-0 opacity-70"
           style={{ background: "radial-gradient(110% 120% at 10% 0%, color-mix(in oklab, var(--c-gold) 30%, transparent), transparent 62%)" }}

@@ -47,7 +47,7 @@ export function HeroPanel({
   const duration = tracks.reduce((sum, t) => sum + durationOf(t), 0);
 
   return (
-    <section className={clsx("relative overflow-hidden rounded-2xl border border-line", big ? "min-h-[380px]" : "min-h-[280px]")}>
+    <section className={clsx("over-art relative overflow-hidden rounded-2xl border border-line", big ? "min-h-[380px]" : "min-h-[280px]")}>
       <div
         className="absolute inset-0 opacity-80"
         style={{
@@ -56,19 +56,18 @@ export function HeroPanel({
         aria-hidden
       />
       <div className="absolute inset-0 bg-gradient-to-r from-[rgba(4,11,9,0.94)] via-[rgba(4,11,9,0.82)] to-[rgba(4,11,9,0.5)]" />
-      <div className="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-transparent" />
       <div className="grain absolute inset-0" />
 
       <div className={clsx("relative flex flex-col gap-6 p-5 md:flex-row md:items-end md:p-8", big ? "md:min-h-[380px]" : "md:min-h-[280px]")}>
         <Reveal className="shrink-0">
           <div
             className={clsx(
-              "relative overflow-hidden rounded-xl border border-line2 shadow-[0_30px_80px_-30px_rgba(0,0,0,1)] transition-transform duration-700 hover:scale-[1.02]",
+              "shadow-art relative overflow-hidden rounded-xl border border-line2 transition-transform duration-700 hover:scale-[1.02]",
               big ? "h-[164px] w-[164px] md:h-[208px] md:w-[208px]" : "h-[132px] w-[132px] md:h-[164px] md:w-[164px]",
             )}
           >
             <CoverArt path={artworkPath} title={title} accent={accent} className="h-full w-full" rounded="md" />
-            <div className="absolute inset-0 ring-1 ring-inset ring-white/10" />
+            <div className="absolute inset-0 ring-1 ring-inset ring-line2" />
           </div>
         </Reveal>
 

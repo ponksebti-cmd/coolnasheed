@@ -1757,7 +1757,9 @@ export const api = {
     } | null;
     if (!row) return { ...DEFAULT_PREFS };
     return {
-      theme: row.theme === "dawn" ? "dawn" : "night",
+      /* a stored choice wins; anything else — an older row, a column default, a
+         null — is the house default, which is the light book */
+      theme: row.theme === "night" ? "night" : "dawn",
       volume: Math.min(
         Math.max(Number(row.volume ?? DEFAULT_PREFS.volume), 0),
         1,

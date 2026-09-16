@@ -77,7 +77,7 @@ export function TrackRow({
           <div className="relative">
             <ArtThumb track={track} size={42} />
             <button
-              className="absolute inset-0 grid place-items-center rounded-lg bg-[rgba(4,12,9,0.62)] opacity-0 transition-opacity group-hover:opacity-100 sm:hidden lg:grid"
+              className="over-art absolute inset-0 grid place-items-center rounded-lg bg-[rgba(4,12,9,0.62)] opacity-0 transition-opacity group-hover:opacity-100 sm:hidden lg:grid"
               aria-label={`Play ${track.title}`}
               onClick={() => (isCurrent ? toggle() : playIds(list, Math.max(0, list.indexOf(track.id)), context))}
             >
@@ -223,7 +223,7 @@ export function TrackCard({
         className={clsx("card group relative overflow-hidden", variant === "wide" && "sm:col-span-2")}
       >
         <Link to={`/t/${track.id}`} className="block">
-          <div className={clsx("relative overflow-hidden", variant === "wide" ? "aspect-[16/9]" : "aspect-square")}>
+          <div className={clsx("over-art relative overflow-hidden", variant === "wide" ? "aspect-[16/9]" : "aspect-square")}>
             <div className="absolute inset-0 transition-transform duration-[900ms] ease-out group-hover:scale-[1.06]">
               <CoverArt path={track.artworkPath} title={track.title} className="h-full w-full" rounded="sm" />
             </div>
