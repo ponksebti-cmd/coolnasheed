@@ -23,6 +23,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   audioUrl,
   artworkUrl,
+  avatarUrl,
   hasSupabase,
   invoke,
   maybeSb,
@@ -70,6 +71,7 @@ import {
 import {
   AUDIO_BUCKET,
   ARTWORK_BUCKET,
+  AVATAR_BUCKET,
   DEFAULT_PREFS,
   type Accent,
   type AdminSummary,
@@ -1365,6 +1367,21 @@ export const api = {
     return { path };
   },
 
+  /** A profile picture: 1 MB, images only, brought under the line before it leaves. */
+  uploadAvatar: async (file: File): Promise<{ path: string }> => {
+    const { uid } = await requireUid("change your picture");
+    const { path } = await upload(uid, "avatar", file, {
+      bucket: AVATAR_BUCKET,
+    });
+    return { path };
+  },
+
+  /** Takes a picture down from storage. The profile row is updated separately. */
+  removeAvatar: async (path: string): Promise<void> => {
+    const { client } = await requireUid("change your picture");
+    await client.storage.from(AVATAR_BUCKET).remove([path]);
+  },
+
   /* ------------------------------------------------------------ analytics */
 
   play: async (input: PlayInput): Promise<PlayReceipt> => {
@@ -1623,6 +1640,8 @@ export const api = {
         if (patch.bio !== undefined) update.bio = patch.bio.trim();
         if (patch.city !== undefined) update.city = patch.city.trim();
         if (patch.accent !== undefined) update.accent = patch.accent;
+        if (patch.avatarPath !== undefined)
+          update.avatar_path = patch.avatarPath?.trim() || null;
         if (patch.handle !== undefined)
           update.handle = patch.handle.trim().toLowerCase();
         if (!Object.keys(update).length)
@@ -1884,7 +1903,11 @@ export const api = {
   files: async (): Promise<{ items: LibraryFile[]; total: number }> => {
     const { client, uid } = await requireUid("list your files");
     const items: LibraryFile[] = [];
-    for (const bucket of [AUDIO_BUCKET, ARTWORK_BUCKET] as StorageBucket[]) {
+    for (const bucket of [
+      AUDIO_BUCKET,
+      ARTWORK_BUCKET,
+      AVATAR_BUCKET,
+    ] as StorageBucket[]) {
       const { data } = await client.storage
         .from(bucket)
         .list(uid, { limit: 200 });
@@ -1904,7 +1927,9 @@ export const api = {
           url:
             bucket === AUDIO_BUCKET
               ? String(audioUrl(path))
-              : String(artworkUrl(path)),
+              : bucket === AVATAR_BUCKET
+                ? String(avatarUrl(path))
+                : String(artworkUrl(path)),
         });
       }
     }

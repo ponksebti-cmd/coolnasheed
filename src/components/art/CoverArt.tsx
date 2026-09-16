@@ -8,7 +8,7 @@
  */
 
 import { clsx } from "clsx";
-import { artworkUrl } from "../../lib/supabase";
+import { artworkUrl, avatarUrl } from "../../lib/supabase";
 import type { Accent } from "../../data/types";
 
 const ACCENT_VAR: Record<Accent, string> = {
@@ -91,11 +91,14 @@ export function Avatar({
   accent = "jade",
   size = 40,
   className,
+  /** a storage path; the URL is derived here so callers pass what the row carries */
+  picture,
 }: {
   name: string;
   accent?: Accent;
   size?: number;
   className?: string;
+  picture?: string | null;
 }) {
   const initial = name
     .split(/\s+/)
@@ -103,22 +106,35 @@ export function Avatar({
     .slice(0, 2)
     .map((part) => part[0]!.toUpperCase())
     .join("");
+  const url = avatarUrl(picture);
   return (
     <span
       className={clsx(
-        "inline-grid shrink-0 place-items-center rounded-full border border-line/60 bg-surface2 font-medium",
+        "inline-grid shrink-0 place-items-center overflow-hidden rounded-full border border-line/60 bg-surface2 font-medium",
         className,
       )}
       style={{
         width: size,
         height: size,
         fontSize: Math.max(11, size * 0.38),
-        background: `color-mix(in oklab, var(${ACCENT_VAR[accent]}) 24%, transparent)`,
+        background: url
+          ? undefined
+          : `color-mix(in oklab, var(${ACCENT_VAR[accent]}) 24%, transparent)`,
         color: `var(${ACCENT_VAR[accent]})`,
       }}
-      aria-hidden
     >
-      {initial || "?"}
+      {url ? (
+        <img
+          src={url}
+          alt=""
+          className="h-full w-full object-cover"
+          loading="lazy"
+          decoding="async"
+          aria-hidden
+        />
+      ) : (
+        <span aria-hidden>{initial || "?"}</span>
+      )}
     </span>
   );
 }

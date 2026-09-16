@@ -34,6 +34,7 @@ npm run verify            # typecheck + contract + database + bundles + build + 
 | **Studio** | five steps: the recording, the words, the details, the cover, publish. Timings are optional — publishing has never required previewing or marking |
 | **Player** | one reused `<audio>` element, an honest error when a file will not decode, three retries with backoff when the network drops, a transport, a queue, an immersive view, and the words over the cover |
 | **Library** | loved nasheeds, your sets, play history, listening totals — rows in Postgres, so they follow you to the next device |
+| **Profile pictures** | one image you upload, ≤ 1 MB, in its own public bucket. The row stores the path; the circle beside your name shows the picture, and initials when there is none |
 | **Analytics** | play beacons → per-day rollups → charts. Per-nasheed listeners and completion, per-account history, a staff dashboard at `/admin` |
 | **Moderation** | report a note, three reports hide it automatically, staff resolve it — the row stays, so a thread never silently renumbers |
 | **Tasbīḥ** | a dhikr counter in the sidebar — six phrases with 33 / 100 targets |
@@ -93,12 +94,13 @@ zero invocations, and they run in one transaction next to the rows they read.
 | `health` | GET | is the database, storage and auth actually there — what the dashboard reads first |
 
 Uploads never pass through a function. The browser puts the file straight into
-`nasheed-audio` or `nasheed-artwork` with the caller's own JWT, and `publish` is then handed
-a *path*. A 5 MB recording costs no invocation time, no function memory, and no rewrite.
+`nasheed-audio`, `nasheed-artwork` or `nasheed-avatars` with the caller's own JWT, and `publish`
+is then handed a *path*. A 5 MB recording costs no invocation time, no function memory, and no
+rewrite.
 
 ### Knowing which version of itself the database is
 
-`public.app_schema` holds one row and one string — `audio-only-2` — and the client reads it at
+`public.app_schema` holds one row and one string — `profile-pictures-1` — and the client reads it at
 boot (`src/lib/schema.ts`). A project still running an older shape fails in ways that point
 somewhere else entirely: the old `songs.maqam` is `NOT NULL` and the audio-only client does not
 send it, so publishing dies on a column nobody can see, and `studio_drafts` does not exist yet,
@@ -106,8 +108,8 @@ so drafts save nothing. The same check covers the step from `audio-only-1` to `a
 `accent` and `year` are columns of a nasheed that no longer exist, so a project one migration
 behind says so rather than half-working. So the app asks the database rather than guessing, and says one of:
 
-- **behind** — "This database is an older version of CoolNasheed's schema … recordings upload,
-  but publishing and drafts will fail until it is updated", with a button that copies the SQL.
+- **behind** — "This database is an older version of CoolNasheed's schema … part of what this
+  build writes has nowhere to go until it is updated", with a button that copies the SQL.
 - **missing** — no tables at all: the project has never been set up.
 - **unknown** — the project could not be asked. Never treated as broken: a dropped connection
   must not read as a broken database.
@@ -312,6 +314,12 @@ pill, the dimmer behind a dialog — takes its shadow and its veil from `--shado
 At night those are black; in the light book they are the same green the rest of it is drawn in, so
 nothing on a cream page is accidentally wearing the night book's wardrobe.
 
+**A person's picture is their own.** `profiles.avatar_path` holds a path into
+`nasheed-avatars` — public, 1 MB, images only — and every payload that describes a person
+carries it: the bootstrap, a publisher's page, the catalogue, a note's author. Anything larger
+than the limit is scaled down in the browser before it leaves, exactly as cover art is, and the
+circle beside a name falls back to initials when there is nothing to show.
+
 **Cover art is either uploaded or absent.** When a publisher has not uploaded an image, the
 nasheed gets a plain accent tile with the first letter of its title. Nothing is generated from
 a seed and nothing pretends to be artwork: a nasheed without cover art looks like a nasheed
@@ -331,8 +339,8 @@ turns all of it off.
 ```
 supabase/
   migrations/  core schema + triggers · Postgres functions · RLS policies + grants ·
-               storage buckets · audio-only shape + app_schema (6 migrations,
-               version audio-only-2)
+               storage buckets · audio-only shape + app_schema · profile pictures
+               (7 migrations, version profile-pictures-1)
   functions/   catalog · analytics · publish · moderate · account · health
     _shared/     cors, json/errors, db clients, auth, validation, cache, song mappers
   seed.sql     intentionally empty — the catalogue is what people upload
@@ -388,7 +396,7 @@ that `app_schema` is readable by anyone and writable by nobody — and then the 
 setup file has to survive: pasted onto a fresh project, onto one that is a migration behind,
 onto one that already has everything (twice, for good measure), and onto one built by the CLI
 where the file has to work out for itself what has already been done.
-Current run: **137 checks.**
+Current run: **141 checks.**
 
 Publishing has two validators, and a pair of hand-written mirrors is a pair that drifts, so
 `npm run contract:test` holds both to `shared/fixtures/publish-cases.json` (24 cases, 2 stored rows):
@@ -415,7 +423,7 @@ tapped, keeps its own dark ground in either theme, and steps back one place on `
 account gates, the keyboard staying out of the way while you type, the focus landing on the
 first field of a dialog rather than its Close button, toasts, upload fitting, and every route
 rendering.
-Current run: **177 checks.**
+Current run: **187 checks.**
 
 `npm run functions:bundle` bundles all six Edge Functions with the esbuild that is already a
 dependency, which proves every file parses and every import resolves on a machine with no Deno

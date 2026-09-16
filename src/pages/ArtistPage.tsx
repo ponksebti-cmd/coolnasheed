@@ -64,7 +64,7 @@ export default function ArtistPage() {
         <div className="relative flex flex-col gap-6 p-6 md:flex-row md:items-end md:p-9">
           <Reveal className="shrink-0">
             <div className="relative h-[150px] w-[150px] md:h-[186px] md:w-[186px]">
-              <Avatar name={artist.name} accent={artist.accent} size={186} className="!h-full !w-full !text-[3.4rem] ring-1 ring-line2" />
+              <Avatar name={artist.name} accent={artist.accent} size={186} picture={artist.avatarPath} className="!h-full !w-full !text-[3.4rem] ring-1 ring-line2" />
               {artist.verified ? (
                 <span className="absolute bottom-1 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line2 bg-elev/90 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wider text-jade backdrop-blur">
                   <Icon name="check" size={10} strokeWidth={2.6} /> verified publisher

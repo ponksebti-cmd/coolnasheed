@@ -14,7 +14,7 @@
  * answers so they cannot drift apart (`npm run contract:test`).
  */
 
-import { artworkUrl, audioUrl } from "./supabase";
+import { artworkUrl, audioUrl, avatarUrl } from "./supabase";
 import { ApiError } from "./errors";
 import { MAX_AUDIO_BYTES, type Accent, type LyricLine, type SongInput } from "../../shared/types";
 import type {
@@ -125,6 +125,7 @@ export function songsFromRows(rows: SongRow[] | null | undefined): Song[] {
 /** Storage paths are stored; URLs are derived. The player and the artwork want URLs. */
 export const songAudioUrl = (song: Pick<Song, "audioPath">): string | null => audioUrl(song.audioPath);
 export const songArtworkUrl = (song: Pick<Song, "artworkPath">): string | null => artworkUrl(song.artworkPath);
+export const profileAvatarUrl = (path: string | null | undefined): string | null => avatarUrl(path);
 
 /* ------------------------------------------------------------------ profiles */
 
@@ -140,11 +141,12 @@ export type ProfileRow = {
   role: UserRole;
   kind: UserKind;
   verified: boolean;
+  avatar_path: string | null;
   created_at: string;
 };
 
 export const PROFILE_COLUMNS =
-  "id, handle, name, name_ar, tagline, bio, city, accent, role, kind, verified, created_at";
+  "id, handle, name, name_ar, tagline, bio, city, accent, role, kind, verified, avatar_path, created_at";
 
 /** The public id of a person is their handle; the uuid travels beside it. */
 export function userFromRow(row: ProfileRow, email?: string | null): User {
@@ -161,6 +163,7 @@ export function userFromRow(row: ProfileRow, email?: string | null): User {
     role: row.role ?? "listener",
     kind: row.kind ?? "listener",
     verified: Boolean(row.verified),
+    avatarPath: row.avatar_path ?? null,
     createdAt: epochMs(row.created_at, Date.now()),
     email: email ?? null,
   };
@@ -169,7 +172,10 @@ export function userFromRow(row: ProfileRow, email?: string | null): User {
 /* ----------------------------------------------------------------- comments */
 
 export const COMMENT_COLUMNS =
-  "id, song_id, author_id, text, at_line, edited_at, amens, reports, removed, created_at, author:profiles(id, handle, name, accent, verified)";
+  /* the join names the foreign key: `amens` and `reports` are each a two-key table, so
+     PostgREST reads them as many-to-many paths between comments and profiles as well,
+     and without the hint it refuses to guess (PGRST201) */
+  "id, song_id, author_id, text, at_line, edited_at, amens, reports, removed, created_at, author:profiles!comments_author_id_fkey(id, handle, name, accent, verified, avatar_path)";
 
 /**
  * A note plus who wrote it. `viewer` comes from the caller so the list arrives ready to
@@ -185,6 +191,7 @@ export function commentFromRow(row: CommentRow, viewer: Listener): Comment {
     authorHandle: author?.handle ?? "",
     authorAccent: author?.accent ?? "jade",
     authorVerified: Boolean(author?.verified),
+    authorAvatar: author?.avatar_path ?? null,
     text: row.text,
     atLine: row.at_line ?? null,
     createdAt: epochMs(row.created_at, Date.now()),
@@ -226,6 +233,7 @@ export type ArtistRow = {
   accent: Accent | null;
   verified: boolean;
   kind: UserKind;
+  avatar_path?: string | null;
 };
 
 export function artistFromRow(row: ArtistRow, songs = 0, followers = 0): ArtistCard {
@@ -241,6 +249,7 @@ export function artistFromRow(row: ArtistRow, songs = 0, followers = 0): ArtistC
     accent: row.accent ?? "jade",
     verified: Boolean(row.verified),
     kind: row.kind ?? "artist",
+    avatarPath: row.avatar_path ?? null,
     songs,
     followers,
   };

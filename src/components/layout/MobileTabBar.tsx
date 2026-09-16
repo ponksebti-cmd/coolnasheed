@@ -134,7 +134,7 @@ export function MobileTabBar() {
               aria-label="Your profile"
             >
               <span className="grid h-6 w-6 place-items-center overflow-hidden rounded-full ring-1 ring-line2">
-                <Avatar name={account.name} accent="jade" size={24} />
+                <Avatar name={account.name} accent="jade" size={24} picture={account.avatarPath} />
               </span>
               <span className="text-[9.5px] font-bold uppercase tracking-[0.12em]">
                 You

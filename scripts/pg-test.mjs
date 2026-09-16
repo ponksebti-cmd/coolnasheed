@@ -246,11 +246,11 @@ try {
   /* The database names its own version. The client reads this at boot and refuses to
      guess from a constraint name when a project is a build behind. */
   const version = await one("select version from public.app_schema where id = 1");
-  check("the database says which version of the app it is", version === "audio-only-2", String(version));
+  check("the database says which version of the app it is", version === "profile-pictures-1", String(version));
 
   await asAnon();
   const anonVersion = await one("select version from public.app_schema where id = 1");
-  check("and anyone may read it, signed in or not", anonVersion === "audio-only-2", String(anonVersion));
+  check("and anyone may read it, signed in or not", anonVersion === "profile-pictures-1", String(anonVersion));
   await refused("but nobody may write it",
     () => sql("insert into public.app_schema (id, version) values (2, 'forged')"), "42501");
   await asPostgres();
@@ -258,8 +258,9 @@ try {
   const buckets = (await sql("select id, public, file_size_limit, allowed_mime_types from storage.buckets order by id")).rows;
   const audioBucket = buckets.find((b) => b.id === "nasheed-audio");
   const artBucket = buckets.find((b) => b.id === "nasheed-artwork");
+  const avatarBucket = buckets.find((b) => b.id === "nasheed-avatars");
   check("the audio bucket takes mp3 and nothing else",
-    buckets.length === 2 && Number(audioBucket?.file_size_limit) === 5242880
+    buckets.length === 3 && Number(audioBucket?.file_size_limit) === 5242880
     && Array.isArray(audioBucket?.allowed_mime_types)
     && audioBucket.allowed_mime_types.every((mime) => mime.includes("mpeg") || mime.includes("mp3"))
     && !audioBucket.allowed_mime_types.some((mime) => /wav|ogg|aac|flac|webm/.test(mime)),
@@ -269,6 +270,14 @@ try {
     && artBucket?.allowed_mime_types?.length === 4
     && artBucket.allowed_mime_types.every((mime) => mime.startsWith("image/")),
     artBucket?.allowed_mime_types?.join(" "));
+
+  /* ---- a face: one megabyte, images only, its own bucket ---- */
+  check("a third bucket holds profile pictures, capped at 1 MB",
+    Number(avatarBucket?.file_size_limit) === 1048576
+    && avatarBucket?.allowed_mime_types?.length === 4
+    && avatarBucket.allowed_mime_types.every((mime) => mime.startsWith("image/")),
+    `${avatarBucket?.allowed_mime_types?.join(" ")} · ${avatarBucket?.file_size_limit} bytes`);
+
 
   const rpcs = (await sql(`
     select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -296,6 +305,16 @@ try {
      for and no publisher should be handed. */
   const synthesis = ["maqam", "root", "bpm", "voices", "duff", "duff_enter", "passes", "motif_bank", "accent", "year"]
     .filter((c) => songColumns.includes(c));
+  const themeDefault = String(
+    (await sql("select column_default from information_schema.columns where table_schema = 'public' and table_name = 'user_prefs' and column_name = 'theme'")).rows[0]?.column_default ?? "",
+  );
+  check("a settings row nobody has written yet is light, not night",
+    /'dawn'/.test(themeDefault), themeDefault);
+
+  const profileColumns = await columnsOf("profiles");
+  check("nothing on a song is a picture, and a profile may carry one",
+    profileColumns.includes("avatar_path") && !songColumns.includes("avatar_path"));
+
   check("the songs table carries no composition, colour or year parameters", synthesis.length === 0,
     synthesis.length ? `still there: ${synthesis.join(", ")}` : `${songColumns.length} columns left, 10 checked`);
   check("and it does carry the recording", ["audio_path", "audio_mime", "audio_bytes", "duration_ms", "artwork_path"].every((c) => songColumns.includes(c)));
@@ -350,7 +369,9 @@ try {
 
   const prefs = (await sql("select * from public.user_prefs where profile_id = $1", [owner])).rows[0];
   check("their preferences exist without anyone inserting them",
-    prefs?.theme === "night" && Number(prefs?.volume) === 0.85 && prefs?.lyric_script === "tr" && prefs?.show_arabic === true,
+    /* light, because the house is light: a row nobody wrote yet must not arrive as a
+       theme the person never chose */
+    prefs?.theme === "dawn" && Number(prefs?.volume) === 0.85 && prefs?.lyric_script === "tr" && prefs?.show_arabic === true,
     JSON.stringify(prefs ?? null).slice(0, 140));
 
   const secondId = await one(
@@ -843,7 +864,7 @@ try {
   );
   const state = upgraded.rows[0] ?? {};
   check("the old column is gone and the version marker is there",
-    state.maqam === 0 && state.version === "audio-only-2",
+    state.maqam === 0 && state.version === "profile-pictures-1",
     `maqam columns=${state.maqam} · version=${state.version}`);
   check("and the file knows what it applied, so it need not do it twice",
     state.applied === MIGRATIONS.length,
@@ -865,7 +886,7 @@ try {
     "(select count(*)::int from pg_tables where schemaname = 'public') as tables",
   );
   const now_ = afterSecond.rows[0] ?? {};
-  check("and it changed nothing", now_.version === "audio-only-2" && now_.applied === MIGRATIONS.length,
+  check("and it changed nothing", now_.version === "profile-pictures-1" && now_.applied === MIGRATIONS.length,
     `version=${now_.version} · ${now_.applied} recorded · ${now_.tables} tables`);
 
   section("What a person pastes, onto a project that has never been set up");
@@ -883,7 +904,7 @@ try {
     "(select count(*)::int from pg_tables where schemaname = 'public') as tables",
   )).rows[0] ?? {};
   check("with the version marker and every table",
-    freshState.version === "audio-only-2" && freshState.tables >= 18,
+    freshState.version === "profile-pictures-1" && freshState.tables >= 18,
     `version=${freshState.version} · ${freshState.tables} tables`);
   await empty.close();
   await behind.close();

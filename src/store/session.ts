@@ -33,6 +33,8 @@ export type Account = {
   profileId: string;
   handle: string;
   name: string;
+  /** the storage path of their picture, not a URL */
+  avatarPath: string | null;
   bio: string;
   city: string;
   createdAt: number;
@@ -40,7 +42,7 @@ export type Account = {
   role: UserRole;
 };
 
-export type AccountPatch = Partial<Pick<Account, "name" | "bio" | "city">> & {
+export type AccountPatch = Partial<Pick<Account, "name" | "bio" | "city" | "avatarPath">> & {
   nameAr?: string;
   tagline?: string;
   handle?: string;
@@ -102,6 +104,7 @@ export function toAccount(user: User): Account {
     profileId: user.profileId,
     handle: user.handle,
     name: user.name,
+    avatarPath: user.avatarPath ?? null,
     bio: user.bio,
     city: user.city,
     createdAt: user.createdAt,
@@ -151,6 +154,8 @@ type SessionState = {
   signIn: (identity: string, password: string) => Promise<SessionResult>;
   signOut: () => Promise<void>;
   update: (patch: AccountPatch) => Promise<SessionResult>;
+  /** put a picture on the account, or take the one that is there down */
+  changeAvatar: (file: File | null) => Promise<SessionResult>;
   changePassword: (current: string, next: string) => Promise<SessionResult>;
   deleteAccount: () => Promise<boolean>;
 };
@@ -282,6 +287,7 @@ export const useSession = create<SessionState>()((set, get) => ({
       if (patch.bio !== undefined) body.bio = patch.bio.trim();
       if (patch.city !== undefined) body.city = patch.city.trim();
       if (patch.handle !== undefined) body.handle = patch.handle.trim().toLowerCase().replace(/^@/, "");
+      if (patch.avatarPath !== undefined) body.avatarPath = patch.avatarPath;
 
       const session = await api.updateProfile(body);
       get().setSession(session.user, session.stats);
@@ -290,6 +296,36 @@ export const useSession = create<SessionState>()((set, get) => ({
     } catch (err) {
       set({ busy: false });
       return { ok: false, field: fieldOf(err), msg: errorMessage(err, "Could not save that.") };
+    }
+  },
+
+  /**
+   * The picture goes up first and the profile row is pointed at it second, so a row never
+   * names an object that is not there. The picture it replaces is then deleted — best
+   * effort, because an orphaned file is a smaller problem than a save that reports one.
+   */
+  async changeAvatar(file) {
+    const user = get().user;
+    if (!user) return { ok: false, field: "form", msg: "You are not signed in." };
+    const previous = user.avatarPath ?? null;
+
+    set({ busy: true });
+    try {
+      let next: string | null = null;
+      if (file) {
+        const stored = await api.uploadAvatar(file);
+        next = stored.path;
+      }
+      const session = await api.updateProfile({ avatarPath: next });
+      get().setSession(session.user, session.stats);
+      set({ busy: false });
+      if (previous && previous !== next) {
+        void api.removeAvatar(previous).catch(() => {});
+      }
+      return { ok: true, account: toAccount(session.user) };
+    } catch (err) {
+      set({ busy: false });
+      return { ok: false, field: fieldOf(err), msg: errorMessage(err, "Could not save that picture.") };
     }
   },
 

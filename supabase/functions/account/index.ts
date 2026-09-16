@@ -16,7 +16,7 @@ import { serviceClient, withTimeout } from "../_shared/db.ts";
 import { HttpError, json, readBody, serve } from "../_shared/json.ts";
 import { log } from "../_shared/log.ts";
 import { requireCaller, type Caller } from "../_shared/auth.ts";
-import { AUDIO_BUCKET, ARTWORK_BUCKET, type Accent } from "../../../shared/types.ts";
+import { AUDIO_BUCKET, ARTWORK_BUCKET, AVATAR_BUCKET, type Accent } from "../../../shared/types.ts";
 
 const ACCENTS: Accent[] = ["jade", "gold", "turq", "madder", "cobalt"];
 const HANDLE = /^[a-z0-9._]{3,20}$/;
@@ -29,6 +29,8 @@ type ProfilePatch = {
   city?: string;
   accent?: Accent;
   handle?: string;
+  /** null takes the picture down; a path is what an upload into the bucket returned */
+  avatarPath?: string | null;
 };
 
 function text(value: unknown, field: string, min: number, max: number, optional = false): string | null {
@@ -44,9 +46,9 @@ function text(value: unknown, field: string, min: number, max: number, optional 
   return trimmed;
 }
 
-const PROFILE_KEYS = ["name", "nameAr", "tagline", "bio", "city", "accent", "handle"] as const;
+const PROFILE_KEYS = ["name", "nameAr", "tagline", "bio", "city", "accent", "handle", "avatarPath"] as const;
 
-function profilePatch(body: Record<string, unknown>): ProfilePatch {
+function profilePatch(body: Record<string, unknown>, callerId: string): ProfilePatch {
   const extra = Object.keys(body).filter((key) => key !== "action" && !PROFILE_KEYS.includes(key as typeof PROFILE_KEYS[number]));
   if (extra.length) throw new HttpError(`A profile does not have: ${extra.slice(0, 5).join(", ")}.`, 400, extra[0]);
 
@@ -62,6 +64,21 @@ function profilePatch(body: Record<string, unknown>): ProfilePatch {
     }
     patch.accent = body.accent as Accent;
   }
+  if ("avatarPath" in body) {
+    const value = body.avatarPath;
+    if (value === null || value === "") {
+      patch.avatarPath = null;
+    } else if (typeof value !== "string" || value.length > 200) {
+      throw new HttpError("That is not a picture path.", 400, "avatarPath");
+    } else {
+      /* only ever your own folder, so a path from somebody else's account cannot be
+         pasted in and adopted */
+      if (!value.startsWith(`${callerId}/`)) {
+        throw new HttpError("A picture has to be uploaded to your own account.", 403, "avatarPath");
+      }
+      patch.avatarPath = value;
+    }
+  }
   if ("handle" in body) {
     const handle = text(body.handle, "handle", 3, 20)!.toLowerCase();
     if (!HANDLE.test(handle)) {
@@ -74,7 +91,7 @@ function profilePatch(body: Record<string, unknown>): ProfilePatch {
 }
 
 async function saveProfile(caller: Caller, body: Record<string, unknown>): Promise<Response> {
-  const patch = profilePatch(body);
+  const patch = profilePatch(body, caller.id);
   const { data, error } = await withTimeout(
     caller.client
       .from("profiles")
@@ -86,9 +103,10 @@ async function saveProfile(caller: Caller, body: Record<string, unknown>): Promi
         ...(patch.city !== undefined ? { city: patch.city } : {}),
         ...(patch.accent !== undefined ? { accent: patch.accent } : {}),
         ...(patch.handle !== undefined ? { handle: patch.handle } : {}),
+        ...(patch.avatarPath !== undefined ? { avatar_path: patch.avatarPath } : {}),
       })
       .eq("id", caller.id)
-      .select("id, handle, name, name_ar, tagline, bio, city, accent, role, kind, verified, created_at")
+      .select("id, handle, name, name_ar, tagline, bio, city, accent, role, kind, verified, avatar_path, created_at")
       .single(),
     8000,
     "profiles.update",
@@ -151,7 +169,7 @@ async function exportAccount(caller: Caller): Promise<Response> {
 async function ownedObjects(uid: string): Promise<{ bucket: string; path: string }[]> {
   const db = serviceClient();
   const found: { bucket: string; path: string }[] = [];
-  for (const bucket of [AUDIO_BUCKET, ARTWORK_BUCKET]) {
+  for (const bucket of [AUDIO_BUCKET, ARTWORK_BUCKET, AVATAR_BUCKET]) {
     const { data } = await withTimeout(db.storage.from(bucket).list(uid, { limit: 1000 }), 8000, "storage.list");
     for (const object of data ?? []) {
       if (object?.name) found.push({ bucket, path: `${uid}/${object.name}` });

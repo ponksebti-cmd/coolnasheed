@@ -111,7 +111,7 @@ export default function ProfilePage() {
       {/* identity */}
       <header className="relative overflow-hidden rounded-2xl border border-line bg-surface/40">
         <div className="relative flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-6">
-          <Avatar name={account.name} size={96} className="!text-[2rem] ring-1 ring-line2" />
+          <Avatar name={account.name} size={96} picture={account.avatarPath} className="!text-[2rem] ring-1 ring-line2" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl text-text sm:text-3xl">{account.name}</h1>
@@ -305,12 +305,64 @@ function Settings({ account: accountId, onSignedOut }: { account: string; onSign
   const [pwMsg, setPwMsg] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deletePw, setDeletePw] = useState("");
+  const [pictureBusy, setPictureBusy] = useState(false);
+  const changeAvatar = useSession((s) => s.changeAvatar);
+
+  const pickPicture = async (file: File | null) => {
+    setPictureBusy(true);
+    const res = await changeAvatar(file);
+    setPictureBusy(false);
+    if (!res.ok) {
+      toast.push({ title: "That picture did not save", msg: res.msg, kind: "warn" });
+      return;
+    }
+    toast.push({ title: file ? "Picture updated" : "Picture taken down", kind: "ok" });
+  };
 
   if (!account) return null;
   void accountId;
 
   return (
     <div className="space-y-4">
+      <section className="space-y-3 rounded-2xl border border-line bg-surface/40 p-4 sm:p-5">
+        <div className="label">picture</div>
+        <div className="flex flex-wrap items-center gap-4">
+          <Avatar name={account.name} size={76} picture={account.avatarPath} className="ring-1 ring-line2" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex flex-wrap gap-2">
+              <label className="btn btn-ghost cursor-pointer !px-4 !py-2.5">
+                <Icon name="upload" size={14} />
+                {account.avatarPath ? "Choose another" : "Choose a picture"}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/avif"
+                  className="sr-only"
+                  disabled={pictureBusy}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    e.target.value = "";
+                    if (file) void pickPicture(file);
+                  }}
+                />
+              </label>
+              {account.avatarPath ? (
+                <button
+                  className="btn btn-ghost !px-4 !py-2.5"
+                  disabled={pictureBusy}
+                  onClick={() => void pickPicture(null)}
+                >
+                  <Icon name="trash" size={14} /> Take it down
+                </button>
+              ) : null}
+            </div>
+            <p className="text-[11.5px] leading-relaxed text-muted">
+              1 MB at most, and it shows wherever your name does — your profile, your notes, the sidebar. Anything
+              bigger is scaled down before it uploads.
+            </p>
+          </div>
+        </div>
+      </section>
+
       <section className="space-y-3 rounded-2xl border border-line bg-surface/40 p-4 sm:p-5">
         <div className="label">profile</div>
         <label className="block">

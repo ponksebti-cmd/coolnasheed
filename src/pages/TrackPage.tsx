@@ -11,7 +11,7 @@ import { clsx } from "clsx";
 import { Icon } from "../components/ui/Icons";
 import { CoverArt } from "../components/art/CoverArt";
 import { EmptyState, Reveal, SectionHeader, useToast } from "../components/ui/Primitives";
-import { Lyrics, LyricPreview } from "../components/player/Lyrics";
+import { Lyrics } from "../components/player/Lyrics";
 import { TrackCardGrid, TrackList } from "../components/track/TrackViews";
 import { Equalizer, LikeButton, PlayFab, TrackMenu } from "../components/track/TrackBits";
 import { TRACKS, artistOf, collectionsOf, durationOf, formatCount, getTrack, statsFor } from "../data/catalog";
@@ -177,30 +177,12 @@ export default function TrackPage() {
 
         {/* ----------------------------------------------- right column */}
         <div className="min-w-0 space-y-8">
+          {/* one lyric view, at the top and beside the cover */}
           <Reveal delay={40}>
-            <section className="panel rounded-2xl p-4 sm:p-5">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="label">the words</div>
-                <Link to="#lyrics" className="text-[11.5px] text-muted hover:text-text2">
-                  {plural(track.lines.length, "line")}
-                </Link>
-              </div>
-              {track.lines.length ? (
-                <LyricPreview song={track} count={4} />
-              ) : (
-                <p className="text-[12.5px] text-muted">The publisher has not written the lyrics out for this recording.</p>
-              )}
-              {track.lines.length > 4 ? (
-                <Link to={`/t/${track.id}`} className="mt-3 inline-flex items-center gap-1 text-[12px] text-jade hover:text-jadesoft">
-                  All the words <Icon name="chevronRight" size={12} />
-                </Link>
-              ) : null}
+            <section id="lyrics" className="panel rounded-2xl p-4 sm:p-5">
+              <Lyrics song={track} variant="inline" className="max-h-[560px]" />
             </section>
           </Reveal>
-
-          <section id="lyrics" className="panel rounded-2xl p-4 sm:p-5">
-            <Lyrics song={track} variant="inline" className="max-h-[560px]" />
-          </section>
 
           <section>
             <SectionHeader label="underneath" title="Notes" subtitle={`${thread?.items.length ?? 0} in the thread`} />

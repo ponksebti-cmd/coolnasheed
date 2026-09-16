@@ -199,7 +199,7 @@ export function ArtistCard({
         className="card sheen group block overflow-hidden p-4 text-center"
       >
         <div className="relative mx-auto mb-3 h-[92px] w-[92px] overflow-hidden rounded-full ring-1 ring-line2 transition-transform duration-500 group-hover:scale-[1.05]">
-          <Avatar name={artist.name} accent={artist.accent} size={92} />
+          <Avatar name={artist.name} accent={artist.accent} size={92} picture={artist.avatarPath} />
           <span className="absolute inset-0 rounded-full shadow-[inset_0_0_24px_rgba(0,0,0,0.55)]" />
           {artist.verified ? (
             <span className="absolute -bottom-0.5 left-1/2 grid h-5 w-5 -translate-x-1/2 place-items-center rounded-full border border-line2 bg-elev text-jade">

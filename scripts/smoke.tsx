@@ -463,6 +463,7 @@ async function main() {
         accent: "gold" as const,
         verified: false,
         kind: "artist" as const,
+        avatarPath: null,
         songs: 3,
         followers: 2,
       },
@@ -478,6 +479,7 @@ async function main() {
         accent: "jade" as const,
         verified: false,
         kind: "artist" as const,
+        avatarPath: null,
         songs: 0,
         followers: 0,
       },
@@ -830,6 +832,18 @@ async function main() {
   });
   host.remove();
 
+  /* A nasheed page has one lyric view and it sits at the top, beside the cover: it used
+     to have two — a four-line teaser under a "the words" heading, and the real thing
+     below it — which is one too many ways to read the same lines. */
+  const trackPageSrc = readFileSync(join(process.cwd(), "src/pages/TrackPage.tsx"), "utf8");
+  assert(
+    "a nasheed page has one lyric view, beside the cover",
+    !trackPageSrc.includes("LyricPreview") &&
+      (trackPageSrc.match(/<Lyrics\b/g) ?? []).length === 1 &&
+      trackPageSrc.indexOf('id="lyrics"') < trackPageSrc.indexOf('title="Notes"'),
+    `${(trackPageSrc.match(/<Lyrics\b/g) ?? []).length} lyric views`,
+  );
+
   /* ---------------------------------------------------- words over the cover */
 
   /* The lyric stage: the artwork turned into light with the line being sung in the
@@ -938,7 +952,7 @@ async function main() {
   const schemaLib = await import("../src/lib/schema");
   assert(
     "the client knows what it writes against",
-    schemaLib.EXPECTED_SCHEMA_VERSION === "audio-only-2",
+    schemaLib.EXPECTED_SCHEMA_VERSION === "profile-pictures-1",
   );
   assert(
     "a database that is behind is not usable",
@@ -988,7 +1002,7 @@ async function main() {
 
   stubFetch((url) =>
     url.includes("/rest/v1/app_schema")
-      ? json([{ version: "audio-only-2" }])
+      ? json([{ version: "profile-pictures-1" }])
       : json([]),
   );
   const fresh = await schemaLib.checkSchema(true);
@@ -1330,7 +1344,13 @@ async function main() {
   assert(
     "and it contains the table the app asks about its schema",
     canonical.includes("public.app_schema") &&
-      canonical.includes("audio-only-2"),
+      canonical.includes("profile-pictures-1"),
+  );
+  assert(
+    "and the picture schema travels in the same paste",
+    canonical.includes("avatar_path") &&
+      canonical.includes("nasheed-avatars") &&
+      /\(\s*'nasheed-avatars', 'nasheed-avatars', true, 1048576/m.test(canonical),
   );
 
   /* The file gets pasted onto databases that are already part way through — a project one
@@ -1974,6 +1994,7 @@ async function main() {
         authorName: "Hafsa Noor",
         authorHandle: "hafsa.noor",
         authorAccent: "jade" as const,
+        authorAvatar: null,
         at: Date.now(),
         text: "recorded after fajr",
         amens: 0,
@@ -2007,6 +2028,128 @@ async function main() {
   });
   profileHost.remove();
   session.useSession.setState({ user: signedOutUser, currentId: null, accounts: [] });
+
+  /* ------------------------------------------------------- a picture beside a name */
+
+  /* Profile pictures: one megabyte, its own bucket, and the row stores the path. The
+     circle beside a name shows the picture when there is one and initials when there is
+     not — nothing generated. */
+  section("A picture beside a name");
+
+  const typesLib = await import("../shared/types");
+  assert(
+    "a picture is capped at one megabyte",
+    typesLib.MAX_AVATAR_BYTES === 1048576 &&
+      typesLib.MAX_AVATAR_BYTES < typesLib.MAX_ARTWORK_BYTES,
+    `${typesLib.MAX_AVATAR_BYTES} bytes`,
+  );
+
+  const facePath = `${OWNER}/avatar-1.webp`;
+  const meWithFace = wire.userFromRow({
+    id: OWNER,
+    handle: "hafsa.noor",
+    name: "Hafsa Noor",
+    name_ar: null,
+    tagline: "",
+    bio: "",
+    city: "",
+    accent: "jade",
+    role: "listener",
+    kind: "artist",
+    verified: false,
+    avatar_path: facePath,
+    created_at: new Date().toISOString(),
+  } as never);
+  assert(
+    "a profile row carries its picture",
+    meWithFace.avatarPath === facePath,
+    String(meWithFace.avatarPath),
+  );
+
+  const noteWithFace = wire.commentFromRow(
+    {
+      id: "cmt_pic",
+      song_id: "sng_smoke_0001",
+      author_id: SECOND,
+      text: "amin",
+      at_line: null,
+      edited_at: null,
+      amens: 0,
+      reports: 0,
+      removed: false,
+      created_at: new Date().toISOString(),
+      author: {
+        id: SECOND,
+        handle: "maryam.q",
+        name: "Maryam Q.",
+        accent: "jade",
+        verified: false,
+        avatar_path: `${SECOND}/avatar-2.png`,
+      },
+    } as never,
+    { id: null, amened: new Set<string>() } as never,
+  );
+  assert(
+    "and so does the author of a note",
+    noteWithFace.authorAvatar === `${SECOND}/avatar-2.png`,
+    String(noteWithFace.authorAvatar),
+  );
+
+  /* Two-foreign-key tables (`amens`, `reports`) give PostgREST a second path between
+     comments and profiles, and it refuses to guess which one was meant. The join has to
+     name the key. */
+  assert(
+    "the comment join names the foreign key, or PostgREST refuses it",
+    wire.COMMENT_COLUMNS.includes("author:profiles!comments_author_id_fkey"),
+    wire.COMMENT_COLUMNS,
+  );
+
+  const art = await import("../src/components/art/CoverArt");
+  const faceHost = w.document.createElement("div");
+  w.document.body.appendChild(faceHost);
+  const faceRoot = createRoot(faceHost);
+  await act(async () => {
+    faceRoot.render(
+      createElement(art.Avatar, { name: "Hafsa Noor", size: 40, picture: facePath }),
+    );
+  });
+  const faceImg = faceHost.querySelector("img");
+  assert(
+    "the circle shows the picture when there is one",
+    faceImg?.getAttribute("src") ===
+      `https://smoke.supabase.co/storage/v1/object/public/nasheed-avatars/${facePath}`,
+    String(faceImg?.getAttribute("src") ?? ""),
+  );
+  await act(async () => {
+    faceRoot.render(createElement(art.Avatar, { name: "Hafsa Noor", size: 40 }));
+  });
+  assert(
+    "and initials when there is not",
+    faceHost.querySelector("img") === null &&
+      (faceHost.textContent ?? "").includes("HN"),
+    faceHost.textContent ?? "",
+  );
+  await act(async () => {
+    faceRoot.unmount();
+  });
+  faceHost.remove();
+
+  const profilePageSrc = readFileSync(join(process.cwd(), "src/pages/ProfilePage.tsx"), "utf8");
+  const apiSrcForPictures = readFileSync(join(process.cwd(), "src/lib/api.ts"), "utf8");
+  const sessionSrc = readFileSync(join(process.cwd(), "src/store/session.ts"), "utf8");
+  assert(
+    "the profile settings offer a picture, with the limit in words",
+    profilePageSrc.includes("1 MB at most") &&
+      profilePageSrc.includes('type="file"') &&
+      profilePageSrc.includes("changeAvatar"),
+    "",
+  );
+  assert(
+    "and it goes into the picture bucket before the row points at it",
+    apiSrcForPictures.includes('upload(uid, "avatar"') &&
+      sessionSrc.includes("api.uploadAvatar(file)"),
+    "",
+  );
 
   /* ----------------------------------------------------------- the light book */
 

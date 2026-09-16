@@ -120,6 +120,7 @@ export function artistOf(song: Song): ArtistCard {
     accent: "jade",
     verified: false,
     kind: "artist",
+    avatarPath: null,
     songs: 0,
     followers: 0,
   };

@@ -23,6 +23,8 @@ export type UserComment = {
   authorName: string;
   authorHandle: string;
   authorAccent: Accent;
+  /** the author's picture, if they have one */
+  authorAvatar: string | null;
   at: number;
   text: string;
   /** optional "on line N" — the thread can jump the voice there */
@@ -56,6 +58,7 @@ function fromServer(comment: Comment): UserComment {
     authorName: comment.authorName,
     authorHandle: comment.authorHandle,
     authorAccent: comment.authorAccent,
+    authorAvatar: comment.authorAvatar ?? null,
     at: comment.createdAt,
     text: comment.text,
     atLine: comment.atLine ?? undefined,

@@ -41,7 +41,9 @@ async function checkStorage(): Promise<Probe> {
     const { data, error } = await withTimeout(db.storage.listBuckets(), 5000, "storage.listBuckets");
     if (error) return { ok: false, detail: error.message.slice(0, 160) };
     const ids = (data ?? []).map((bucket) => bucket.id);
-    const missing = ["nasheed-audio", "nasheed-artwork"].filter((id) => !ids.includes(id));
+    const missing = ["nasheed-audio", "nasheed-artwork", "nasheed-avatars"].filter(
+      (id) => !ids.includes(id),
+    );
     return missing.length ? { ok: false, detail: `missing buckets: ${missing.join(", ")}` } : { ok: true };
   } catch (error) {
     return { ok: false, detail: error instanceof Error ? error.message.slice(0, 160) : "unreachable" };

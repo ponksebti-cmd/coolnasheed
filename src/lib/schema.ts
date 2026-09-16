@@ -16,7 +16,7 @@
 import { maybeSb, hasSupabase } from "./supabase";
 
 /** The version this build of the client writes against. Keep in step with the migration. */
-export const EXPECTED_SCHEMA_VERSION = "audio-only-2";
+export const EXPECTED_SCHEMA_VERSION = "profile-pictures-1";
 
 export type SchemaState =
   /** no project configured: nothing to check, and the app says so elsewhere */
@@ -56,7 +56,7 @@ export function schemaProblem(
         schema.version
           ? ` (it reports “${schema.version}”, this build expects “${EXPECTED_SCHEMA_VERSION}”)`
           : ""
-      }. Recordings upload, but publishing and drafts will fail until it is updated. ${FIX_LINE}`;
+      }. Part of what this build writes has nowhere to go until it is updated. ${FIX_LINE}`;
     default:
       return null;
   }

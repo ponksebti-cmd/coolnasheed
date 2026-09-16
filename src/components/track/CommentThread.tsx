@@ -133,7 +133,7 @@ export function CommentThread({
         <div className="rounded-xl border border-line bg-surface/60 p-3">
           <div className="flex gap-3">
             <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full ring-1 ring-line2">
-              <Avatar name={account.name} accent="jade" size={36} />
+              <Avatar name={account.name} accent="jade" size={36} picture={account.avatarPath} />
             </span>
             <div className="min-w-0 flex-1">
               <textarea
@@ -224,7 +224,7 @@ export function CommentThread({
               className={clsx("flex gap-3 rounded-xl border p-3.5", mine ? "border-jade/28 bg-jade/[0.05]" : "border-line bg-surface/50")}
             >
               <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full ring-1 ring-line2">
-                <Avatar name={c.authorName} accent={c.authorAccent} size={36} />
+                <Avatar name={c.authorName} accent={c.authorAccent} size={36} picture={c.authorAvatar} />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px]">

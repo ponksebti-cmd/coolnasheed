@@ -19,7 +19,9 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   AUDIO_BUCKET,
   ARTWORK_BUCKET,
+  AVATAR_BUCKET,
   MAX_ARTWORK_BYTES,
+  MAX_AVATAR_BYTES,
   MAX_AUDIO_BYTES,
   type StorageBucket,
 } from "../../shared/types";
@@ -109,6 +111,8 @@ export const audioUrl = (path: string | null | undefined): string | null =>
   publicUrl(AUDIO_BUCKET, path);
 export const artworkUrl = (path: string | null | undefined): string | null =>
   publicUrl(ARTWORK_BUCKET, path);
+export const avatarUrl = (path: string | null | undefined): string | null =>
+  publicUrl(AVATAR_BUCKET, path);
 
 /**
  * `<uid>/<prefix>-<stamp>-<nonce>.<ext>` — the shape the bucket policies expect, so
@@ -159,7 +163,12 @@ export async function upload(
   const bucket =
     options.bucket ??
     (file.type.startsWith("image/") ? ARTWORK_BUCKET : AUDIO_BUCKET);
-  const limit = bucket === AUDIO_BUCKET ? MAX_AUDIO_BYTES : MAX_ARTWORK_BYTES;
+  const limit =
+    bucket === AUDIO_BUCKET
+      ? MAX_AUDIO_BYTES
+      : bucket === AVATAR_BUCKET
+        ? MAX_AVATAR_BYTES
+        : MAX_ARTWORK_BYTES;
 
   let ready = file;
   try {
@@ -184,6 +193,9 @@ export async function upload(
   if (ready.size === 0) throw new ApiError("That file is empty.", 400, "file");
   if (bucket === AUDIO_BUCKET && !/\.mp3$/i.test(ready.name)) {
     throw new ApiError("Recordings must be .mp3 files.", 400, "audio");
+  }
+  if (bucket === AVATAR_BUCKET && !ready.type.startsWith("image/")) {
+    throw new ApiError("A picture has to be an image.", 400, "avatar");
   }
 
   const path = storagePath(ownerId, prefix, ready.name || `${prefix}.bin`);

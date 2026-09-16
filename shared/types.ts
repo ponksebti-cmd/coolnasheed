@@ -41,6 +41,8 @@ export type User = {
   role: UserRole;
   kind: UserKind;
   verified: boolean;
+  /** the storage path of their picture, not a URL — URLs are derived */
+  avatarPath: string | null;
   createdAt: number;
   /** filled in from the Supabase auth session, never from the database */
   email?: string | null;
@@ -55,6 +57,8 @@ export type ProfileInput = {
   city?: string;
   accent?: Accent;
   handle?: string;
+  /** null takes the picture down; a path is what an upload returned */
+  avatarPath?: string | null;
 };
 
 export type ListenerStats = {
@@ -207,6 +211,8 @@ export type ArtistCard = {
   accent: Accent;
   verified: boolean;
   kind: UserKind;
+  /** the publisher's picture, if they have one */
+  avatarPath: string | null;
   songs: number;
   followers: number;
 };
@@ -251,6 +257,7 @@ export type Comment = {
   authorHandle: string;
   authorAccent: Accent;
   authorVerified: boolean;
+  authorAvatar: string | null;
   text: string;
   atLine: number | null;
   createdAt: number;
@@ -281,6 +288,7 @@ export type CommentRow = {
     name: string;
     accent: Accent;
     verified: boolean;
+    avatar_path?: string | null;
   } | null;
 };
 
@@ -434,10 +442,14 @@ export type PublisherProfile = {
 
 /* ------------------------------------------------------------------- storage */
 
-export type StorageBucket = "nasheed-audio" | "nasheed-artwork";
+export type StorageBucket =
+  | "nasheed-audio"
+  | "nasheed-artwork"
+  | "nasheed-avatars";
 
 export const AUDIO_BUCKET: StorageBucket = "nasheed-audio";
 export const ARTWORK_BUCKET: StorageBucket = "nasheed-artwork";
+export const AVATAR_BUCKET: StorageBucket = "nasheed-avatars";
 
 /**
  * What one upload may weigh. The browser brings anything larger inside these before it
@@ -445,11 +457,13 @@ export const ARTWORK_BUCKET: StorageBucket = "nasheed-artwork";
  * table refuses a row that describes anything larger — the same two numbers, enforced
  * three times, because a limit that lives only in the interface is a suggestion.
  *
- *   a recording    5 MB   mp3, transcoded down to the best bitrate that fits
- *   cover art      2 MB   webp/jpeg, scaled down until it fits
+ *   a recording       5 MB   mp3, transcoded down to the best bitrate that fits
+ *   cover art         2 MB   webp/jpeg, scaled down until it fits
+ *   a profile picture 1 MB   jpeg/png/webp, scaled down until it fits
  */
 export const MAX_AUDIO_BYTES = 5242880;
 export const MAX_ARTWORK_BYTES = 2097152;
+export const MAX_AVATAR_BYTES = 1048576;
 
 /** mp3 only, and the two MIME spellings browsers and Supabase disagree about. */
 export const AUDIO_MIME_TYPES = ["audio/mpeg", "audio/mp3", "audio/x-mpeg"] as const;
