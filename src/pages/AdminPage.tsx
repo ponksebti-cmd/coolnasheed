@@ -17,8 +17,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { clsx } from "clsx";
 import { Icon } from "../components/ui/Icons";
-import { EmptyState, SectionHeader, useToast } from "../components/ui/Primitives";
-import { PatternArt } from "../components/art/PatternArt";
+import { EmptyState, SectionHeader, useErrorToast, useToast } from "../components/ui/Primitives";
+import { Avatar } from "../components/art/CoverArt";
 import { api, errorMessage, functionsAvailable } from "../lib/api";
 import { backendLabel, hasSupabase, projectRef } from "../lib/supabase";
 import { formatCount } from "../data/catalog";
@@ -138,6 +138,7 @@ export default function AdminPage() {
   const [summary, setSummary] = useState<AdminSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useErrorToast(error);
   const [busyReport, setBusyReport] = useState<string | null>(null);
 
   const staff = user?.role === "staff";
@@ -261,12 +262,6 @@ export default function AdminPage() {
           </button>
         </div>
       </div>
-
-      {error ? (
-        <p className="field-error rounded-xl border border-madder/35 bg-madder/10 px-3.5 py-2.5">
-          <Icon name="info" size={13} /> {error}
-        </p>
-      ) : null}
 
       {/* ---------------------------------------------------------- totals */}
       <section className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
@@ -429,7 +424,7 @@ export default function AdminPage() {
               summary.topOwners.map((owner) => (
                 <Link key={owner.ownerId} to={`/a/${owner.handle}`} className="flex items-center gap-3 group">
                   <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full ring-1 ring-line">
-                    <PatternArt seed={`artist-${owner.handle}`} accent="gold" showVignette={false} />
+                    <Avatar name={owner.name} accent="gold" size={36} />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] text-text2 group-hover:text-jadesoft">{owner.name}</span>
@@ -465,15 +460,9 @@ export default function AdminPage() {
                   <span className="text-[11.5px] text-muted">@{song.owner ?? "—"}</span>
                   <span className="text-[11.5px] text-muted">{formatCount(song.plays)} plays</span>
                   <span className="text-[11.5px] text-muted">{relativeTime(song.publishedAt)}</span>
-                  {song.hasAudio ? (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[10.5px] text-muted">
-                      <Icon name="upload" size={10} /> recording
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[10.5px] text-muted">
-                      <Icon name="waveform" size={10} /> synthesized
-                    </span>
-                  )}
+                  <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[10.5px] text-muted">
+                    <Icon name="upload" size={10} /> recording
+                  </span>
                   <button
                     type="button"
                     className={clsx(

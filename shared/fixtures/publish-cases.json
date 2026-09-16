@@ -20,555 +20,169 @@
     "{ input, error: { status, field, says } } — it is refused, with this status, this",
     "field for the form to highlight, and this much of the sentence it says.",
     "",
-    "Rules mirrored here, all of which are also CHECK constraints on public.songs:",
-    "title 2–120 · note ≤ 480 · maqam in the ten names · root 24–96 · bpm 30–240 ·",
-    "voices solo|duet|choir · duff null or ^[DT.]{16}$ · duff_enter intro|verse ·",
-    "passes 1–6 · accent jade|gold|turq|madder|cobalt · year null or 600–2200 ·",
-    "tags ≤ 8, lowercased, ≤ 24 chars · lines 0–40 · duration_ms null or 1000–86400000 ·",
-    "audio ≤ 60 MB · artwork ≤ 8 MB · storage paths inside the publisher's own folder."
+    "A nasheed is a recording and some words about it. There is no synthesis, no tempo,",
+    "no key, no colour of its own:",
+    "title 2–120 · titleAr 1–120 or null · note ≤ 480 · tags ≤ 8, lowercased, folded to",
+    "plain letters, ≤ 24 chars each · lines 0–40, each ≤ 240 chars, timings 0–86400 to the",
+    "millisecond · audioPath required, an .mp3, inside the publisher's own folder ·",
+    "audioMime ≤ 60 chars (audio/mpeg assumed) · audioBytes ≤ 5 MB · duration_ms null or",
+    "1000–86400000 · artworkPath null or png/jpg/webp/avif in the publisher's own folder ·",
+    "unknown keys refused, so a typo cannot look like it worked."
   ],
   "owner": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29",
   "cases": [
     {
-      "name": "a full nasheed, everything supplied",
+      "name": "the minimum that publishes",
+      "input": {
+        "title": "Ṭalaʿa al-Badru ʿAlaynā",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3"
+      },
+      "row": {
+        "title": "Ṭalaʿa al-Badru ʿAlaynā",
+        "title_ar": null,
+        "note": "",
+        "tags": [],
+        "lines": [],
+        "audio_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "audio_mime": "audio/mpeg",
+        "audio_bytes": null,
+        "duration_ms": null,
+        "artwork_path": null
+      }
+    },
+    {
+      "name": "a full upload, everything supplied",
       "input": {
         "title": "Ṣalawāt of the Morning",
         "titleAr": "صلوات الصباح",
-        "note": "Recorded in one take, vocals and duff only.",
-        "maqam": "hijaz",
-        "root": 62,
-        "bpm": 84,
-        "voices": "choir",
-        "duff": "DT..DT..DT..DT..",
-        "duffEnter": "intro",
-        "passes": 3,
-        "accent": "gold",
-        "year": 2026,
+        "note": "Recorded in one take, voices only.",
         "tags": [
-          "ṣalawāt",
-          "morning",
-          "choir"
+          "Morning",
+          "traditional"
         ],
         "lines": [
           {
-            "tr": "allāhumma ṣalli ʿalā muḥammad",
-            "ar": "اللهم صل على محمد",
-            "en": "O God, bless Muḥammad",
+            "tr": "ṣallū ʿalā al-ḥabīb",
+            "ar": "صلوا على الحبيب",
             "t": 0
           },
           {
-            "tr": "wa ʿalā āli muḥammad",
-            "ar": "وعلى آل محمد",
-            "en": "and the family of Muḥammad",
-            "t": 4.5
+            "tr": "fī kulli ṣabāḥ",
+            "en": "every morning",
+            "t": 12.5
           }
         ],
-        "motifBank": [
-          0,
-          2,
-          3,
-          5,
-          7
-        ],
-        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/nasheed-20260914-abcdef.mp3",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
         "audioMime": "audio/mpeg",
-        "audioBytes": 8412345,
-        "durationMs": 184000,
-        "artworkPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/cover-20260914-abcdef.png"
+        "audioBytes": 4512000,
+        "durationMs": 192000,
+        "artworkPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/salawat.jpg"
       },
       "row": {
         "title": "Ṣalawāt of the Morning",
         "title_ar": "صلوات الصباح",
-        "note": "Recorded in one take, vocals and duff only.",
-        "maqam": "hijaz",
-        "root": 62,
-        "bpm": 84,
-        "voices": "choir",
-        "duff": "DT..DT..DT..DT..",
-        "duff_enter": "intro",
-        "passes": 3,
-        "accent": "gold",
-        "year": 2026,
+        "note": "Recorded in one take, voices only.",
         "tags": [
-          "alawt",
           "morning",
-          "choir"
+          "traditional"
         ],
         "lines": [
           {
-            "tr": "allāhumma ṣalli ʿalā muḥammad",
-            "ar": "اللهم صل على محمد",
-            "en": "O God, bless Muḥammad",
+            "tr": "ṣallū ʿalā al-ḥabīb",
+            "ar": "صلوا على الحبيب",
             "t": 0
           },
           {
-            "tr": "wa ʿalā āli muḥammad",
-            "ar": "وعلى آل محمد",
-            "en": "and the family of Muḥammad",
-            "t": 4.5
+            "tr": "fī kulli ṣabāḥ",
+            "en": "every morning",
+            "t": 12.5
           }
         ],
-        "motif_bank": [
-          0,
-          2,
-          3,
-          5,
-          7
-        ],
-        "audio_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/nasheed-20260914-abcdef.mp3",
+        "audio_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
         "audio_mime": "audio/mpeg",
-        "audio_bytes": 8412345,
-        "duration_ms": 184000,
-        "artwork_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/cover-20260914-abcdef.png"
-      }
-    },
-    {
-      "name": "only what is required — the defaults are the shape of a plain nasheed",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo"
-      },
-      "row": {
-        "title": "Salam",
-        "title_ar": null,
-        "note": "",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "duff": null,
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
-        "tags": [],
-        "lines": [],
-        "motif_bank": null,
-        "audio_path": null,
-        "audio_mime": null,
-        "audio_bytes": null,
-        "duration_ms": null,
-        "artwork_path": null
+        "audio_bytes": 4512000,
+        "duration_ms": 192000,
+        "artwork_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/salawat.jpg"
       }
     },
     {
       "name": "a title padded with spaces is a title",
       "input": {
         "title": "   Yā Rabb   ",
-        "maqam": "bayati",
-        "root": 58,
-        "bpm": 66,
-        "voices": "duet"
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3"
       },
       "row": {
         "title": "Yā Rabb",
         "title_ar": null,
         "note": "",
-        "maqam": "bayati",
-        "root": 58,
-        "bpm": 66,
-        "voices": "duet",
-        "duff": null,
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
         "tags": [],
         "lines": [],
-        "motif_bank": null,
-        "audio_path": null,
-        "audio_mime": null,
+        "audio_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "audio_mime": "audio/mpeg",
         "audio_bytes": null,
         "duration_ms": null,
         "artwork_path": null
       }
     },
     {
-      "name": "a title of one character",
+      "name": "a leading slash is trimmed, not refused",
       "input": {
-        "title": "S",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo"
-      },
-      "error": {
-        "status": 400,
-        "field": "title",
-        "says": "between 2 and 120"
-      }
-    },
-    {
-      "name": "a title of 121 characters",
-      "input": {
-        "title": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo"
-      },
-      "error": {
-        "status": 400,
-        "field": "title",
-        "says": "between 2 and 120"
-      }
-    },
-    {
-      "name": "no title at all",
-      "input": {
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo"
-      },
-      "error": {
-        "status": 400,
-        "field": "title",
-        "says": "required"
-      }
-    },
-    {
-      "name": "a maqām that does not exist",
-      "input": {
-        "title": "Salam",
-        "maqam": "mustar",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo"
-      },
-      "error": {
-        "status": 400,
-        "field": "maqam",
-        "says": "must be one of"
-      }
-    },
-    {
-      "name": "a root below the range",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 23,
-        "bpm": 72,
-        "voices": "solo"
-      },
-      "error": {
-        "status": 400,
-        "field": "root",
-        "says": "between 24 and 96"
-      }
-    },
-    {
-      "name": "a root above the range",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 97,
-        "bpm": 72,
-        "voices": "solo"
-      },
-      "error": {
-        "status": 400,
-        "field": "root",
-        "says": "between 24 and 96"
-      }
-    },
-    {
-      "name": "a tempo that is not a number",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": "quickly",
-        "voices": "solo"
-      },
-      "error": {
-        "status": 400,
-        "field": "bpm",
-        "says": "must be a number"
-      }
-    },
-    {
-      "name": "a fractional tempo rounds to the beat it is nearest",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 84.6,
-        "voices": "solo"
+        "title": "Subḥān Allāh",
+        "audioPath": "/3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3"
       },
       "row": {
-        "title": "Salam",
+        "title": "Subḥān Allāh",
         "title_ar": null,
         "note": "",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 85,
-        "voices": "solo",
-        "duff": null,
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
         "tags": [],
         "lines": [],
-        "motif_bank": null,
-        "audio_path": null,
-        "audio_mime": null,
+        "audio_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "audio_mime": "audio/mpeg",
         "audio_bytes": null,
         "duration_ms": null,
         "artwork_path": null
       }
     },
     {
-      "name": "a tempo below the range",
+      "name": "tags are folded to plain letters, lowercased and deduplicated",
       "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 29,
-        "voices": "solo"
-      },
-      "error": {
-        "status": 400,
-        "field": "bpm",
-        "says": "between 30 and 240"
-      }
-    },
-    {
-      "name": "a tempo a string can still carry",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": "96",
-        "voices": "solo"
-      },
-      "row": {
-        "title": "Salam",
-        "title_ar": null,
-        "note": "",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 96,
-        "voices": "solo",
-        "duff": null,
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
-        "tags": [],
-        "lines": [],
-        "motif_bank": null,
-        "audio_path": null,
-        "audio_mime": null,
-        "audio_bytes": null,
-        "duration_ms": null,
-        "artwork_path": null
-      }
-    },
-    {
-      "name": "voices that do not exist",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "quartet"
-      },
-      "error": {
-        "status": 400,
-        "field": "voices",
-        "says": "must be one of"
-      }
-    },
-    {
-      "name": "a drum pattern of the wrong length",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "duff": "DT.DT"
-      },
-      "error": {
-        "status": 400,
-        "field": "duff",
-        "says": "16 steps"
-      }
-    },
-    {
-      "name": "a drum pattern with a step that is not a drum",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "duff": "DT..DT..DT..DT.X"
-      },
-      "error": {
-        "status": 400,
-        "field": "duff",
-        "says": "16 steps"
-      }
-    },
-    {
-      "name": "an empty drum pattern means vocals only",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "duff": "   "
-      },
-      "row": {
-        "title": "Salam",
-        "title_ar": null,
-        "note": "",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "duff": null,
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
-        "tags": [],
-        "lines": [],
-        "motif_bank": null,
-        "audio_path": null,
-        "audio_mime": null,
-        "audio_bytes": null,
-        "duration_ms": null,
-        "artwork_path": null
-      }
-    },
-    {
-      "name": "passes outside one to six",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "passes": 7
-      },
-      "error": {
-        "status": 400,
-        "field": "passes",
-        "says": "between 1 and 6"
-      }
-    },
-    {
-      "name": "an accent that does not exist",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "accent": "purple"
-      },
-      "error": {
-        "status": 400,
-        "field": "accent",
-        "says": "must be one of"
-      }
-    },
-    {
-      "name": "a year before the range",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "year": 599
-      },
-      "error": {
-        "status": 400,
-        "field": "year",
-        "says": "between 600 and 2200"
-      }
-    },
-    {
-      "name": "an empty year is no year",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "year": ""
-      },
-      "error": {
-        "status": 400,
-        "field": "year",
-        "says": "required"
-      }
-    },
-    {
-      "name": "tags are cleaned: lowercased, dashed, deduplicated, and a number is not a tag",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
+        "title": "Dhikr at Fajr",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
         "tags": [
           "Dhikr",
+          "  dhikr  ",
           "RAHMA",
-          "  sabr  ",
-          "not$valid",
-          "duplicate",
-          "duplicate",
+          "ṣalawāt",
+          "salawat",
+          "madinah",
           42,
-          "a-very-long-tag-that-goes-past-twenty-four"
+          "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          ""
         ]
       },
       "row": {
-        "title": "Salam",
+        "title": "Dhikr at Fajr",
         "title_ar": null,
         "note": "",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "duff": null,
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
         "tags": [
           "dhikr",
           "rahma",
-          "sabr",
-          "notvalid",
-          "duplicate"
+          "salawat",
+          "madinah"
         ],
         "lines": [],
-        "motif_bank": null,
-        "audio_path": null,
-        "audio_mime": null,
+        "audio_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "audio_mime": "audio/mpeg",
         "audio_bytes": null,
         "duration_ms": null,
         "artwork_path": null
       }
     },
     {
-      "name": "nine tags become eight",
+      "name": "only the first eight tags are considered",
       "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
+        "title": "Many Tags",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
         "tags": [
           "one",
           "two",
@@ -578,22 +192,14 @@
           "six",
           "seven",
           "eight",
-          "nine"
+          "nine",
+          "ten"
         ]
       },
       "row": {
-        "title": "Salam",
+        "title": "Many Tags",
         "title_ar": null,
         "note": "",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "duff": null,
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
         "tags": [
           "one",
           "two",
@@ -605,190 +211,156 @@
           "eight"
         ],
         "lines": [],
-        "motif_bank": null,
-        "audio_path": null,
-        "audio_mime": null,
+        "audio_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "audio_mime": "audio/mpeg",
         "audio_bytes": null,
         "duration_ms": null,
         "artwork_path": null
       }
     },
     {
-      "name": "tags that are not a list",
+      "name": "lyric lines keep only what a lyric view can read, and round their timings",
       "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "tags": "dhikr"
-      },
-      "error": {
-        "status": 400,
-        "field": "tags",
-        "says": "must be a list"
-      }
-    },
-    {
-      "name": "lyrics past forty lines",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "lines": "FORTY_ONE"
-      },
-      "error": {
-        "status": 400,
-        "field": "lines",
-        "says": "at most 40"
-      }
-    },
-    {
-      "name": "lyrics are trimmed, timed to the millisecond, and a line with no words is dropped",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
+        "title": "Lā ilāha illā Allāh",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
         "lines": [
           {
-            "tr": "  yā rabbi  ",
-            "t": 0.12345
+            "tr": "  lā ilāha illā Allāh  ",
+            "ar": "لا إله إلا الله",
+            "t": 3.4567,
+            "junk": "dropped"
           },
           {
-            "ar": "   ",
-            "en": ""
+            "t": 5
           },
           {
-            "en": "O my Lord",
-            "note": "  repeated three times  ",
-            "t": 2
+            "tr": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "t": -1
           },
-          "not a line at all"
+          "not a line"
         ]
       },
       "row": {
-        "title": "Salam",
+        "title": "Lā ilāha illā Allāh",
         "title_ar": null,
         "note": "",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "duff": null,
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
         "tags": [],
         "lines": [
           {
-            "tr": "yā rabbi",
-            "t": 0.123
+            "tr": "lā ilāha illā Allāh",
+            "ar": "لا إله إلا الله",
+            "t": 3.457
           },
           {
-            "en": "O my Lord",
-            "note": "repeated three times",
-            "t": 2
+            "tr": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
           }
         ],
-        "motif_bank": null,
-        "audio_path": null,
-        "audio_mime": null,
+        "audio_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "audio_mime": "audio/mpeg",
         "audio_bytes": null,
         "duration_ms": null,
         "artwork_path": null
       }
     },
     {
-      "name": "motifs are rounded, and what is not a number is not a motif",
+      "name": "bytes are capped at the bucket ceiling",
       "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "motifBank": [
-          0,
-          1.4,
-          2.6,
-          "three",
-          null,
-          5
-        ]
+        "title": "Long Recitation",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "audioBytes": 62915560
       },
       "row": {
-        "title": "Salam",
+        "title": "Long Recitation",
         "title_ar": null,
         "note": "",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "duff": null,
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
         "tags": [],
         "lines": [],
-        "motif_bank": [
-          0,
-          1,
-          3,
-          5
-        ],
-        "audio_path": null,
-        "audio_mime": null,
-        "audio_bytes": null,
+        "audio_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "audio_mime": "audio/mpeg",
+        "audio_bytes": 5242880,
         "duration_ms": null,
         "artwork_path": null
       }
     },
     {
-      "name": "an empty motif list is no list",
+      "name": "an empty audioBytes is unknown, not zero",
       "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "motifBank": []
+        "title": "A Small One",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "audioBytes": ""
       },
       "row": {
-        "title": "Salam",
+        "title": "A Small One",
         "title_ar": null,
         "note": "",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "duff": null,
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
         "tags": [],
         "lines": [],
-        "motif_bank": null,
-        "audio_path": null,
-        "audio_mime": null,
+        "audio_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "audio_mime": "audio/mpeg",
         "audio_bytes": null,
         "duration_ms": null,
         "artwork_path": null
       }
     },
     {
-      "name": "audio in somebody else's folder",
+      "name": "a duration is stored to the millisecond",
       "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
+        "title": "Timed",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "durationMs": 192000
+      },
+      "row": {
+        "title": "Timed",
+        "title_ar": null,
+        "note": "",
+        "tags": [],
+        "lines": [],
+        "audio_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "audio_mime": "audio/mpeg",
+        "audio_bytes": null,
+        "duration_ms": 192000,
+        "artwork_path": null
+      }
+    },
+    {
+      "name": "no recording at all",
+      "input": {
+        "title": "Ṭalaʿa al-Badru ʿAlaynā"
+      },
+      "error": {
+        "status": 400,
+        "field": "audioPath",
+        "says": "required"
+      }
+    },
+    {
+      "name": "a wav, which is not what the product plays",
+      "input": {
+        "title": "A WAV",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/recording.wav"
+      },
+      "error": {
+        "status": 400,
+        "field": "audioPath",
+        "says": ".mp3"
+      }
+    },
+    {
+      "name": "an external url, which is not a path at all",
+      "input": {
+        "title": "Streamed",
+        "audioPath": "https://example.com/nasheed.mp3"
+      },
+      "error": {
+        "status": 400,
+        "field": "audioPath",
+        "says": "not a valid storage path"
+      }
+    },
+    {
+      "name": "somebody else's folder",
+      "input": {
+        "title": "Not Mine",
         "audioPath": "11111111-2222-3333-4444-555555555555/stolen.mp3"
       },
       "error": {
@@ -798,14 +370,10 @@
       }
     },
     {
-      "name": "a path that climbs out of the bucket",
+      "name": "a path trying to climb out of its folder",
       "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/../other/x.mp3"
+        "title": "Climbing",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/../../etc/passwd.mp3"
       },
       "error": {
         "status": 400,
@@ -814,193 +382,34 @@
       }
     },
     {
-      "name": "a leading slash is trimmed, not refused",
+      "name": "a title with nothing in it",
       "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "audioPath": "/3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/nasheed-1.mp3"
-      },
-      "row": {
-        "title": "Salam",
-        "title_ar": null,
-        "note": "",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "duff": null,
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
-        "tags": [],
-        "lines": [],
-        "motif_bank": null,
-        "audio_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/nasheed-1.mp3",
-        "audio_mime": null,
-        "audio_bytes": null,
-        "duration_ms": null,
-        "artwork_path": null
-      }
-    },
-    {
-      "name": "a mime that is not audio is no mime",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "audioMime": "video/mp4"
-      },
-      "row": {
-        "title": "Salam",
-        "title_ar": null,
-        "note": "",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "duff": null,
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
-        "tags": [],
-        "lines": [],
-        "motif_bank": null,
-        "audio_path": null,
-        "audio_mime": null,
-        "audio_bytes": null,
-        "duration_ms": null,
-        "artwork_path": null
-      }
-    },
-    {
-      "name": "a size above the ceiling is clamped to it",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "audioBytes": 62915560
-      },
-      "row": {
-        "title": "Salam",
-        "title_ar": null,
-        "note": "",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "duff": null,
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
-        "tags": [],
-        "lines": [],
-        "motif_bank": null,
-        "audio_path": null,
-        "audio_mime": null,
-        "audio_bytes": 62914560,
-        "duration_ms": null,
-        "artwork_path": null
-      }
-    },
-    {
-      "name": "a size of zero is no size",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "audioBytes": 0
-      },
-      "row": {
-        "title": "Salam",
-        "title_ar": null,
-        "note": "",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "duff": null,
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
-        "tags": [],
-        "lines": [],
-        "motif_bank": null,
-        "audio_path": null,
-        "audio_mime": null,
-        "audio_bytes": null,
-        "duration_ms": null,
-        "artwork_path": null
-      }
-    },
-    {
-      "name": "a duration below a second",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "durationMs": 999
+        "title": "",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3"
       },
       "error": {
         "status": 400,
-        "field": "durationMs",
-        "says": "between 1000 and 86400000"
+        "field": "title",
+        "says": "required"
       }
     },
     {
-      "name": "a duration above a day",
+      "name": "a title of one character",
       "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "durationMs": 86400001
+        "title": "Ṣ",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3"
       },
       "error": {
         "status": 400,
-        "field": "durationMs",
-        "says": "between 1000 and 86400000"
+        "field": "title",
+        "says": "between 2 and 120"
       }
     },
     {
-      "name": "artwork in somebody else's folder",
+      "name": "a note longer than the field allows",
       "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
-        "artworkPath": "11111111-2222-3333-4444-555555555555/cover.png"
-      },
-      "error": {
-        "status": 403,
-        "field": "artworkPath",
-        "says": "your own folder"
-      }
-    },
-    {
-      "name": "a note over 480 characters",
-      "input": {
-        "title": "Salam",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 72,
-        "voices": "solo",
+        "title": "Long Note",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
         "note": "SIX_HUNDRED"
       },
       "error": {
@@ -1008,148 +417,198 @@
         "field": "note",
         "says": "between 0 and 480"
       }
+    },
+    {
+      "name": "more lyric lines than the table wants",
+      "input": {
+        "title": "Long One",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "lines": "FORTY_ONE"
+      },
+      "error": {
+        "status": 400,
+        "field": "lines",
+        "says": "at most 40"
+      }
+    },
+    {
+      "name": "a duration the player could never reach",
+      "input": {
+        "title": "Forever",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "durationMs": 86400001
+      },
+      "error": {
+        "status": 400,
+        "field": "durationMs",
+        "says": "between 1000 and 21600000"
+      }
+    },
+    {
+      "name": "cover art that is not an image the bucket takes",
+      "input": {
+        "title": "GIF Cover",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "artworkPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/cover.gif"
+      },
+      "error": {
+        "status": 400,
+        "field": "artworkPath",
+        "says": "png, jpg, webp or avif"
+      }
+    },
+    {
+      "name": "a composition parameter the app no longer carries",
+      "input": {
+        "title": "Old Payload",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "maqam": "rast"
+      },
+      "error": {
+        "status": 400,
+        "field": "maqam",
+        "says": "does not accept"
+      }
+    },
+    {
+      "name": "a colour a nasheed no longer has",
+      "input": {
+        "title": "Old Payload",
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa-al-badru.mp3",
+        "accent": "cobalt"
+      },
+      "error": {
+        "status": 400,
+        "field": "accent",
+        "says": "does not accept"
+      }
+    },
+    {
+      "name": "a payload that is not an object at all",
+      "input": "not a payload",
+      "error": {
+        "status": 400,
+        "says": "not a nasheed"
+      }
     }
   ],
   "songRows": [
     {
       "name": "a stored nasheed becomes the model the player reads",
-      "ownerHandle": "yusuf",
+      "ownerHandle": "hafsa",
       "row": {
-        "id": "sng_talaa-al-badru",
-        "owner_id": "d26f258b-7b1d-452b-bf5a-7947d45fb56b",
+        "id": "sng_0001",
+        "owner_id": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29",
         "title": "Ṭalaʿa al-Badru ʿAlaynā",
         "title_ar": "طلع البدر علينا",
-        "note": "The welcome sung at Madinah. Public domain, and the app says so.",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 76,
-        "voices": "choir",
-        "duff": "DT..DT..DT..DT..",
-        "duff_enter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
+        "note": "The oldest welcome song we have.",
         "tags": [
-          "madinah",
-          "welcome"
+          "traditional",
+          "madinah"
         ],
         "lines": [
           {
             "tr": "ṭalaʿa al-badru ʿalaynā",
             "ar": "طلع البدر علينا",
-            "en": "The full moon rose upon us",
+            "en": "the full moon rose over us",
             "t": 0
+          },
+          {
+            "tr": "min thaniyyāti al-wadāʿ",
+            "ar": "من ثنيات الوداع",
+            "en": "from the valley of farewell",
+            "t": 6
           }
         ],
-        "motif_bank": null,
-        "audio_path": null,
-        "audio_mime": null,
-        "duration_ms": 214000,
-        "artwork_path": null,
+        "audio_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa.mp3",
+        "audio_mime": "audio/mpeg",
+        "audio_bytes": 5120000,
+        "duration_ms": 192000,
+        "artwork_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa.jpg",
         "status": "live",
-        "published_at": "2026-09-01T06:00:00.000Z",
-        "created_at": "2026-09-01T06:00:00.000Z",
-        "plays": 1200,
-        "likes": 84,
-        "notes": 6
+        "published_at": "2026-09-15T09:30:00.000Z",
+        "created_at": "2026-09-15T09:30:00.000Z",
+        "plays": 12,
+        "likes": 3,
+        "notes": 1
       },
       "song": {
-        "id": "sng_talaa-al-badru",
-        "ownerId": "d26f258b-7b1d-452b-bf5a-7947d45fb56b",
-        "ownerHandle": "yusuf",
+        "id": "sng_0001",
+        "ownerId": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29",
+        "ownerHandle": "hafsa",
+        "ownerName": null,
         "title": "Ṭalaʿa al-Badru ʿAlaynā",
         "titleAr": "طلع البدر علينا",
-        "note": "The welcome sung at Madinah. Public domain, and the app says so.",
-        "maqam": "rast",
-        "root": 60,
-        "bpm": 76,
-        "voices": "choir",
-        "duff": "DT..DT..DT..DT..",
-        "duffEnter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
+        "note": "The oldest welcome song we have.",
         "tags": [
-          "madinah",
-          "welcome"
+          "traditional",
+          "madinah"
         ],
         "lines": [
           {
             "tr": "ṭalaʿa al-badru ʿalaynā",
             "ar": "طلع البدر علينا",
-            "en": "The full moon rose upon us",
+            "en": "the full moon rose over us",
             "t": 0
+          },
+          {
+            "tr": "min thaniyyāti al-wadāʿ",
+            "ar": "من ثنيات الوداع",
+            "en": "from the valley of farewell",
+            "t": 6
           }
         ],
-        "motifBank": null,
-        "audioPath": null,
-        "audioMime": null,
-        "durationMs": 214000,
-        "artworkPath": null,
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa.mp3",
+        "audioMime": "audio/mpeg",
+        "audioBytes": 5120000,
+        "durationMs": 192000,
+        "artworkPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/talaa.jpg",
         "status": "live",
-        "publishedAt": 1788242400000,
-        "plays": 1200,
-        "likes": 84,
-        "notes": 6
+        "publishedAt": 1789464600000,
+        "plays": 12,
+        "likes": 3,
+        "notes": 1
       }
     },
     {
       "name": "a row with nothing optional in it still becomes a whole model",
       "ownerHandle": null,
       "row": {
-        "id": "sng_bare",
+        "id": "sng_0002",
         "owner_id": null,
-        "title": "Bare",
+        "title": "Yā Nabiyy Salām",
         "title_ar": null,
-        "note": null,
-        "maqam": "kurd",
-        "root": 55,
-        "bpm": 60,
-        "voices": "solo",
-        "duff": null,
-        "duff_enter": null,
-        "passes": null,
-        "accent": null,
-        "year": null,
-        "tags": null,
-        "lines": null,
-        "motif_bank": null,
-        "audio_path": null,
-        "audio_mime": null,
-        "duration_ms": null,
-        "artwork_path": null,
-        "status": null,
-        "published_at": "2026-09-01T06:00:00.000Z",
-        "created_at": "2026-09-01T06:00:00.000Z",
-        "plays": null,
-        "likes": null,
-        "notes": null
-      },
-      "song": {
-        "id": "sng_bare",
-        "ownerId": null,
-        "ownerHandle": null,
-        "title": "Bare",
-        "titleAr": null,
         "note": "",
-        "maqam": "kurd",
-        "root": 55,
-        "bpm": 60,
-        "voices": "solo",
-        "duff": null,
-        "duffEnter": "verse",
-        "passes": 2,
-        "accent": "jade",
-        "year": null,
         "tags": [],
         "lines": [],
-        "motifBank": null,
-        "audioPath": null,
+        "audio_path": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/salam.mp3",
+        "audio_mime": null,
+        "audio_bytes": null,
+        "duration_ms": null,
+        "artwork_path": null,
+        "status": "live",
+        "published_at": "NOW",
+        "plays": 0,
+        "likes": 0,
+        "notes": 0
+      },
+      "song": {
+        "id": "sng_0002",
+        "ownerId": null,
+        "ownerHandle": null,
+        "ownerName": null,
+        "title": "Yā Nabiyy Salām",
+        "titleAr": null,
+        "note": "",
+        "tags": [],
+        "lines": [],
+        "audioPath": "3f2b8c1e-9d4a-4b7c-8e2f-1a6d5c4b3a29/salam.mp3",
         "audioMime": null,
+        "audioBytes": null,
         "durationMs": null,
         "artworkPath": null,
         "status": "live",
-        "publishedAt": 1788242400000,
+        "publishedAt": "NOW",
         "plays": 0,
         "likes": 0,
         "notes": 0

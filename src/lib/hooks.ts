@@ -1,8 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { engine } from "./audio/engine";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { player } from "./audio/player";
 import { currentTime } from "../store/player";
 import { useSession } from "../store/session";
 import { useUi } from "../store/ui";
+import { catalogVersion, subscribeCatalog } from "../data/catalog";
+
+/**
+ * Re-render when the catalogue changes. Hydration and a publish both mutate the live
+ * arrays in place, so a memo that only depends on its query would otherwise keep a
+ * stale answer forever.
+ */
+export function useCatalogVersion(): number {
+  return useSyncExternalStore(subscribeCatalog, catalogVersion, () => 0);
+}
 
 /** rAF loop that only re-renders when the value actually moves (≈25fps). */
 export function useSmoothTime(active = true): number {
@@ -13,7 +23,7 @@ export function useSmoothTime(active = true): number {
     if (!active) return;
     let raf = 0;
     const loop = () => {
-      const now = engine.getTime();
+      const now = player.getTime();
       if (Math.abs(now - last.current) > 0.035) {
         last.current = now;
         setT(now);
@@ -93,17 +103,46 @@ export function useOnClickAway<T extends HTMLElement>(onAway: () => void, active
   return ref;
 }
 
+/**
+ * Is this element taking text, rather than navigating the app?
+ *
+ * `tagName` alone is not enough: a rich-text box is a `div` with `contenteditable`,
+ * and a click can land on a child of either one, so the check has to be about where
+ * the event went, not about the element the listener was attached to.
+ */
+export function isTextField(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.tagName !== "string") return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "OPTION") return true;
+  /* A rich-text box, or anything inside one — the event target is often a child
+     element rather than the editable root itself. */
+  const editable = typeof el.closest === "function"
+    ? el.closest('[contenteditable=""],[contenteditable="true"],[contenteditable="plaintext-only"]')
+    : null;
+  return editable !== null;
+}
+
 export function useKeyboard(map: Record<string, (e: KeyboardEvent) => void>, active = true) {
   const saved = useRef(map);
   saved.current = map;
   useEffect(() => {
     if (!active) return;
     const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const typing = !!target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);
+      const typing = isTextField(e.target);
+      const mod = e.metaKey || e.ctrlKey;
       const key = e.key;
-      const combo = `${e.metaKey || e.ctrlKey ? "mod+" : ""}${e.shiftKey && key.length > 1 ? "shift+" : ""}${key.toLowerCase()}`;
-      const fn = saved.current[combo] ?? (typing ? undefined : saved.current[key]);
+
+      /* While a field has focus, the keyboard belongs to the field. A space is a space
+         and "n" is an n: a global shortcut that eats them is a text field you cannot
+         type in. Shift does not make a key a shortcut either — "?" is a question mark
+         while someone is typing their name, not the shortcuts sheet. Modified
+         combinations still go through, and Escape still closes what is open. */
+      if (typing && !mod && key !== "Escape") return;
+
+      const combo = `${mod ? "mod+" : ""}${e.shiftKey && key.length > 1 ? "shift+" : ""}${key.toLowerCase()}`;
+      const fn = saved.current[combo] ?? saved.current[key];
       if (fn) fn(e);
     };
     window.addEventListener("keydown", handler);

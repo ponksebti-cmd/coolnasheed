@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { clsx } from "clsx";
 import { Icon, type IconName } from "../components/ui/Icons";
-import { PatternArt } from "../components/art/PatternArt";
+import { CoverArt } from "../components/art/CoverArt";
 import { EmptyState, Modal, Reveal, SectionHeader, useToast } from "../components/ui/Primitives";
 import { ArtistCard, CollectionCard } from "../components/collection/Cards";
 import { TrackList } from "../components/track/TrackViews";
@@ -52,7 +52,7 @@ export default function LibraryPage() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="label mb-1.5">yours, on this device</div>
+          <div className="label mb-1.5">yours</div>
           <h1 className="text-[2rem] leading-none text-text md:text-[2.6rem]">Library</h1>
           <p className="mt-2 text-[13px] text-muted">
             {plural(loved.length, "loved nasheed", "loved nasheeds")} · {plural(sets.length, "set")} ·{" "}
@@ -124,7 +124,7 @@ export default function LibraryPage() {
           <EmptyState
             icon="star"
             title="Nothing loved yet"
-            msg="Tap the star on any nasheed. Nūr reads this list to build your mixes, and it never leaves the device."
+            msg="Tap the star on any nasheed and it collects here, under your account."
             action={
               <Link to="/" className="btn btn-primary mt-2 !px-4 !py-2.5">
                 <Icon name="home" size={14} /> Start browsing
@@ -148,7 +148,7 @@ export default function LibraryPage() {
                           {(tracks.length ? tracks.slice(0, 4) : [null, null, null, null]).map((t, k) =>
                             t ? (
                               <span key={k} className="overflow-hidden">
-                                <PatternArt seed={t.seed} accent={t.accent} showVignette={false} />
+                                <CoverArt path={t.artworkPath} title={t.title} className="h-full w-full" rounded="sm" />
                               </span>
                             ) : (
                               <span key={k} className="bg-surface3/60" />
@@ -224,7 +224,7 @@ export default function LibraryPage() {
               {historyRows.map(({ h, track }) => (
                 <div key={h.id} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-surface2/50">
                   <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg ring-1 ring-line">
-                    <PatternArt seed={track.seed} accent={track.accent} showVignette={false} />
+                    <CoverArt path={track.artworkPath} title={track.title} className="h-full w-full" rounded="sm" />
                   </span>
                   <Link to={`/t/${track.id}`} className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] font-semibold text-text group-hover:text-jadesoft">{track.title}</span>

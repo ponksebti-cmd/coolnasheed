@@ -1,203 +1,243 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { clsx } from "clsx";
 import { Icon } from "../components/ui/Icons";
-import { PatternArt, AmbientBackdrop } from "../components/art/PatternArt";
-import { Chip, Reveal, SectionHeader, useToast } from "../components/ui/Primitives";
-import { ArtistCard, CollectionCard, MiniTrack, MoodTile, Rail, RailItem } from "../components/collection/Cards";
+import { Chip, EmptyState, Reveal, SectionHeader, useToast } from "../components/ui/Primitives";
+import { ArtistCard, CollectionCard, MiniTrack, Rail, RailItem } from "../components/collection/Cards";
 import { TrackCardGrid } from "../components/track/TrackViews";
 import { Equalizer, PlayFab } from "../components/track/TrackBits";
-import { RadialSpectrum } from "../components/player/Visualizer";
+import { CoverArt } from "../components/art/CoverArt";
 import {
   ARTISTS,
   COLLECTIONS,
-  MOODS,
   TRACKS,
   artistOf,
   durationOf,
   formatCount,
   getTrack,
+  latestSongs,
+  popularSongs,
   statsFor,
 } from "../data/catalog";
-import { maqamLabel } from "../lib/theory";
-import { clsx } from "clsx";
+import { api } from "../lib/api";
 import { formatTime, greeting, plural, relativeTime } from "../lib/format";
-import { useNow } from "../lib/hooks";
+import { useCatalogVersion, useNow } from "../lib/hooks";
 import { usePlayer } from "../store/player";
 import { useLibrary } from "../store/library";
-import { useUi } from "../store/ui";
-import { generateNurMix } from "../lib/nur";
+import { useBoot } from "../lib/boot";
 import type { Track } from "../data/types";
-
-/** The featured nasheed changes with the hour — the app has a body clock. */
-const HOUR_PICKS: { from: number; to: number; id: string; why: string }[] = [
-  { from: 0, to: 4, id: "laylat-al-qadr", why: "the odd nights are the good ones" },
-  { from: 4, to: 7, id: "city-of-fajr", why: "the minarets are already awake" },
-  { from: 7, to: 12, id: "alhamdulillah", why: "gratitude, before the day gets loud" },
-  { from: 12, to: 16, id: "talaa-al-badru", why: "the oldest welcome song we have" },
-  { from: 16, to: 19, id: "asma-al-husna", why: "the hour between ʿAṣr and Maghrib" },
-  { from: 19, to: 22, id: "nur-ala-nur", why: "light upon light, after ʿIshāʾ" },
-  { from: 22, to: 24, id: "sakina", why: "put the day down" },
-];
-
-function featuredForHour(hour: number): { track: Track; why: string } {
-  const pick = HOUR_PICKS.find((p) => hour >= p.from && hour < p.to) ?? HOUR_PICKS[6]!;
-  return { track: getTrack(pick.id) ?? TRACKS[0]!, why: pick.why };
-}
 
 export default function Home() {
   const now = useNow(60_000);
+  const version = useCatalogVersion();
+  const boot = useBoot();
   const player = usePlayer();
   const history = useLibrary((s) => s.history);
   const liked = useLibrary((s) => s.liked);
   const playlists = useLibrary((s) => s.playlists);
-  const setNur = useUi((s) => s.setNur);
+  const toggleLike = useLibrary((s) => s.toggleLike);
   const toast = useToast();
 
-  const { track: featured, why } = useMemo(() => featuredForHour(now.getHours()), [now]);
-  const isFeatured = player.trackId === featured.id;
+  /* real play counts, asked of the server — not a number this app invented */
+  const [trending, setTrending] = useState<Track[]>([]);
 
-  const trending = useMemo(
-    () => [...TRACKS].sort((a, b) => statsFor(b).plays - statsFor(a).plays).slice(0, 8),
-    [],
+  useEffect(() => {
+    let live = true;
+    void api
+      .trending("7d", 10)
+      .then((res) => {
+        if (!live) return;
+        setTrending(res.rows.map((row) => getTrack(row.songId)).filter((t): t is Track => !!t));
+      })
+      .catch(() => {
+        if (live) setTrending([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [version]);
+
+  const latest = useMemo(() => latestSongs(10), [version]);
+  const featured = useMemo(() => trending[0] ?? latest[0] ?? null, [trending, latest]);
+  const popular = useMemo(() => (trending.length ? trending : popularSongs(8)), [trending, version]);
+  const featuredLoved = useLibrary((s) => (featured ? s.liked.includes(featured.id) : false));
+  const recent = useMemo(
+    () =>
+      history
+        .slice(0, 10)
+        .map((entry) => ({ entry, track: getTrack(entry.id) }))
+        .filter((row): row is { entry: (typeof history)[number]; track: Track } => !!row.track),
+    [history],
   );
-  const fresh = useMemo(() => [...TRACKS].sort((a, b) => b.year - a.year || b.bpm - a.bpm).slice(0, 10), []);
-  const vocalsOnly = useMemo(() => TRACKS.filter((t) => !t.duff), []);
-  const recent = useMemo(() => history.slice(0, 10).map((h) => ({ h, track: getTrack(h.id) })).filter((r) => !!r.track) as { h: (typeof history)[number]; track: Track }[], [history]);
-
-  const nurPreview = useMemo(() => generateNurMix({ liked, history, size: 5, seedKey: `home-${now.toDateString()}` }), [liked, history, now]);
-
   const lovedTracks = useMemo(() => liked.map((id) => getTrack(id)).filter((t): t is Track => !!t), [liked]);
-  const featuredLoved = useLibrary((s) => s.liked.includes(featured.id));
-  const toggleLike = useLibrary((s) => s.toggleLike);
+
+  /* ------------------------------------------------------------------ empty */
+  if (!TRACKS.length) {
+    const loading = !boot;
+    return (
+      <div className="space-y-6">
+        <EmptyState
+          icon={loading ? "clock" : boot?.needsSetup ? "server" : boot?.error ? "cloudOff" : "upload"}
+          title={
+            loading
+              ? "Reading the catalogue…"
+              : boot?.needsSetup
+                ? "The database has no schema yet"
+                : boot?.error
+                  ? "The catalogue would not load"
+                  : "Nothing published yet"
+          }
+          msg={
+            loading
+              ? "One request to the backend. Until it answers, the app does not pretend to know what is in the catalogue."
+              : boot?.error
+                ? boot.error
+                : "This project has no nasheeds in it. Upload an mp3 with an account, and it will be the first thing on this page — there is no bundled demo catalogue behind it."
+          }
+          action={
+            boot?.needsSetup || boot?.error ? (
+              <Link to="/about" className="btn btn-ghost mt-2 !px-4 !py-2.5">
+                <Icon name="info" size={14} /> What the app expects
+              </Link>
+            ) : (
+              <Link to="/studio" className="btn btn-primary mt-2 !px-4 !py-2.5">
+                <Icon name="upload" size={14} /> Publish a nasheed
+              </Link>
+            )
+          }
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-11">
       {/* ---------------------------------------------------------- hero */}
-      <section className="relative overflow-hidden rounded-3xl border border-line">
-        <div className="absolute inset-0 scale-[1.5] opacity-80 blur-[2px]">
-          <PatternArt seed={featured.seed} accent={featured.accent} intensity={1.1} />
-        </div>
-        <div className="absolute inset-0 bg-gradient-to-r from-[rgba(4,11,9,0.95)] via-[rgba(4,11,9,0.82)] to-[rgba(4,11,9,0.35)]" />
-        <div className="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-transparent" />
-        <AmbientBackdrop accent={featured.accent} seed="hero" />
+      {featured ? (
+        <section className="relative overflow-hidden rounded-3xl border border-line">
+          <div
+            className="absolute inset-0 opacity-70"
+            style={{
+              background: `radial-gradient(120% 120% at 12% 0%, color-mix(in oklab, var(--c-jade) 40%, transparent), transparent 62%)`,
+            }}
+            aria-hidden
+          />
+          <div className="absolute inset-0 bg-gradient-to-r from-[rgba(4,11,9,0.95)] via-[rgba(4,11,9,0.82)] to-[rgba(4,11,9,0.4)]" />
+          <div className="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-transparent" />
+          <div className="grain absolute inset-0" />
 
-        <div className="relative grid gap-8 p-6 md:p-10 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:items-center">
-          <div className="min-w-0">
-            <div className="label mb-3 flex flex-wrap items-center gap-2">
-              <span className="flex items-center gap-1.5 text-gold">
-                <Icon name="clock" size={12} /> {greeting(now)}
-              </span>
-              <span className="hidden h-px w-6 bg-gold/40 sm:block" />
-              <span className="normal-case tracking-normal text-muted">{why}</span>
-            </div>
-
-            <Reveal>
-              <h1 className="max-w-[16ch] text-[2.4rem] leading-[0.94] text-text sm:text-[3.2rem] lg:text-[3.9rem]">
-                {featured.title}
-              </h1>
-              {featured.titleAr ? (
-                <div className="arabic mt-3 text-[1.4rem] text-goldsoft/85 sm:text-[1.8rem]" dir="rtl">
-                  {featured.titleAr}
-                </div>
-              ) : null}
-            </Reveal>
-
-            <Reveal delay={80}>
-              <div className="mt-4 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[13px] text-text2">
-                <Link to={`/a/${featured.artistId}`} className="flex items-center gap-2 font-semibold text-text hover:text-jadesoft">
-                  <span className="h-6 w-6 overflow-hidden rounded-full ring-1 ring-line2">
-                    <PatternArt seed={artistOf(featured).seed} accent={artistOf(featured).accent} showVignette={false} />
-                  </span>
-                  {artistOf(featured).name}
-                </Link>
-                <span aria-hidden className="text-muted">·</span>
-                <span className="text-muted">{maqamLabel(featured.maqam)}</span>
-                <span aria-hidden className="text-muted">·</span>
-                <span className="text-muted">{featured.bpm} bpm</span>
-                <span aria-hidden className="text-muted">·</span>
-                <span className="text-muted">{formatTime(durationOf(featured))}</span>
-                <span aria-hidden className="text-muted">·</span>
-                <span className="flex items-center gap-1 text-muted">
-                  <Icon name="waveform" size={12} /> {formatCount(statsFor(featured).plays)} plays
+          <div className="relative grid gap-8 p-6 md:p-10 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:items-center">
+            <div className="min-w-0">
+              <div className="label mb-3 flex flex-wrap items-center gap-2">
+                <span className="flex items-center gap-1.5 text-gold">
+                  <Icon name="clock" size={12} /> {greeting(now)}
+                </span>
+                <span className="hidden h-px w-6 bg-gold/40 sm:block" />
+                <span className="normal-case tracking-normal text-muted">
+                  {trending.length ? "most played this week" : "newest in the catalogue"}
                 </span>
               </div>
-              <p className="mt-4 max-w-[54ch] text-[13.5px] leading-relaxed text-text2/85 text-balance-pretty">{featured.blurb}</p>
-            </Reveal>
 
-            <Reveal delay={140}>
-              <div className="mt-6 flex flex-wrap items-center gap-2.5">
-                <button
-                  className="btn btn-primary !px-6 !py-3.5 !text-[13.5px]"
-                  onClick={() => (isFeatured ? player.toggle() : player.playTrack(featured.id, { kind: "home", label: "Featured" }))}
-                >
-                  <Icon name={isFeatured && player.playing ? "pause" : "play"} size={16} strokeWidth={2.2} />
-                  {isFeatured && player.playing ? "Pause" : "Play now"}
-                </button>
-                <Link to={`/t/${featured.id}`} className="btn btn-ghost !px-5 !py-3.5">
-                  <Icon name="lyrics" size={15} /> Read the lyrics
-                </Link>
-                <button
-                  className={clsx("btn !px-4 !py-3.5", featuredLoved ? "btn-gold" : "btn-ghost")}
-                  onClick={() => {
-                    const nowLiked = toggleLike(featured.id);
-                    if (nowLiked === null) return;
-                    toast.push({ title: nowLiked ? "Loved" : "Removed from loved", msg: featured.title, kind: nowLiked ? "ok" : "info" });
-                  }}
-                  aria-pressed={featuredLoved}
-                >
-                  <Icon name={featuredLoved ? "starFill" : "star"} size={15} />
-                  <span className="hidden sm:inline">{featuredLoved ? "Loved" : "Love"}</span>
-                </button>
+              <Reveal>
+                <h1 className="max-w-[16ch] text-[2.4rem] leading-[0.94] text-text sm:text-[3.2rem] lg:text-[3.9rem]">{featured.title}</h1>
+                {featured.titleAr ? (
+                  <div className="arabic mt-3 text-[1.4rem] text-goldsoft/85 sm:text-[1.8rem]" dir="rtl">
+                    {featured.titleAr}
+                  </div>
+                ) : null}
+              </Reveal>
+
+              <Reveal delay={80}>
+                <div className="mt-4 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[13px] text-text2">
+                  <Link to={`/a/${artistOf(featured).id}`} className="flex items-center gap-2 font-semibold text-text hover:text-jadesoft">
+                    <CoverArt path={featured.artworkPath} title={featured.title} rounded="full" className="h-6 w-6" />
+                    {artistOf(featured).name}
+                  </Link>
+                  <span aria-hidden className="text-muted">·</span>
+                  <span className="text-muted">{formatTime(durationOf(featured))}</span>
+                  <span aria-hidden className="text-muted">·</span>
+                  <span className="flex items-center gap-1 text-muted">
+                    <Icon name="waveform" size={12} /> {formatCount(statsFor(featured).plays)} plays
+                  </span>
+                </div>
+                {featured.note ? (
+                  <p className="mt-4 max-w-[54ch] text-[13.5px] leading-relaxed text-text2/85 text-balance-pretty">{featured.note}</p>
+                ) : null}
+              </Reveal>
+
+              <Reveal delay={140}>
+                <div className="mt-6 flex flex-wrap items-center gap-2.5">
+                  <button
+                    className="btn btn-primary !px-6 !py-3.5 !text-[13.5px]"
+                    onClick={() => (player.trackId === featured.id ? player.toggle() : player.playTrack(featured.id, { kind: "home", label: "Featured" }, latest.map((t) => t.id)))}
+                  >
+                    <Icon name={player.trackId === featured.id && player.playing ? "pause" : "play"} size={16} strokeWidth={2.2} />
+                    {player.trackId === featured.id && player.playing ? "Pause" : "Play now"}
+                  </button>
+                  <Link to={`/t/${featured.id}`} className="btn btn-ghost !px-5 !py-3.5">
+                    <Icon name="lyrics" size={15} /> Read the lyrics
+                  </Link>
+                  <button
+                    className={clsx("btn !px-4 !py-3.5", featuredLoved ? "btn-gold" : "btn-ghost")}
+                    onClick={() => {
+                      const nowLiked = toggleLike(featured.id);
+                      if (nowLiked === null) return;
+                      toast.push({ title: nowLiked ? "Loved" : "Removed from loved", msg: featured.title, kind: nowLiked ? "ok" : "info" });
+                    }}
+                    aria-pressed={featuredLoved}
+                  >
+                    <Icon name={featuredLoved ? "starFill" : "star"} size={15} />
+                    <span className="hidden sm:inline">{featuredLoved ? "Loved" : "Love"}</span>
+                  </button>
+                </div>
+              </Reveal>
+            </div>
+
+            <Reveal delay={100} className="relative mx-auto w-full max-w-[340px]">
+              <div className="relative aspect-square overflow-hidden rounded-2xl border border-line2 shadow-[0_50px_110px_-40px_rgba(0,0,0,1)]">
+                <CoverArt path={featured.artworkPath} title={featured.title} className="h-full w-full" rounded="lg" />
+                <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-[rgba(3,9,7,0.94)] to-transparent p-4">
+                  <div>
+                    <div className="label mb-1 flex items-center gap-1.5">
+                      {player.trackId === featured.id && player.playing ? <Equalizer bars={3} className="text-jade" /> : <Icon name="mic" size={11} />}
+                      {player.trackId === featured.id && player.playing ? "playing" : "featured"}
+                    </div>
+                    <div className="text-[12px] text-text2">
+                      {artistOf(featured).name}
+                    </div>
+                  </div>
+                  <PlayFab
+                    playing={player.trackId === featured.id && player.playing}
+                    size={44}
+                    onClick={() => (player.trackId === featured.id ? player.toggle() : player.playTrack(featured.id, { kind: "home", label: "Featured" }, latest.map((t) => t.id)))}
+                  />
+                </div>
               </div>
             </Reveal>
           </div>
-
-          {/* hero artwork + on-air */}
-          <Reveal delay={100} className="relative mx-auto w-full max-w-[340px]">
-            <div className="absolute -inset-8">
-              <RadialSpectrum radius={0.66} />
-            </div>
-            <div className="relative aspect-square overflow-hidden rounded-2xl border border-line2 shadow-[0_50px_110px_-40px_rgba(0,0,0,1)]">
-              <PatternArt seed={featured.seed} accent={featured.accent} intensity={1} />
-              <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-[rgba(3,9,7,0.94)] to-transparent p-4">
-                <div>
-                  <div className="label mb-1 flex items-center gap-1.5">
-                    {isFeatured && player.playing ? <Equalizer bars={3} className="text-jade" /> : <Icon name="mic" size={11} />}
-                    {isFeatured && player.playing ? "on air" : "featured"}
-                  </div>
-                  <div className="text-[12px] text-text2">{featured.voices} · {featured.duff ? "with duff" : "vocals only"}</div>
-                </div>
-                <PlayFab
-                  playing={isFeatured && player.playing}
-                  size={44}
-                  onClick={() => (isFeatured ? player.toggle() : player.playTrack(featured.id, { kind: "home", label: "Featured" }))}
-                />
-              </div>
-            </div>
-          </Reveal>
-        </div>
-      </section>
+        </section>
+      ) : null}
 
       {/* ------------------------------------------------------ continue */}
       {recent.length ? (
         <Rail
           label="where you left off"
           title="Pick up the thread"
-          subtitle={`${plural(history.length, "play", "plays")} logged on this device`}
+          subtitle={`${plural(history.length, "play", "plays")} in your history`}
           action={
             <Link to="/library" className="btn btn-ghost !px-3 !py-1.5">
               Library <Icon name="chevronRight" size={13} />
             </Link>
           }
         >
-          {recent.map(({ h, track }, i) => (
+          {recent.map(({ entry, track }, i) => (
             <RailItem key={`${track.id}-${i}`} className="!w-[260px]">
               <button
                 className="card group flex w-full items-center gap-3 p-2.5 text-left"
                 onClick={() => player.playTrack(track.id, { kind: "home", label: "Recently played" }, recent.map((r) => r.track.id))}
               >
                 <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg ring-1 ring-line">
-                  <PatternArt seed={track.seed} accent={track.accent} showVignette={false} />
+                  <CoverArt path={track.artworkPath} title={track.title} className="h-full w-full" rounded="sm" />
                   <span className="absolute inset-0 grid place-items-center bg-[rgba(3,10,8,0.6)] opacity-0 transition-opacity group-hover:opacity-100">
                     <Icon name="play" size={15} className="text-text" />
                   </span>
@@ -205,7 +245,7 @@ export default function Home() {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13px] font-semibold text-text">{track.title}</span>
                   <span className="block truncate text-[11px] text-muted">
-                    {artistOf(track).name} · {relativeTime(h.at)}
+                    {artistOf(track).name} · {relativeTime(entry.at)}
                   </span>
                 </span>
                 {player.trackId === track.id ? <Equalizer active={player.playing} className="text-jade" bars={3} /> : null}
@@ -215,141 +255,66 @@ export default function Home() {
         </Rail>
       ) : null}
 
-      {/* --------------------------------------------------------- moods */}
-      <section>
-        <SectionHeader
-          label="eight ways in"
-          title="What are you listening for?"
-          subtitle="Moods filter the whole catalogue by tempo, maqām and intent."
-        />
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {MOODS.map((m, i) => (
-            <MoodTile key={m.id} mood={m} index={i} />
-          ))}
-        </div>
-      </section>
-
-      {/* ---------------------------------------------------------- Nūr */}
-      <Reveal>
-        <section className="relative overflow-hidden rounded-2xl border border-line2">
-          <div className="absolute inset-0 opacity-45">
-            <PatternArt seed={nurPreview.seed} accent={nurPreview.accent} motif="rosette" />
-          </div>
-          <div className="absolute inset-0 bg-gradient-to-r from-[rgba(4,11,9,0.96)] via-[rgba(4,11,9,0.86)] to-[rgba(4,11,9,0.6)]" />
-          <div className="relative grid gap-6 p-5 md:p-7 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-center">
-            <div>
-              <div className="label mb-2 flex items-center gap-1.5 text-gold">
-                <Icon name="sparkle" size={12} /> on-device curator
-              </div>
-              <h2 className="text-[1.7rem] leading-tight text-text md:text-[2.1rem]">
-                Nūr made you a mix
-                <span className="arabic ml-2 text-[1.2rem] text-goldsoft/80" dir="rtl">
-                  {nurPreview.titleAr}
-                </span>
-              </h2>
-              <p className="mt-1 font-display text-[17px] text-jadesoft">{nurPreview.title}</p>
-              <p className="mt-3 max-w-[52ch] text-[13px] leading-relaxed text-text2/85">{nurPreview.blurb}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  className="btn btn-gold !px-4 !py-2.5"
-                  onClick={() => {
-                    player.playIds(nurPreview.trackIds, 0, { kind: "mix", id: nurPreview.id, label: `Nūr · ${nurPreview.title}` });
-                  }}
-                >
-                  <Icon name="play" size={14} strokeWidth={2.2} /> Play the mix
-                </button>
-                <button className="btn btn-ghost !px-4 !py-2.5" onClick={() => setNur(true)}>
-                  <Icon name="sliders" size={14} /> Open Nūr
-                </button>
-                <button
-                  className="btn btn-ghost !px-4 !py-2.5"
-                  onClick={() => {
-                    void useLibrary.getState().createPlaylist(nurPreview.title, nurPreview.trackIds, nurPreview.blurb).then((pl) => {
-                      if (!pl) return;
-                      toast.push({ title: "Saved to your sets", msg: pl.name, kind: "ok" });
-                    });
-                  }}
-                >
-                  <Icon name="plus" size={14} /> Save as a set
-                </button>
-              </div>
-            </div>
-            <ul className="space-y-1">
-              {nurPreview.picks.map((pick, i) => (
-                <li key={pick.track.id}>
-                  <MiniTrack
-                    track={pick.track}
-                    index={i}
-                    queue={nurPreview.trackIds}
-                    context={{ kind: "mix", id: nurPreview.id, label: `Nūr · ${nurPreview.title}` }}
-                  />
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
-      </Reveal>
-
       {/* ----------------------------------------------------- trending */}
       <section>
         <SectionHeader
           label="this week"
-          title="Most played nasheeds"
-          subtitle="Counted across the whole library of listeners, which is to say: made up, but stable."
+          title="Most played"
+          subtitle={trending.length ? "Counted from real plays in the last seven days." : "No plays recorded in the last seven days yet."}
           action={
             <Link to="/search" className="btn btn-ghost !px-3 !py-1.5">
-              All tracks <Icon name="chevronRight" size={13} />
+              Everything <Icon name="chevronRight" size={13} />
             </Link>
           }
         />
-        <div className="panel rounded-2xl p-2 sm:p-3">
-          {trending.map((t, i) => (
-            <MiniTrack key={t.id} track={t} index={i} queue={trending.map((x) => x.id)} context={{ kind: "home", label: "Trending" }} />
-          ))}
-        </div>
+        {popular.length ? (
+          <div className="panel rounded-2xl p-2 sm:p-3">
+            {popular.map((t, i) => (
+              <MiniTrack key={t.id} track={t} index={i} queue={popular.map((x) => x.id)} context={{ kind: "home", label: "Most played" }} />
+            ))}
+          </div>
+        ) : (
+          <EmptyState icon="trending" title="Nothing charted this week" msg="Play counts appear here once people listen." />
+        )}
       </section>
 
       {/* ------------------------------------------------- curated sets */}
-      <Rail
-        label="curated"
-        title="Sets worth an evening"
-        action={
-          <Link to="/library" className="btn btn-ghost !px-3 !py-1.5">
-            Library <Icon name="chevronRight" size={13} />
-          </Link>
-        }
-      >
-        {COLLECTIONS.map((c, i) => (
-          <RailItem key={c.id} className="!w-[240px] sm:!w-[268px]">
-            <CollectionCard collection={c} index={i} />
-          </RailItem>
-        ))}
-      </Rail>
+      {COLLECTIONS.length ? (
+        <Rail
+          label="curated"
+          title="Sets worth an evening"
+          action={
+            <Link to="/library" className="btn btn-ghost !px-3 !py-1.5">
+              Library <Icon name="chevronRight" size={13} />
+            </Link>
+          }
+        >
+          {COLLECTIONS.map((c, i) => (
+            <RailItem key={c.id} className="!w-[240px] sm:!w-[268px]">
+              <CollectionCard collection={c} index={i} />
+            </RailItem>
+          ))}
+        </Rail>
+      ) : null}
 
       {/* -------------------------------------------------- new releases */}
-      <section>
-        <SectionHeader label="fresh" title="New from the reciters" subtitle="Sorted by year, then by tempo — the loudest first." />
-        <TrackCardGrid tracks={fresh} context={{ kind: "home", label: "New releases" }} />
-      </section>
+      {latest.length ? (
+        <section>
+          <SectionHeader label="fresh" title="Newly published" subtitle="Newest uploads first." />
+          <TrackCardGrid tracks={latest} context={{ kind: "home", label: "Newly published" }} />
+        </section>
+      ) : null}
 
       {/* ------------------------------------------------------- artists */}
-      <Rail label="the voices" title="Who is singing" subtitle={`${plural(ARTISTS.length, "reciter")} in the catalogue`}>
-        {ARTISTS.map((a, i) => (
-          <RailItem key={a.id} className="!w-[158px] sm:!w-[178px]">
-            <ArtistCard artist={a} index={i} />
-          </RailItem>
-        ))}
-      </Rail>
-
-      {/* --------------------------------------------------- vocals only */}
-      <section>
-        <SectionHeader
-          label="no drum, no strings"
-          title="Vocals only"
-          subtitle="For listeners who prefer the voice unaccompanied — every track here has the duff switched off at the source."
-        />
-        <TrackCardGrid tracks={vocalsOnly} context={{ kind: "home", label: "Vocals only" }} />
-      </section>
+      {ARTISTS.length ? (
+        <Rail label="the voices" title="Who is publishing" subtitle={`${plural(ARTISTS.length, "publisher")} in the catalogue`}>
+          {ARTISTS.map((a, i) => (
+            <RailItem key={a.id} className="!w-[158px] sm:!w-[178px]">
+              <ArtistCard artist={a} index={i} />
+            </RailItem>
+          ))}
+        </Rail>
+      ) : null}
 
       {/* ---------------------------------------------------- your stuff */}
       {lovedTracks.length || playlists.length ? (
@@ -370,13 +335,13 @@ export default function Home() {
               const tracks = pl.trackIds.map((id) => getTrack(id)).filter((t): t is Track => !!t);
               return (
                 <Link key={pl.id} to={`/p/${pl.id}`} className="card group flex items-center gap-4 p-4">
-                  <span className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl ring-1 ring-line2">
-                    <PatternArt seed={pl.seed} accent={pl.accent} motif="girih" />
+                  <span className="grid h-14 w-14 shrink-0 place-items-center rounded-xl bg-surface2 ring-1 ring-line2">
+                    <Icon name="library" size={19} className="text-muted" />
                   </span>
                   <span className="min-w-0">
                     <span className="block truncate text-[14px] font-semibold text-text">{pl.name}</span>
                     <span className="block text-[12px] text-muted">
-                      {tracks.length} tracks · {formatTime(tracks.reduce((s, t) => s + durationOf(t), 0))}
+                      {plural(tracks.length, "nasheed")} · {formatTime(tracks.reduce((sum, t) => sum + durationOf(t), 0))}
                     </span>
                   </span>
                   <Icon name="chevronRight" size={16} className="ml-auto text-muted" />
@@ -392,13 +357,13 @@ export default function Home() {
         <div className="hairline mb-5" />
         <div className="flex flex-col gap-3 text-[11.5px] leading-relaxed text-muted sm:flex-row sm:items-center sm:justify-between">
           <p className="max-w-[70ch]">
-            CoolNasheed synthesises every performance in your browser from maqām, tempo and syllables — nothing is streamed,
-            nothing is uploaded, and no one's recording was touched. Qurʾānic lines are marked and their English renderings are
-            meanings, not scripture.
+            Every nasheed here is a real recording, uploaded by the publisher who made it and streamed as an mp3. CoolNasheed
+            writes no music of its own, invents no counters and keeps nothing on your device. Qurʾānic lines are marked, and their
+            English renderings are meanings, not scripture.
           </p>
           <div className="flex shrink-0 items-center gap-2">
             <Chip>
-              <Icon name="waveform" size={11} /> {TRACKS.length} nasheeds
+              <Icon name="waveform" size={11} /> {plural(TRACKS.length, "nasheed")}
             </Chip>
             <Chip>
               <Icon name="library" size={11} /> {COLLECTIONS.length} sets

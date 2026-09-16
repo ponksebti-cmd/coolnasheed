@@ -5,12 +5,11 @@ import { EmptyState, Reveal, SectionHeader } from "../components/ui/Primitives";
 import { HeroPanel } from "../components/collection/HeroPanel";
 import { CollectionCard, Rail, RailItem } from "../components/collection/Cards";
 import { TrackList } from "../components/track/TrackViews";
-import { COLLECTIONS, artistOf, formatCount, getCollection, statsFor, tracksOf } from "../data/catalog";
-import { maqamLabel } from "../lib/theory";
+import { COLLECTIONS, artistOf, formatCount, getCollection, statsFor, totalDuration, tracksOf } from "../data/catalog";
 import { plural } from "../lib/format";
 import { usePlayer } from "../store/player";
 import { useLibrary } from "../store/library";
-import { shuffle as shuffled, rngFrom } from "../lib/prng";
+import { seededShuffle } from "../lib/math";
 
 export default function CollectionPage() {
   const { id } = useParams();
@@ -39,20 +38,19 @@ export default function CollectionPage() {
   const inSet = player.trackId ? ids.includes(player.trackId) : false;
   const saved = library.likedCollections.includes(collection.id);
   const totalPlays = tracks.reduce((sum, t) => sum + statsFor(t).plays, 0);
-  const maqams = Array.from(new Set(tracks.map((t) => maqamLabel(t.maqam))));
+  const tags = Array.from(new Set(tracks.flatMap((t) => t.tags)));
   const artists = Array.from(new Set(tracks.map((t) => artistOf(t).name)));
   const related = COLLECTIONS.filter((c) => c.id !== collection.id && c.tags.some((t) => collection.tags.includes(t))).slice(0, 6);
-  const order = shuffled(rngFrom(collection.seed), ids);
+  const order = seededShuffle(ids, collection.id);
 
   return (
     <div className="space-y-10">
       <HeroPanel
         eyebrow={`${collection.kind === "album" ? "album" : "selection"} · ${collection.year}`}
         title={collection.title}
-        titleAr={collection.titleAr}
+        titleAr={collection.titleAr ?? undefined}
         curator={collection.curator}
         blurb={collection.blurb}
-        seed={collection.seed}
         accent={collection.accent}
         tracks={tracks}
         playing={inSet && player.playing}
@@ -73,14 +71,14 @@ export default function CollectionPage() {
         <span aria-hidden className="text-muted">·</span>
         <span className="tabular-nums">{formatCount(totalPlays)} plays</span>
         <span aria-hidden className="text-muted">·</span>
-        <span className="truncate">{maqams.join(", ")}</span>
+        <span className="truncate">{tags.slice(0, 4).join(" · ")}</span>
       </HeroPanel>
 
       <section>
         <SectionHeader
           label="tracklist"
           title={collection.title}
-          subtitle={`${plural(tracks.length, "track")} · ${plural(artists.length, "reciter")} · ${maqams.length} maqāmāt`}
+          subtitle={`${plural(tracks.length, "nasheed")} · ${plural(artists.length, "reciter")}`}
           action={
             <div className="flex items-center gap-2">
               <button
@@ -102,12 +100,12 @@ export default function CollectionPage() {
       <Reveal>
         <section className="grid gap-3 rounded-2xl border border-line bg-surface/40 p-5 md:grid-cols-3">
           <Stat label="Reciters" value={artists.length} detail={artists.slice(0, 3).join(" · ")} icon="user" />
-          <Stat label="Modes used" value={maqams.length} detail={maqams.slice(0, 4).join(" · ")} icon="compass" />
+          <Stat label="Tags" value={tags.length} detail={tags.slice(0, 4).join(" · ")} icon="compass" />
           <Stat
-            label="With duff"
-            value={tracks.filter((t) => t.duff).length}
-            detail={`${tracks.filter((t) => !t.duff).length} vocals only`}
-            icon="drum"
+            label="Listening time"
+            value={Math.round(totalDuration(tracks) / 60)}
+            detail={`${plural(tracks.length, "nasheed")} · minutes`}
+            icon="waveform"
           />
         </section>
       </Reveal>
@@ -125,7 +123,7 @@ export default function CollectionPage() {
   );
 }
 
-function Stat({ label, value, detail, icon }: { label: string; value: number; detail: string; icon: "user" | "compass" | "drum" }) {
+function Stat({ label, value, detail, icon }: { label: string; value: number; detail: string; icon: "user" | "compass" | "waveform" }) {
   return (
     <div>
       <div className="label mb-1.5 flex items-center gap-1.5">

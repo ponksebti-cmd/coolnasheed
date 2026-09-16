@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../ui/Icons";
 import { DropdownMenu } from "../ui/Menu";
-import { PatternArt } from "../art/PatternArt";
+import { Avatar } from "../art/CoverArt";
 import { useToast } from "../ui/Primitives";
 import { useAccount } from "../../lib/hooks";
 import { useSession } from "../../store/session";
@@ -13,7 +13,7 @@ import { useLibrary } from "../../store/library";
  * The account corner of the top bar.
  *
  * Signed out it is a plain door — one tap to the sheet. Signed in it is your
- * generated avatar opening onto your profile, the studio, and your own writing.
+ * your avatar opening onto your profile, the studio, and your own writing.
  */
 export function AccountMenu() {
   const account = useAccount();
@@ -52,7 +52,7 @@ export function AccountMenu() {
           title={`@${account.handle}`}
           className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full ring-1 ring-line2 transition-shadow hover:ring-jade/50 no-hover:ring-jade/40"
         >
-          <PatternArt seed={account.seed} accent="jade" showVignette={false} />
+          <Avatar name={account.name} accent="jade" size={40} />
           <span className="absolute inset-x-0 bottom-0 h-[3px] bg-jade/80" aria-hidden />
         </button>
       )}
@@ -93,7 +93,7 @@ export function AccountMenu() {
           danger: true,
           onClick: () => {
             signOut();
-            toast.push({ title: "Signed out", msg: "Your nasheeds and notes stay on this device.", kind: "info" });
+            toast.push({ title: "Signed out", msg: "Your nasheeds and notes stay on your account.", kind: "info" });
           },
         },
       ]}

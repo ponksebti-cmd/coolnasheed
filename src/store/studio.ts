@@ -1,478 +1,552 @@
 /**
- * The studio: the draft you are writing, and what you have published.
+ * The studio: publish a recording.
  *
- * Publishing here can mean two things, and both end up as a real nasheed on the server:
+ *  1. upload an mp3 (required; it is the nasheed)
+ *  2. optionally upload cover art
+ *  3. write the title, the tags and the lyrics — with timings if you have them
+ *  4. publish, and it is in the catalogue
  *
- *   1. a composition — a maqām, a tempo, a voice arrangement and some lines of poetry.
- *      The browser's synthesis engine performs it, and because the lyric timings come
- *      from the same schedule the engine plays, the karaoke view cannot drift.
- *   2. a recording — an mp3 or wav you attach. It is uploaded to storage, streamed back
- *      with range support so seeking works, and sung over by nobody: your voices, your
- *      take. The composition you wrote alongside it still drives the lyric timeline.
+ * Editing an existing nasheed goes through the same draft, which is why a draft
+ * carries a `songId` when it started from something already published.
  *
- * The draft itself is kept on this device, so a half-written nasheed survives a reload.
- * The moment you publish, it belongs to your account and follows you everywhere.
+ * The draft itself is stored on the server, one row per account, so a half-written
+ * nasheed survives closing the laptop and is waiting on the next machine too. Nothing
+ * about it is kept in this browser.
  */
 
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
 import { api, errorMessage } from "../lib/api";
-import { applySong, forgetSong, getTrack } from "../data/catalog";
-import type { Accent, Artist, LyricLine, Track } from "../data/types";
-import type { MaqamName } from "../lib/theory";
-import { MAQAMAT } from "../lib/theory";
-import { currentUser, useSession, type Account } from "./session";
-import type { Song, SongInput, SongStatus } from "../../shared/types";
+import { getTrack } from "../data/catalog";
+import { registerPreview, clearPreview } from "../data/preview";
+import { useUi } from "./ui";
+import { isSignedIn } from "./session";
+import type {
+  DraftLine,
+  LyricLine,
+  Song,
+  SongDraft,
+  SongStatus,
+} from "../../shared/types";
+import { DEFAULT_PREFS } from "../../shared/types";
 
-export const DUFF_PATTERNS: { id: string; label: string; pattern: string }[] = [
-  { id: "malfuf", label: "Malfūf — rolling", pattern: "D..T..D.T..T.D.." },
-  { id: "simple", label: "Simple — dum and tak", pattern: "D...T...D...T..." },
-  { id: "ayyub", label: "Ayyūb — driving", pattern: "D..TD..TD.T.D..T" },
-  { id: "roll", label: "Roll — busy tak", pattern: "D..TD..TD..TD..T" },
-  { id: "sparse", label: "Sparse — two a bar", pattern: "D.......D...T..." },
-];
-
-export type DraftLine = { tr: string; ar: string; en: string; note: string };
-
-export type Draft = {
-  title: string;
-  titleAr: string;
-  note: string;
-  maqam: MaqamName;
-  root: number;
-  bpm: number;
-  voices: Track["voices"];
-  duff: string | null;
-  duffEnter: "intro" | "verse";
-  passes: number;
-  accent: Accent;
-  tags: string[];
-  lines: DraftLine[];
+export const EMPTY_LINE: DraftLine = {
+  tr: "",
+  ar: "",
+  en: "",
+  note: "",
+  t: null,
 };
 
-export const EMPTY_LINE: DraftLine = { tr: "", ar: "", en: "", note: "" };
-
-export const DEFAULT_DRAFT: Draft = {
+export const EMPTY_DRAFT: SongDraft = {
   title: "",
   titleAr: "",
   note: "",
-  maqam: "bayati",
-  root: 57,
-  bpm: 68,
-  voices: "solo",
-  duff: null,
-  duffEnter: "verse",
-  passes: 2,
-  accent: "jade",
-  tags: ["original"],
-  lines: [{ ...EMPTY_LINE }, { ...EMPTY_LINE }],
+  tags: [],
+  lines: [EMPTY_LINE, EMPTY_LINE, EMPTY_LINE, EMPTY_LINE],
+  audioPath: null,
+  audioMime: null,
+  audioBytes: null,
+  durationMs: null,
+  artworkPath: null,
+  songId: null,
+  updatedAt: 0,
 };
 
-/** A published nasheed, as the studio lists it. */
-export type PublishedEntry = Omit<Draft, "lines"> & {
-  id: string;
-  /** the publisher's uuid — what the database keys ownership by */
-  ownerId: string;
-  /** the publisher's handle — what the catalogue and its URLs key publishers by */
-  ownerHandle?: string;
-  publishedAt: number;
-  lines: LyricLine[];
-  /** an uploaded recording exists, so this plays your voices rather than the engine */
-  hasAudio: boolean;
-  hasArtwork: boolean;
-  status: SongStatus;
-  plays: number;
-  likes: number;
-  notes: number;
+export type PublishError = { message: string; field?: string };
+
+export type UploadState = {
+  /** 0..1 while an upload is running, null when nothing is uploading */
+  progress: number | null;
+  error: string | null;
 };
-
-export type PublishError = { ok: false; field: "title" | "lines" | "audio" | "form"; msg: string };
-export type PublishResult = { ok: true; track: Track } | PublishError;
-
-/** Attachments waiting to go up with the next publish. */
-export type Attachment = {
-  file: File;
-  name: string;
-  bytes: number;
-  /** decoded length, when the browser could read it */
-  durationMs: number | null;
-};
-
-/* ------------------------------------------------------------------ helpers */
-
-export function slugify(text: string): string {
-  const slug = text
-    .toLowerCase()
-    .replace(/[\u0600-\u06FF\u0750-\u077F]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 42);
-  return slug || "nasheed";
-}
-
-export function draftToLines(lines: DraftLine[]): LyricLine[] {
-  return lines
-    .map((l) => ({
-      tr: l.tr.trim() || undefined,
-      ar: l.ar.trim() || undefined,
-      en: l.en.trim() || undefined,
-      note: l.note.trim() || undefined,
-    }))
-    .filter((l) => l.tr || l.ar || l.en);
-}
-
-/** Returns the failure, or null when the draft is publishable. */
-export function validateDraft(draft: Draft, account: Account | null, audio?: Attachment | null): PublishError | null {
-  if (!account) return { ok: false, field: "form", msg: "You need an account to publish." };
-  if (draft.title.trim().length < 2) return { ok: false, field: "title", msg: "Give it a title — two characters at least." };
-  if (draft.title.trim().length > 120) return { ok: false, field: "title", msg: "That title is too long to set." };
-  if (draftToLines(draft.lines).length === 0)
-    return { ok: false, field: "lines", msg: "Add at least one line. Transliteration or Arabic is what gets sung." };
-  if (draftToLines(draft.lines).length > 40) return { ok: false, field: "lines", msg: "Forty lines is a book, not a nasheed." };
-  if (draft.bpm < 40 || draft.bpm > 180) return { ok: false, field: "form", msg: "Tempo has to sit between 40 and 180 bpm." };
-  if (draft.root < 36 || draft.root > 84) return { ok: false, field: "form", msg: "Pick a tonic between C2 and C6." };
-  if (draft.passes < 1 || draft.passes > 6) return { ok: false, field: "form", msg: "Between one and six repetitions." };
-  if (draft.duff && !/^[DT.]{16}$/.test(draft.duff)) return { ok: false, field: "form", msg: "A duff pattern is 16 steps of D, T or ." };
-  if (audio && audio.bytes <= 0) return { ok: false, field: "audio", msg: "That audio file is empty." };
-  return null;
-}
-
-/** The composition part of a publish — everything except the attached files. */
-export function songInputFromDraft(draft: Draft, extra: Partial<SongInput> = {}): SongInput {
-  return {
-    title: draft.title.trim(),
-    titleAr: draft.titleAr.trim() || null,
-    note: draft.note.trim() || null,
-    maqam: draft.maqam,
-    root: draft.root,
-    bpm: draft.bpm,
-    voices: draft.voices,
-    duff: draft.duff,
-    duffEnter: draft.duffEnter,
-    passes: draft.passes,
-    accent: draft.accent,
-    tags: draft.tags.length ? draft.tags.slice(0, 8) : ["original"],
-    lines: draftToLines(draft.lines),
-    ...extra,
-  };
-}
-
-export function entryFromSong(song: Song): PublishedEntry {
-  return {
-    id: song.id,
-    ownerId: song.ownerId ?? "",
-    ownerHandle: song.ownerHandle ?? "",
-    publishedAt: song.publishedAt,
-    title: song.title,
-    titleAr: song.titleAr ?? "",
-    note: song.note,
-    maqam: song.maqam,
-    root: song.root,
-    bpm: song.bpm,
-    voices: song.voices,
-    duff: song.duff,
-    duffEnter: song.duffEnter,
-    passes: song.passes,
-    accent: song.accent,
-    tags: song.tags,
-    lines: song.lines.map((l) => ({ ...l })),
-    hasAudio: !!song.audioPath,
-    hasArtwork: !!song.artworkPath,
-    status: song.status,
-    plays: song.plays,
-    likes: song.likes,
-    notes: song.notes,
-  };
-}
-
-export function trackForEntry(entry: PublishedEntry, account: Account | null): Track {
-  const who = account?.name ?? "a listener";
-  const maqam = MAQAMAT[entry.maqam];
-  return {
-    id: entry.id,
-    title: entry.title,
-    titleAr: entry.titleAr || undefined,
-    artistId: entry.ownerHandle || entry.ownerId,
-    collections: [],
-    tags: entry.tags.length ? entry.tags : ["original"],
-    maqam: entry.maqam,
-    root: entry.root,
-    bpm: entry.bpm,
-    voices: entry.voices,
-    duff: entry.duff ?? undefined,
-    duffEnter: entry.duff ? entry.duffEnter : undefined,
-    introBars: entry.duff && entry.duffEnter === "intro" ? 2 : 1,
-    passes: entry.passes,
-    blurb:
-      entry.note.trim() ||
-      `Published by ${who}. ${maqam?.name ?? entry.maqam} at ${entry.bpm} bpm, ${entry.voices}${entry.duff ? " with duff" : ", vocals only"}.`,
-    year: new Date(entry.publishedAt).getFullYear(),
-    seed: `published-${entry.id}`,
-    accent: entry.accent,
-    lines: entry.lines,
-    ownerId: entry.ownerId,
-    stats: { plays: entry.plays, likes: entry.likes, notes: entry.notes },
-    status: entry.status,
-    publishedAt: entry.publishedAt,
-  };
-}
-
-/** A publisher page for yourself, until the server's own copy is loaded. */
-export function artistForAccount(account: Account, entries: PublishedEntry[]): Artist {
-  const first = entries[0];
-  return {
-    id: account.id,
-    name: account.name,
-    role: "listener · publisher",
-    origin: account.city || "—",
-    bio: account.bio.trim() || `@${account.handle} publishes on CoolNasheed.`,
-    seed: account.seed,
-    accent: first?.accent ?? "jade",
-    verified: false,
-  };
-}
-
-/** The same, for a draft that has not been published yet — used by the preview player. */
-export function draftTrack(draft: Draft, account: Account | null): Track | null {
-  const lines = draftToLines(draft.lines);
-  if (!account || !lines.length || draft.title.trim().length < 2) return null;
-  const entry: PublishedEntry = {
-    ...draft,
-    id: `draft-${account.id}`,
-    ownerId: account.id,
-    ownerHandle: account.handle,
-    publishedAt: Date.now(),
-    lines,
-    hasAudio: false,
-    hasArtwork: false,
-    status: "live",
-    plays: 0,
-    likes: 0,
-    notes: 0,
-  };
-  return trackForEntry(entry, account);
-}
-
-/** Read a recording's length in the browser, so the server can store it. */
-export function probeDuration(file: File): Promise<number | null> {
-  return new Promise((resolvePromise) => {
-    const url = URL.createObjectURL(file);
-    const el = new Audio();
-    const done = (value: number | null) => {
-      URL.revokeObjectURL(url);
-      resolvePromise(value);
-    };
-    el.preload = "metadata";
-    el.onloadedmetadata = () => done(Number.isFinite(el.duration) && el.duration > 0 ? Math.round(el.duration * 1000) : null);
-    el.onerror = () => done(null);
-    el.src = url;
-    // a file that never reports metadata should not hang the publish form
-    window.setTimeout(() => done(null), 8000);
-  });
-}
-
-/* -------------------------------------------------------------------- store */
 
 type StudioState = {
-  /** what this account has on the server */
-  entries: PublishedEntry[];
-  draft: Draft;
-  audio: Attachment | null;
-  artwork: Attachment | null;
-  publishing: boolean;
+  draft: SongDraft;
+  entries: Song[];
   loading: boolean;
-  error: string | null;
+  publishing: boolean;
+  savedAt: number;
+  /** a save is in flight right now */
+  saving: boolean;
+  /** why the last save failed — null when the draft is safely stored */
+  draftError: string | null;
+  error: PublishError | null;
+  /** true while a recording is being brought under the size limit, before it uploads */
+  preparing: boolean;
+  /** 0..1 of that compression pass, so the button can show it */
+  uploadProgress: number | null;
+  /** the local object URL while an mp3 is uploaded but not yet published */
+  previewUrl: string | null;
 
-  setDraft: (patch: Partial<Draft>) => void;
+  hydrate: () => Promise<void>;
+  /** replace the published list — what a sign-out, or a fresh publish, does */
+  applyServerSongs: (songs: Song[]) => void;
+  loadMine: (force?: boolean) => Promise<void>;
+  setDraft: (patch: Partial<SongDraft>) => void;
   setLine: (index: number, patch: Partial<DraftLine>) => void;
   addLine: () => void;
   removeLine: (index: number) => void;
   moveLine: (from: number, to: number) => void;
-  resetDraft: () => void;
+  setTags: (value: string) => void;
+  setDuration: (ms: number) => void;
 
-  setAudio: (file: File | null) => Promise<void>;
-  setArtwork: (file: File | null) => Promise<void>;
+  attachAudio: (file: File) => Promise<boolean>;
+  attachArtwork: (file: File) => Promise<boolean>;
+  clearAudio: () => void;
+  preview: () => string | null;
 
-  publish: () => Promise<PublishResult>;
-  unpublish: (trackId: string) => Promise<boolean>;
-  owns: (trackId: string) => boolean;
-  byOwner: (accountId: string) => PublishedEntry[];
-  loadMine: (force?: boolean) => Promise<void>;
-  applyServerSongs: (songs: Song[]) => void;
+  saveDraft: (draft?: SongDraft) => Promise<void>;
+  publish: () => Promise<Song | null>;
+  unpublish: (songId: string) => Promise<void>;
+  startEdit: (songId: string) => void;
+  resetDraft: () => Promise<void>;
+  validate: () => PublishError | null;
 };
 
-const MAX_AUDIO_BYTES = 48 * 1024 * 1024;
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+let saveTimer: number | null = null;
 
-function attachment(file: File, durationMs: number | null): Attachment {
-  return { file, name: file.name, bytes: file.size, durationMs };
+/** A draft is saved on a debounce: typing a lyric line must not be forty writes. */
+/**
+ * Debounced draft save.
+ *
+ * Two rules learned the hard way: a failure has to be *visible* (this used to swallow
+ * everything, so a database that refused every write looked like a studio that simply
+ * did not save), and it has to be retried without the person doing anything — a dropped
+ * connection or a cold project should cost nothing but a moment.
+ *
+ * `flushSave` writes the pending draft immediately; the studio calls it when the tab is
+ * hidden or the page is going away, so nothing typed in the last second is lost.
+ */
+let pendingDraft: SongDraft | null = null;
+
+function queueSave(draft: SongDraft, commit: (draft: SongDraft) => void): void {
+  if (!isSignedIn()) return;
+  pendingDraft = draft;
+  if (saveTimer !== null) window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => {
+    saveTimer = null;
+    const next = pendingDraft;
+    pendingDraft = null;
+    if (next) commit(next);
+  }, 900);
 }
 
-export const useStudio = create<StudioState>()(
-  persist(
-    (set, get) => ({
-      entries: [],
-      draft: { ...DEFAULT_DRAFT, lines: DEFAULT_DRAFT.lines.map((l) => ({ ...l })) },
-      audio: null,
-      artwork: null,
-      publishing: false,
-      loading: false,
+/** Write whatever is waiting right now. Returns true when there was something to write. */
+export function flushDraftSave(): boolean {
+  if (saveTimer === null || !pendingDraft) return false;
+  window.clearTimeout(saveTimer);
+  saveTimer = null;
+  const next = pendingDraft;
+  pendingDraft = null;
+  void useStudio.getState().saveDraft(next);
+  return true;
+}
+
+function linesFrom(draft: SongDraft): LyricLine[] {
+  return draft.lines
+    .map((line) => {
+      const out: LyricLine = {};
+      if (line.tr.trim()) out.tr = line.tr.trim();
+      if (line.ar.trim()) out.ar = line.ar.trim();
+      if (line.en.trim()) out.en = line.en.trim();
+      if (line.note.trim()) out.note = line.note.trim();
+      if (typeof line.t === "number" && Number.isFinite(line.t) && line.t >= 0)
+        out.t = line.t;
+      return out;
+    })
+    .filter((line) => line.tr || line.ar || line.en);
+}
+
+export function draftFromSong(song: Song): SongDraft {
+  return {
+    title: song.title,
+    titleAr: song.titleAr ?? "",
+    note: song.note,
+    tags: song.tags,
+    lines: song.lines.length
+      ? song.lines.map((line) => ({
+          tr: line.tr ?? "",
+          ar: line.ar ?? "",
+          en: line.en ?? "",
+          note: line.note ?? "",
+          t: line.t ?? null,
+        }))
+      : [EMPTY_LINE, EMPTY_LINE, EMPTY_LINE, EMPTY_LINE],
+    audioPath: song.audioPath,
+    audioMime: song.audioMime,
+    audioBytes: song.audioBytes,
+    durationMs: song.durationMs,
+    artworkPath: song.artworkPath,
+    songId: song.id,
+    updatedAt: Date.now(),
+  };
+}
+
+export const useStudio = create<StudioState>((set, get) => ({
+  draft: { ...EMPTY_DRAFT },
+  entries: [],
+  loading: false,
+  publishing: false,
+  savedAt: 0,
+  saving: false,
+  draftError: null,
+  error: null,
+  preparing: false,
+  uploadProgress: null,
+  previewUrl: null,
+
+  applyServerSongs: (songs) => set({ entries: songs }),
+
+  hydrate: async () => {
+    if (!isSignedIn()) return;
+    try {
+      const stored = await api.draft();
+      if (stored)
+        set({
+          draft: { ...EMPTY_DRAFT, ...stored },
+          savedAt: stored.updatedAt ?? 0,
+        });
+    } catch (err) {
+      // a draft that will not load is not worth blocking the studio over — but it is
+      // worth one line, because it is also the first symptom of a database that is behind
+      set({
+        draftError: errorMessage(err, "Your saved draft could not be read."),
+      });
+    }
+  },
+
+  loadMine: async (force = false) => {
+    if (!isSignedIn()) {
+      set({ entries: [] });
+      return;
+    }
+    if (get().entries.length && !force) return;
+    set({ loading: true });
+    try {
+      const page = await api.songs({
+        owner: "me",
+        limit: 100,
+        sort: "new",
+        status: undefined,
+      });
+      set({ entries: page.items, loading: false });
+    } catch (err) {
+      set({
+        loading: false,
+        error: {
+          message: errorMessage(err, "Could not load what you published."),
+        },
+      });
+    }
+  },
+
+  setDraft: (patch) => {
+    const draft = { ...get().draft, ...patch, updatedAt: Date.now() };
+    set({ draft, error: null });
+    queueSave(draft, (next) => void get().saveDraft(next));
+  },
+
+  setLine: (index, patch) => {
+    const lines = get().draft.lines.map((line, i) =>
+      i === index ? { ...line, ...patch } : line,
+    );
+    get().setDraft({ lines });
+  },
+
+  addLine: () => {
+    const lines = get().draft.lines;
+    if (lines.length >= 40) {
+      set({
+        error: {
+          message: "A nasheed is at most 40 lines here.",
+          field: "lines",
+        },
+      });
+      return;
+    }
+    get().setDraft({ lines: [...lines, { ...EMPTY_LINE }] });
+  },
+
+  removeLine: (index) => {
+    const lines = get().draft.lines.filter((_, i) => i !== index);
+    get().setDraft({ lines: lines.length ? lines : [{ ...EMPTY_LINE }] });
+  },
+
+  moveLine: (from, to) => {
+    const lines = get().draft.lines.slice();
+    if (
+      from === to ||
+      from < 0 ||
+      to < 0 ||
+      from >= lines.length ||
+      to >= lines.length
+    )
+      return;
+    const [moved] = lines.splice(from, 1);
+    lines.splice(to, 0, moved!);
+    get().setDraft({ lines });
+  },
+
+  setTags: (value) => {
+    const tags = value
+      .split(",")
+      .map((tag) =>
+        tag
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9\- ]/g, "")
+          .replace(/\s+/g, "-"),
+      )
+      .filter(Boolean)
+      .filter((tag, index, all) => all.indexOf(tag) === index)
+      .slice(0, 8);
+    get().setDraft({ tags });
+  },
+
+  setDuration: (ms) => {
+    const current = get().draft.durationMs;
+    // the audio element measures it exactly; do not churn the draft on every event
+    if (current && Math.abs(current - ms) < 1500) return;
+    get().setDraft({ durationMs: ms });
+  },
+
+  async attachAudio(file) {
+    if (!isSignedIn()) {
+      useUi.getState().requestAuth({ label: "Sign in to upload a recording" });
+      return false;
+    }
+    if (!/\.mp3$/i.test(file.name)) {
+      set({
+        error: { message: "Recordings must be .mp3 files.", field: "audio" },
+      });
+      return false;
+    }
+    if (typeof URL !== "undefined" && URL.createObjectURL) {
+      const previous = get().previewUrl;
+      if (previous) URL.revokeObjectURL(previous);
+      set({ previewUrl: URL.createObjectURL(file) });
+    }
+    set({ error: null, preparing: true, uploadProgress: null });
+    try {
+      /* A recording over the limit is transcoded here, in the browser, before a byte
+         goes anywhere — which can take a few seconds on a long file. The interface says
+         so, rather than looking asleep. */
+      const uploaded = await api.uploadAudio(file, (progress) =>
+        set({ uploadProgress: progress }),
+      );
+      get().setDraft({
+        audioPath: uploaded.path,
+        audioBytes: uploaded.bytes,
+        audioMime: uploaded.mime,
+      });
+      return true;
+    } catch (err) {
+      set({
+        error: {
+          message: errorMessage(err, "That upload did not finish."),
+          field: "audio",
+        },
+      });
+      return false;
+    } finally {
+      set({ preparing: false, uploadProgress: null });
+    }
+  },
+
+  async attachArtwork(file) {
+    if (!isSignedIn()) {
+      useUi.getState().requestAuth({ label: "Sign in to upload cover art" });
+      return false;
+    }
+    set({ error: null, preparing: true });
+    try {
+      /* Cover art over 2 MB is resized here before it is uploaded. */
+      const uploaded = await api.uploadArtwork(file);
+      get().setDraft({ artworkPath: uploaded.path });
+      return true;
+    } catch (err) {
+      set({
+        error: {
+          message: errorMessage(err, "That image did not upload."),
+          field: "artwork",
+        },
+      });
+      return false;
+    } finally {
+      set({ preparing: false });
+    }
+  },
+
+  clearAudio: () => {
+    const url = get().previewUrl;
+    if (url && typeof URL !== "undefined") URL.revokeObjectURL(url);
+    set({ previewUrl: null });
+    get().setDraft({ audioPath: null, audioBytes: null, audioMime: null });
+  },
+
+  /** The URL the player should use for a preview: the local file first, then storage. */
+  preview: () => get().previewUrl ?? null,
+
+  saveDraft: async (draftOverride) => {
+    if (!isSignedIn()) return;
+    const draft = { ...(draftOverride ?? get().draft), updatedAt: Date.now() };
+    set({ draft, saving: true });
+    try {
+      await api.saveDraft(draft);
+      set({ savedAt: Date.now(), saving: false, draftError: null });
+    } catch (err) {
+      /* Say it. A silent catch here is what made "saving does not work" impossible to
+         diagnose: the header said nothing, and the reason was thrown away. */
+      set({
+        saving: false,
+        draftError: errorMessage(err, "Your draft could not be saved."),
+      });
+    }
+  },
+
+  validate: () => {
+    const draft = get().draft;
+    if (draft.title.trim().length < 2)
+      return { message: "A title is required.", field: "title" };
+    if (draft.title.trim().length > 120)
+      return { message: "A title is at most 120 characters.", field: "title" };
+    if (!draft.audioPath)
+      return { message: "Upload the mp3 before publishing.", field: "audio" };
+    if (!linesFrom(draft).length)
+      return { message: "Add at least one line of lyrics.", field: "lines" };
+    return null;
+  },
+
+  async publish() {
+    if (!isSignedIn()) {
+      useUi.getState().requestAuth({ label: "Sign in to publish" });
+      return null;
+    }
+    const problem = get().validate();
+    if (problem) {
+      set({ error: problem });
+      return null;
+    }
+
+    const draft = get().draft;
+    set({ publishing: true, error: null, draftError: null });
+    try {
+      const input = {
+        title: draft.title,
+        titleAr: draft.titleAr || null,
+        note: draft.note || null,
+        tags: draft.tags,
+        lines: linesFrom(draft),
+        audioPath: draft.audioPath!,
+        audioMime: draft.audioMime,
+        audioBytes: draft.audioBytes,
+        durationMs: draft.durationMs,
+        artworkPath: draft.artworkPath,
+      };
+
+      const result = draft.songId
+        ? await api.updateSong(draft.songId, input)
+        : await api.publish(input);
+      const song = result.song;
+
+      set((s) => ({
+        publishing: false,
+        savedAt: Date.now(),
+        entries: [song, ...s.entries.filter((entry) => entry.id !== song.id)],
+        draft: { ...get().draft, songId: song.id },
+      }));
+      await api.discardDraft().catch(() => {});
+      /* the catalogue everyone reads is a module-level registry: refresh it in place so
+         the new nasheed is on the home page, in search and on the reciter's page too */
+      void import("../lib/boot")
+        .then((m) => m.refreshCatalog())
+        .catch(() => {});
+      return song;
+    } catch (err) {
+      set({
+        publishing: false,
+        error: { message: errorMessage(err, "That did not publish.") },
+      });
+      return null;
+    }
+  },
+
+  async unpublish(songId) {
+    const previous = get().entries;
+    set({
+      entries: previous.map((song) =>
+        song.id === songId
+          ? { ...song, status: "removed" as SongStatus }
+          : song,
+      ),
+    });
+    try {
+      await api.setSongStatus(songId, "removed");
+      void import("../lib/boot")
+        .then((m) => m.refreshCatalog())
+        .catch(() => {});
+    } catch (err) {
+      set({
+        entries: previous,
+        error: { message: errorMessage(err, "Could not take that down.") },
+      });
+    }
+  },
+
+  startEdit: (songId) => {
+    const song = getTrack(songId);
+    if (!song) return;
+    set({ draft: draftFromSong(song), error: null, previewUrl: null });
+  },
+
+  async resetDraft() {
+    const url = get().previewUrl;
+    if (url && typeof URL !== "undefined") URL.revokeObjectURL(url);
+    clearPreview();
+    set({
+      draft: { ...EMPTY_DRAFT, updatedAt: Date.now() },
       error: null,
+      previewUrl: null,
+      savedAt: 0,
+    });
+    await api.discardDraft().catch(() => {});
+  },
+}));
 
-      setDraft: (patch) => set((s) => ({ draft: { ...s.draft, ...patch } })),
+/**
+ * Put the current draft into the player, so the publisher hears it through the same
+ * player a listener will use — real duration, real progress, real lyrics.
+ */
+export function previewDraftInPlayer(): Song | null {
+  const draft = useStudio.getState().draft;
+  const url = useStudio.getState().previewUrl;
+  if (!draft.audioPath && !url) return null;
 
-      setLine: (index, patch) =>
-        set((s) => ({ draft: { ...s.draft, lines: s.draft.lines.map((l, i) => (i === index ? { ...l, ...patch } : l)) } })),
+  const song: Song = {
+    id: "preview_current_draft",
+    ownerId: null,
+    ownerHandle: null,
+    ownerName: null,
+    title: draft.title.trim() || "Untitled draft",
+    titleAr: draft.titleAr || null,
+    note: draft.note,
+    tags: draft.tags,
+    lines: linesFrom(draft),
+    // the local file wins while it is still on this machine; the storage path works
+    // from anywhere, which is what the player falls back to
+    audioPath: draft.audioPath ?? url ?? "",
+    audioMime: draft.audioMime ?? null,
+    audioBytes: draft.audioBytes,
+    durationMs: draft.durationMs,
+    artworkPath: draft.artworkPath,
+    status: "live",
+    publishedAt: Date.now(),
+    plays: 0,
+    likes: 0,
+    notes: 0,
+  };
+  registerPreview(song);
+  return song;
+}
 
-      addLine: () => set((s) => ({ draft: { ...s.draft, lines: [...s.draft.lines, { ...EMPTY_LINE }] } })),
-
-      removeLine: (index) => set((s) => ({ draft: { ...s.draft, lines: s.draft.lines.filter((_, i) => i !== index) } })),
-
-      moveLine: (from, to) =>
-        set((s) => {
-          const lines = [...s.draft.lines];
-          if (to < 0 || to >= lines.length) return s;
-          const [moved] = lines.splice(from, 1);
-          lines.splice(to, 0, moved!);
-          return { draft: { ...s.draft, lines } };
-        }),
-
-      resetDraft: () =>
-        set({ draft: { ...DEFAULT_DRAFT, lines: DEFAULT_DRAFT.lines.map((l) => ({ ...l })) }, audio: null, artwork: null, error: null }),
-
-      async setAudio(file) {
-        if (!file) {
-          set({ audio: null, error: null });
-          return;
-        }
-        if (!/^audio\//.test(file.type) && !/\.(mp3|wav|m4a|aac|ogg|flac|webm)$/i.test(file.name)) {
-          set({ error: "That is not an audio file. mp3, wav, m4a, ogg or flac." });
-          return;
-        }
-        if (file.size > MAX_AUDIO_BYTES) {
-          set({ error: "That recording is bigger than 48 MB. Trim it or export it smaller." });
-          return;
-        }
-        set({ error: null, audio: attachment(file, null) });
-        const durationMs = await probeDuration(file);
-        // they may have swapped the file while we were reading it
-        if (get().audio?.name === file.name && get().audio?.bytes === file.size) set({ audio: attachment(file, durationMs) });
-      },
-
-      async setArtwork(file) {
-        if (!file) {
-          set({ artwork: null, error: null });
-          return;
-        }
-        if (!/^image\//.test(file.type)) {
-          set({ error: "Cover art has to be an image: png, jpg, webp or svg." });
-          return;
-        }
-        if (file.size > MAX_IMAGE_BYTES) {
-          set({ error: "That image is bigger than 8 MB." });
-          return;
-        }
-        set({ error: null, artwork: attachment(file, null) });
-      },
-
-      async publish() {
-        const account = currentUser() ? { ...currentUser()! } as Account : null;
-        const draft = get().draft;
-        const invalid = validateDraft(draft, account, get().audio);
-        if (invalid) return invalid;
-
-        set({ publishing: true, error: null });
-        try {
-          const audio = get().audio;
-          const artwork = get().artwork;
-          const res = await api.publish(songInputFromDraft(draft), {
-            audio: audio?.file ?? null,
-            artwork: artwork?.file ?? null,
-            durationMs: audio?.durationMs ?? null,
-          });
-          const track = applySong(res.song);
-          set((s) => ({
-            publishing: false,
-            audio: null,
-            artwork: null,
-            entries: [entryFromSong(res.song), ...s.entries.filter((e) => e.id !== res.song.id)],
-            draft: { ...DEFAULT_DRAFT, lines: DEFAULT_DRAFT.lines.map((l) => ({ ...l })) },
-          }));
-          return { ok: true, track };
-        } catch (err) {
-          const message = errorMessage(err, "Publishing did not go through.");
-          set({ publishing: false, error: message });
-          return { ok: false, field: "form", msg: message };
-        }
-      },
-
-      async unpublish(trackId) {
-        const user = currentUser();
-        if (!user) return false;
-        try {
-          await api.removeSong(trackId);
-          forgetSong(trackId);
-          set((s) => ({ entries: s.entries.filter((e) => e.id !== trackId) }));
-          return true;
-        } catch (err) {
-          set({ error: errorMessage(err, "Could not take that down.") });
-          return false;
-        }
-      },
-
-      owns: (trackId) => {
-        const user = currentUser();
-        if (!user) return false;
-        if (get().entries.some((e) => e.id === trackId && (e.ownerId === user.profileId || e.ownerHandle === user.handle))) {
-          return true;
-        }
-        const track = getTrack(trackId);
-        return track?.ownerId === user.profileId;
-      },
-
-      byOwner: (accountId) =>
-        get()
-          .entries.filter((e) => e.ownerId === accountId || e.ownerHandle === accountId)
-          .sort((a, b) => b.publishedAt - a.publishedAt),
-
-      async loadMine(force = false) {
-        const user = currentUser();
-        if (!user) {
-          set({ entries: [] });
-          return;
-        }
-        if (get().entries.length && !force) return;
-        set({ loading: true });
-        try {
-          const page = await api.songs({ owner: "me", limit: 100, sort: "new" });
-          const entries = page.items.map(entryFromSong);
-          for (const song of page.items) applySong(song);
-          set({ entries, loading: false, error: null });
-        } catch (err) {
-          set({ loading: false, error: errorMessage(err, "Could not load what you published.") });
-        }
-      },
-
-      applyServerSongs: (songs) => {
-        const user = currentUser();
-        if (!user) {
-          set({ entries: [] });
-          return;
-        }
-        const mine = songs.filter((s) => s.ownerId === user.profileId).map(entryFromSong);
-        set((s) => ({ entries: [...mine, ...s.entries.filter((e) => !mine.some((m) => m.id === e.id))] }));
-      },
-    }),
-    {
-      name: "coolnasheed:studio:v2",
-      storage: createJSONStorage(() => localStorage),
-      // the draft survives a reload; the published list and any attachment do not
-      partialize: (s) => ({ draft: s.draft }),
-    },
-  ),
-);
-
-/** Signing out empties the studio's list of what you published. */
-useSession.subscribe((state, prev) => {
-  if (prev.user?.id && !state.user) useStudio.setState({ entries: [], audio: null, artwork: null });
-});
+export { DEFAULT_PREFS };

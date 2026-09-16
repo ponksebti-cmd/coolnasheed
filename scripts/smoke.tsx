@@ -1,28 +1,36 @@
 /**
  * Headless smoke test.
  *
- * Bundled with esbuild and run under jsdom, so the whole app — data, composer,
- * audio graph, every route — is exercised without a browser. Run with:
+ * Bundled with esbuild and run under jsdom, so the parts of the app that are worth
+ * checking without a browser — the row mappers, the catalogue registry, the media
+ * element wrapper, the player store, the gate on writing, the lyric view and every
+ * route — are exercised for real:
  *
  *   npm run smoke
  *
- * It validates the catalogue, the generated songs (timings, words, frequencies),
- * the Web Audio engine against a fake context, and server-renders each route.
+ * There is no audio engine to fake any more. A nasheed is an mp3 on a CDN, so what
+ * this file fakes is `<audio>`: one element, whose events it fires by hand, and then
+ * it checks that the store, the beacon and the pages all believe it.
+ *
+ * The network is absent on purpose. Every call that would need the backend must fail
+ * with a sentence a person could act on, and no page may invent a catalogue to make up
+ * for it — which is the whole point of the rewrite this test is here to hold in place.
  */
 
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { JSDOM, VirtualConsole } from "jsdom";
-
-/** jsdom shouts about canvas/scrollTo; keep the harness output readable. */
-const quietConsole = new VirtualConsole();
-quietConsole.on("jsdomError", () => {});
-quietConsole.on("error", () => {});
+import { createElement, act } from "react";
+import { createRoot } from "react-dom/client";
 
 /* ------------------------------------------------------------------ report */
 
 const failures: string[] = [];
 const notes: string[] = [];
+let assertions = 0;
 
 function assert(name: string, condition: boolean, detail = "") {
+  assertions += 1;
   if (condition) notes.push(`  ✓ ${name}${detail ? ` — ${detail}` : ""}`);
   else failures.push(`  ✗ ${name}${detail ? ` — ${detail}` : ""}`);
 }
@@ -31,239 +39,155 @@ function section(title: string) {
   notes.push(`\n${title}`);
 }
 
-/* ------------------------------------------------------------- fake audio */
-
-let nodeCount = 0;
-let startedSources = 0;
-let buffersPlayed = 0;
-
-class FakeParam {
-  value = 0;
-  private calls = 0;
-  setValueAtTime(v: number) {
-    if (!Number.isFinite(v)) throw new Error("setValueAtTime got a non-finite value");
-    this.value = v;
-    this.calls++;
-    return this;
-  }
-  linearRampToValueAtTime(v: number, t: number) {
-    if (!Number.isFinite(v) || !Number.isFinite(t) || t < 0) throw new Error(`bad linearRamp ${v}@${t}`);
-    this.value = v;
-    this.calls++;
-    return this;
-  }
-  exponentialRampToValueAtTime(v: number, t: number) {
-    if (!Number.isFinite(v) || v === 0 || !Number.isFinite(t) || t < 0) throw new Error(`bad exponentialRamp ${v}@${t}`);
-    this.value = v;
-    this.calls++;
-    return this;
-  }
-  setTargetAtTime(v: number, t: number, c: number) {
-    if (!Number.isFinite(v) || !Number.isFinite(t) || !Number.isFinite(c)) throw new Error("bad setTargetAtTime");
-    this.value = v;
-    this.calls++;
-    return this;
-  }
-  cancelScheduledValues(t: number) {
-    if (!Number.isFinite(t)) throw new Error("bad cancelScheduledValues");
-    this.calls++;
-    return this;
-  }
-  get automationCalls() {
-    return this.calls;
-  }
-}
-
-/** Every node the engine builds, kept so tests can inspect the graph itself. */
-const liveNodes: FakeNode[] = [];
-
-class FakeNode {
-  context: FakeAudioContext;
-  numberOfInputs = 1;
-  numberOfOutputs = 1;
-  constructor(ctx: FakeAudioContext) {
-    this.context = ctx;
-    nodeCount++;
-    liveNodes.push(this);
-  }
-  connect(dest: unknown) {
-    if (!dest) throw new Error("connect() called with no destination");
-    return dest as FakeNode;
-  }
-  disconnect() {}
-}
-
-class FakeGain extends FakeNode {
-  gain = new FakeParam();
-}
-class FakeFilter extends FakeNode {
-  type = "lowpass";
-  frequency = new FakeParam();
-  Q = new FakeParam();
-  detune = new FakeParam();
-  gain = new FakeParam();
-}
-class FakePanner extends FakeNode {
-  pan = new FakeParam();
-}
-class FakeOsc extends FakeNode {
-  type = "sine";
-  frequency = new FakeParam();
-  detune = new FakeParam();
-  onended: (() => void) | null = null;
-  private started = false;
-  private stopped = false;
-  start(when = 0) {
-    if (this.started) throw new Error("oscillator started twice");
-    if (!Number.isFinite(when) || when < 0) throw new Error(`bad start time ${when}`);
-    this.started = true;
-    startedSources++;
-  }
-  stop(when = 0) {
-    if (!this.started) throw new Error("stop before start");
-    if (!Number.isFinite(when) || when < 0) throw new Error(`bad stop time ${when}`);
-    this.stopped = true;
-  }
-  get wasStopped() {
-    return this.stopped;
-  }
-}
-class FakeBufferSource extends FakeNode {
-  buffer: FakeBuffer | null = null;
-  playbackRate = new FakeParam();
-  detune = new FakeParam();
-  loop = false;
-  onended: (() => void) | null = null;
-  private started = false;
-  start(when = 0) {
-    if (this.started) throw new Error("buffer source started twice");
-    if (!Number.isFinite(when) || when < 0) throw new Error(`bad start time ${when}`);
-    this.started = true;
-    startedSources++;
-    buffersPlayed++;
-  }
-  stop(when = 0) {
-    if (!Number.isFinite(when) || when < 0) throw new Error(`bad stop time ${when}`);
-  }
-}
-class FakeBuffer {
-  length: number;
-  numberOfChannels: number;
-  sampleRate: number;
-  private data: Float32Array[];
-  constructor(channels: number, length: number, sampleRate: number) {
-    this.numberOfChannels = channels;
-    this.length = length;
-    this.sampleRate = sampleRate;
-    this.data = Array.from({ length: channels }, () => new Float32Array(length));
-  }
-  get duration() {
-    return this.length / this.sampleRate;
-  }
-  getChannelData(i: number) {
-    return this.data[i]!;
-  }
-}
-class FakeConvolver extends FakeNode {
-  buffer: FakeBuffer | null = null;
-  normalize = true;
-}
-class FakeCompressor extends FakeNode {
-  threshold = new FakeParam();
-  knee = new FakeParam();
-  ratio = new FakeParam();
-  attack = new FakeParam();
-  release = new FakeParam();
-  reduction = 0;
-}
-class FakeAnalyser extends FakeNode {
-  fftSize = 2048;
-  smoothingTimeConstant = 0.8;
-  get frequencyBinCount() {
-    return this.fftSize / 2;
-  }
-  getByteFrequencyData(arr: Uint8Array) {
-    for (let i = 0; i < arr.length; i++) arr[i] = Math.floor(120 + 60 * Math.sin(i / 7));
-  }
-  getByteTimeDomainData(arr: Uint8Array) {
-    arr.fill(128);
-  }
-}
-
-class FakeAudioContext {
-  private t0 = Date.now();
-  sampleRate = 48000;
-  state: "running" | "suspended" = "running";
-  destination = new FakeNode(this);
-  onstatechange: (() => void) | null = null;
-  get currentTime() {
-    return (Date.now() - this.t0) / 1000;
-  }
-  createGain() {
-    return new FakeGain(this);
-  }
-  createBiquadFilter() {
-    return new FakeFilter(this);
-  }
-  createStereoPanner() {
-    return new FakePanner(this);
-  }
-  createOscillator() {
-    return new FakeOsc(this);
-  }
-  createBufferSource() {
-    return new FakeBufferSource(this);
-  }
-  createConvolver() {
-    return new FakeConvolver(this);
-  }
-  createDynamicsCompressor() {
-    return new FakeCompressor(this);
-  }
-  createAnalyser() {
-    return new FakeAnalyser(this);
-  }
-  createBuffer(channels: number, length: number, sampleRate: number) {
-    return new FakeBuffer(channels, length, sampleRate);
-  }
-  async resume() {
-    this.state = "running";
-  }
-  async suspend() {
-    this.state = "suspended";
-  }
-  async close() {
-    this.state = "suspended";
-  }
-}
-
 /* -------------------------------------------------------------- jsdom host */
 
-const dom = new JSDOM(`<!doctype html><html><head></head><body><div id="root"></div></body></html>`, {
-  url: "http://localhost:5173/",
-  pretendToBeVisual: true,
-  virtualConsole: quietConsole,
-});
+const quietConsole = new VirtualConsole();
+quietConsole.on("jsdomError", () => {});
+quietConsole.on("error", () => {});
+
+const dom = new JSDOM(
+  `<!doctype html><html><head></head><body><div id="root"></div></body></html>`,
+  {
+    url: "http://localhost:5173/",
+    pretendToBeVisual: true,
+    virtualConsole: quietConsole,
+  },
+);
 
 const w = dom.window as unknown as Record<string, unknown> & typeof dom.window;
-w.AudioContext = FakeAudioContext as unknown as typeof AudioContext;
-(w as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-  cb: (entries: { isIntersecting: boolean; target: Element }[]) => void;
-  constructor(cb: (entries: { isIntersecting: boolean; target: Element }[]) => void) {
-    this.cb = cb;
+
+/** Node 22 makes some globals getter-only, so define rather than assign. */
+function setGlobal(name: string, value: unknown) {
+  Object.defineProperty(globalThis, name, {
+    value,
+    configurable: true,
+    writable: true,
+  });
+}
+
+/* ------------------------------------------------------------------- audio */
+
+/** The element the app is allowed to play: one mp3, and nothing generated. */
+class FakeAudio extends w.EventTarget {
+  src = "";
+  currentTime = 0;
+  duration = Number.NaN;
+  volume = 1;
+  muted = false;
+  paused = true;
+  ended = false;
+  readyState = 0;
+  crossOrigin: string | null = null;
+  preload = "none";
+  error: { code: number } | null = null;
+  playCalls = 0;
+  pauseCalls = 0;
+  loadCalls = 0;
+
+  constructor() {
+    super();
+    audioElements.push(this);
   }
-  observe(target: Element) {
-    this.cb([{ isIntersecting: true, target }]);
+
+  private emit(type: string) {
+    this.dispatchEvent(new w.Event(type));
   }
-  disconnect() {}
-  unobserve() {}
-};
-(w as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
-  observe() {}
-  disconnect() {}
-  unobserve() {}
-};
-(w as unknown as { matchMedia: unknown }).matchMedia = (query: string) => ({
+
+  load() {
+    this.loadCalls += 1;
+    this.readyState = 1;
+    this.duration = 192;
+    queueMicrotask(() => this.emit("loadedmetadata"));
+  }
+
+  async play() {
+    this.playCalls += 1;
+    this.paused = false;
+    this.readyState = 4;
+    this.emit("play");
+    this.emit("playing");
+  }
+
+  pause() {
+    this.pauseCalls += 1;
+    this.paused = true;
+    this.emit("pause");
+  }
+
+  removeAttribute(name: string) {
+    if (name === "src") this.src = "";
+  }
+
+  /** Test-only: pretend the CDN handed back a bad file. */
+  fail(code = 4) {
+    this.error = { code };
+    this.readyState = 0;
+    this.paused = true;
+    this.emit("error");
+  }
+
+  /** Test-only: playback reaches a new position. */
+  advance(to: number) {
+    this.currentTime = to;
+    this.emit("timeupdate");
+  }
+}
+
+const audioElements: FakeAudio[] = [];
+
+setGlobal("window", w);
+setGlobal("document", w.document);
+setGlobal("navigator", w.navigator);
+setGlobal("location", w.location);
+setGlobal("history", w.history);
+setGlobal("localStorage", w.localStorage);
+setGlobal("CustomEvent", w.CustomEvent);
+setGlobal("Event", w.Event);
+setGlobal("MouseEvent", w.MouseEvent);
+setGlobal("KeyboardEvent", w.KeyboardEvent);
+setGlobal("HTMLElement", w.HTMLElement);
+setGlobal("Element", w.Element);
+setGlobal("Node", w.Node);
+setGlobal("getComputedStyle", w.getComputedStyle.bind(w));
+setGlobal("Audio", FakeAudio);
+setGlobal("MediaError", {
+  MEDIA_ERR_ABORTED: 1,
+  MEDIA_ERR_NETWORK: 2,
+  MEDIA_ERR_DECODE: 3,
+  MEDIA_ERR_SRC_NOT_SUPPORTED: 4,
+});
+setGlobal(
+  "requestAnimationFrame",
+  (cb: FrameRequestCallback) =>
+    setTimeout(() => cb(Date.now()), 16) as unknown as number,
+);
+setGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+(setGlobal as unknown as (n: string, v: unknown) => void)(
+  "IntersectionObserver",
+  class {
+    constructor(
+      private cb: (
+        entries: { isIntersecting: boolean; target: Element }[],
+      ) => void,
+    ) {}
+    observe(target: Element) {
+      this.cb([{ isIntersecting: true, target }]);
+    }
+    disconnect() {}
+    unobserve() {}
+  },
+);
+setGlobal(
+  "ResizeObserver",
+  class {
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+  },
+);
+/* jsdom's `window` is not Node's global, and the DOM matchers live on the former, so
+   a browser API has to go on both to satisfy code that reaches for either. */
+const matchMediaStub = (query: string) => ({
   matches: false,
   media: query,
   addEventListener() {},
@@ -273,35 +197,96 @@ w.AudioContext = FakeAudioContext as unknown as typeof AudioContext;
   onchange: null,
   dispatchEvent: () => false,
 });
-
-/** Node 22 makes some globals getter-only, so define rather than assign. */
-function setGlobal(name: string, value: unknown) {
-  Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
-}
-
-setGlobal("window", w);
-setGlobal("document", w.document);
-setGlobal("navigator", w.navigator);
-setGlobal("localStorage", w.localStorage);
-setGlobal("location", w.location);
-setGlobal("history", w.history);
-setGlobal("CustomEvent", w.CustomEvent);
-setGlobal("Event", w.Event);
-setGlobal("MouseEvent", w.MouseEvent);
-setGlobal("KeyboardEvent", w.KeyboardEvent);
-setGlobal("PointerEvent", w.MouseEvent);
-setGlobal("HTMLElement", w.HTMLElement);
-setGlobal("Element", w.Element);
-setGlobal("Node", w.Node);
-setGlobal("getComputedStyle", w.getComputedStyle.bind(w));
-setGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 16) as unknown as number);
-setGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
-setGlobal("IntersectionObserver", (w as unknown as { IntersectionObserver: unknown }).IntersectionObserver);
-setGlobal("ResizeObserver", (w as unknown as { ResizeObserver: unknown }).ResizeObserver);
-setGlobal("matchMedia", (w as unknown as { matchMedia: unknown }).matchMedia);
+setGlobal("matchMedia", matchMediaStub);
+w.matchMedia = matchMediaStub as unknown as typeof w.matchMedia;
 setGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/* Points the client at a project that does not exist: configured, so every network path
+   really runs, and unreachable, so every failure has to be reported in words. */
+setGlobal("__COOLNASHEED_ENV__", {
+  VITE_SUPABASE_URL: "https://smoke.supabase.co",
+  VITE_SUPABASE_ANON_KEY: "smoke-anon-key-0000000000000000000000",
+});
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/* ------------------------------------------------------------------ fixture */
+
+const fixture = JSON.parse(
+  readFileSync(
+    join(process.cwd(), "shared/fixtures/publish-cases.json"),
+    "utf8",
+  ),
+) as {
+  owner: string;
+  songRows: {
+    name: string;
+    ownerHandle: string | null;
+    row: Record<string, unknown>;
+  }[];
+};
+
+/** The catalogue the payload would carry, described the way the server describes it. */
+const OWNER = fixture.owner;
+const SECOND = "11111111-2222-3333-4444-555555555555";
+
+const songRow = (patch: Record<string, unknown>) => ({
+  id: "sng_smoke_0001",
+  owner_id: OWNER,
+  title: "Ṭalaʿa al-Badru ʿAlaynā",
+  title_ar: "طلع البدر علينا",
+  note: "The oldest welcome song we have.",
+  tags: ["traditional", "madinah"],
+  lines: [
+    {
+      tr: "ṭalaʿa al-badru ʿalaynā",
+      ar: "طلع البدر علينا",
+      en: "the full moon rose over us",
+      t: 0,
+    },
+    {
+      tr: "min thaniyyāti al-wadāʿ",
+      ar: "من ثنيات الوداع",
+      en: "from the valley of farewell",
+      t: 6,
+    },
+  ],
+  audio_path: `${OWNER}/talaa.mp3`,
+  audio_mime: "audio/mpeg",
+  audio_bytes: 5120000,
+  duration_ms: 192000,
+  artwork_path: null,
+  status: "live",
+  published_at: "2026-09-15T09:30:00.000Z",
+  plays: 12,
+  likes: 3,
+  notes: 1,
+  ...patch,
+});
+
+const ROWS = [
+  songRow({}),
+  songRow({
+    id: "sng_smoke_0002",
+    title: "Yā Nabiyy Salām",
+    tags: ["salawat"],
+    lines: [],
+    plays: 4,
+    likes: 1,
+    notes: 0,
+    audio_path: `${OWNER}/salam.mp3`,
+  }),
+  songRow({
+    id: "sng_smoke_0003",
+    title: "Subḥān Allāh",
+    tags: ["dhikr"],
+    lines: [],
+    plays: 40,
+    likes: 9,
+    notes: 2,
+    audio_path: `${OWNER}/subhan.mp3`,
+  }),
+];
 
 /* ------------------------------------------------------------------- tests */
 
@@ -311,534 +296,1564 @@ async function main() {
   console.error = (...args: unknown[]) => {
     const msg = args.map(String).join(" ");
     consoleErrors.push(msg);
-    if (!msg.includes("act(") && !msg.includes("ReactDOMTestUtils")) realError(...args);
+    if (!msg.includes("act(") && !msg.includes("ReactDOMTestUtils"))
+      realError(...args);
   };
 
-  /* ---- catalogue + composer ---- */
+  /* ----------------------------------------------------------- configuration */
+
+  section("Configuration");
+  const supabase = await import("../src/lib/supabase");
+  const errors = await import("../src/lib/errors");
+  const api = (await import("../src/lib/api")).api;
+  /* this run is wired to a project that does not exist, which is the interesting case:
+     the client is configured, so it really does try, and it has to fail in words */
+  assert(
+    "the harness points at a project",
+    supabase.hasSupabase === true,
+    supabase.backendLabel(),
+  );
+  assert(
+    "and the project ref is read from the url",
+    supabase.projectRef === "smoke",
+    supabase.projectRef,
+  );
+  assert(
+    "a stored path becomes a public cdn url",
+    supabase.audioUrl(`${OWNER}/talaa.mp3`) ===
+      `https://smoke.supabase.co/storage/v1/object/public/nasheed-audio/${OWNER}/talaa.mp3`,
+    String(supabase.audioUrl(`${OWNER}/talaa.mp3`)),
+  );
+
+  let catalogError: unknown = null;
+  try {
+    await api.catalog();
+  } catch (err) {
+    catalogError = err;
+  }
+  assert(
+    "asking for the catalogue from an unreachable project fails with a sentence, not a stack",
+    catalogError instanceof errors.ApiError,
+    catalogError instanceof Error
+      ? catalogError.message.slice(0, 90)
+      : String(catalogError),
+  );
+
+  /* ----------------------------------------------------------- row mappers */
+
+  section("Rows in, models out");
+  const wire = await import("../src/lib/wire");
+  for (const rowCase of fixture.songRows) {
+    const song = wire.songFromRow({
+      ...rowCase.row,
+      ownerHandle: rowCase.ownerHandle,
+    } as never);
+    assert(
+      `the fixture's "${rowCase.name}" maps`,
+      typeof song.id === "string" && song.audioPath.length > 0,
+      song.title,
+    );
+  }
+  const live = wire.songFromRow(ROWS[0] as never);
+  assert(
+    "timings survive the mapping",
+    live.lines[1]?.t === 6,
+    JSON.stringify(live.lines[1] ?? null),
+  );
+  assert(
+    "counters are numbers, not strings",
+    live.plays === 12 && live.likes === 3 && live.notes === 1,
+  );
+  assert(
+    "a null duration stays null rather than becoming a guess",
+    wire.songFromRow(songRow({ duration_ms: null }) as never).durationMs ===
+      null,
+  );
+  assert(
+    "a row with no recording is not playable",
+    wire.playableRow(songRow({ audio_path: null }) as never) === false,
+  );
+  assert(
+    "and one with a recording is",
+    wire.playableRow(ROWS[0] as never) === true,
+  );
+
+  const audioUrl = wire.songAudioUrl(live);
+  const artUrl = wire.songArtworkUrl(live);
+  assert(
+    "an audio path becomes a url only when the project knows its host",
+    audioUrl === null || audioUrl.includes("talaa.mp3"),
+    String(audioUrl),
+  );
+  assert(
+    "artwork that is not there stays null",
+    artUrl === null,
+    String(artUrl),
+  );
+
+  /* ------------------------------------------------- the publish mirror */
+
+  section("The browser's publish validator");
+  const row = wire.songRowFromInput(
+    { title: "A test", audioPath: `${OWNER}/test.mp3` } as never,
+    OWNER,
+  );
+  assert(
+    "a minimal payload becomes a row with an mp3 in it",
+    row.audio_path === `${OWNER}/test.mp3` &&
+      row.note === "" &&
+      !("accent" in row) &&
+      !("year" in row),
+  );
+  let refused = "";
+  try {
+    wire.songRowFromInput(
+      { title: "A test", audioPath: `${SECOND}/test.mp3` } as never,
+      OWNER,
+    );
+  } catch (err) {
+    refused = err instanceof Error ? err.message : String(err);
+  }
+  assert(
+    "and somebody else's file is refused, by name",
+    refused.includes("your own folder"),
+    refused,
+  );
+  let composition = "";
+  try {
+    wire.songRowFromInput(
+      { title: "A test", audioPath: `${OWNER}/test.mp3`, bpm: 84 } as never,
+      OWNER,
+    );
+  } catch (err) {
+    composition = err instanceof Error ? err.message : String(err);
+  }
+  assert(
+    "a composition parameter is refused, not quietly dropped",
+    composition.includes("bpm"),
+    composition,
+  );
+
+  /* ------------------------------------------------------------ catalogue */
+
+  section("The catalogue registry");
   const catalog = await import("../src/data/catalog");
-  const { songFor } = await import("../src/lib/song");
-  const theory = await import("../src/lib/theory");
+  assert(
+    "it starts empty — there is no bundled catalogue",
+    catalog.TRACKS.length === 0 && catalog.ARTISTS.length === 0,
+  );
 
-  section("Catalogue");
-  assert(`${catalog.TRACKS.length} tracks loaded`, catalog.TRACKS.length >= 20);
-  assert(`${catalog.ARTISTS.length} reciters loaded`, catalog.ARTISTS.length >= 6);
-  assert(`${catalog.COLLECTIONS.length} sets loaded`, catalog.COLLECTIONS.length >= 6);
-
-  const badArtist = catalog.TRACKS.filter((t) => !catalog.getArtist(t.artistId));
-  assert("every track has a real reciter", badArtist.length === 0, badArtist.map((t) => t.id).join(","));
-
-  const orphanTracks = catalog.COLLECTIONS.flatMap((c) => c.trackIds).filter((id) => !catalog.getTrack(id));
-  assert("every set points at real tracks", orphanTracks.length === 0, orphanTracks.join(","));
-
-  const uncollected = catalog.TRACKS.filter((t) => !catalog.COLLECTIONS.some((c) => c.trackIds.includes(t.id)));
-  assert("every track appears in at least one set", uncollected.length === 0, uncollected.map((t) => t.id).join(","));
-
-  const dupes = catalog.TRACKS.map((t) => t.id).filter((id, i, arr) => arr.indexOf(id) !== i);
-  assert("track ids are unique", dupes.length === 0, dupes.join(","));
-
-  section("Composer (song builder)");
-  let minDur = Infinity;
-  let maxDur = 0;
-  let totalNotes = 0;
-  let totalHits = 0;
-  let totalLines = 0;
-  const problems: string[] = [];
-
-  catalog.TRACKS.forEach((track) => {
-    const song = songFor(track);
-    totalNotes += song.notes.length;
-    totalHits += song.duff.length;
-    totalLines += song.lines.length;
-    minDur = Math.min(minDur, song.duration);
-    maxDur = Math.max(maxDur, song.duration);
-
-    const expectedLines = track.lines.length * Math.max(1, track.passes ?? 2);
-    if (song.lines.length !== expectedLines)
-      problems.push(`${track.id}: expected ${expectedLines} timed lines, got ${song.lines.length}`);
-    if (!Number.isFinite(song.duration) || song.duration <= 0) problems.push(`${track.id}: bad duration`);
-    song.notes.forEach((n, i) => {
-      if (!Number.isFinite(n.freq) || n.freq <= 20 || n.freq > 6000) problems.push(`${track.id}: note ${i} freq ${n.freq}`);
-      if (!Number.isFinite(n.t) || n.t < 0) problems.push(`${track.id}: note ${i} time ${n.t}`);
-      if (!Number.isFinite(n.dur) || n.dur <= 0) problems.push(`${track.id}: note ${i} dur ${n.dur}`);
-    });
-    song.duff.forEach((d, i) => {
-      if (!Number.isFinite(d.t) || d.t < 0 || d.t > song.duration + 0.5) problems.push(`${track.id}: duff ${i} at ${d.t}`);
-    });
-    song.lines.forEach((l, i) => {
-      if (l.words.length === 0) problems.push(`${track.id}: line ${i} has no words`);
-      if (l.end <= l.t) problems.push(`${track.id}: line ${i} ends before it starts`);
-      if (i > 0 && l.t < song.lines[i - 1]!.end - 0.001) problems.push(`${track.id}: line ${i} overlaps the previous`);
-      let prevEnd = -1;
-      l.words.forEach((wd) => {
-        if (wd.t < l.t - 0.001 || wd.end > l.end + 0.001) problems.push(`${track.id}: word "${wd.text}" outside its line`);
-        if (wd.t < prevEnd - 0.001) problems.push(`${track.id}: word "${wd.text}" goes backwards`);
-        if (!wd.text.trim()) problems.push(`${track.id}: empty word`);
-        prevEnd = wd.end;
-      });
-    });
+  let notified = 0;
+  const unsubscribe = catalog.subscribeCatalog(() => {
+    notified += 1;
   });
 
-  assert("every song is finite and non-empty", problems.length === 0, problems.slice(0, 4).join(" | "));
-  assert(
-    `durations between 40s and 5m`,
-    minDur >= 40 && maxDur <= 300,
-    `min ${minDur.toFixed(1)}s, max ${maxDur.toFixed(1)}s`,
-  );
-  assert(`${totalNotes} notes scheduled`, totalNotes > 500);
-  assert(`${totalHits} duff hits scheduled`, totalHits > 100);
-  const expectedTotal = catalog.TRACKS.reduce((n, t) => n + t.lines.length * Math.max(1, t.passes ?? 2), 0);
-  assert(
-    `${totalLines} timed lyric lines across all repetitions`,
-    totalLines === expectedTotal,
-    `expected ${expectedTotal}`,
-  );
-
-  notes.push(
-    catalog.TRACKS.map((t) => {
-      const sg = songFor(t);
-      return `    ${t.id.padEnd(26)} ${sg.duration.toFixed(0).padStart(3)}s  ${String(sg.notes.length).padStart(4)} notes  ${String(sg.duff.length).padStart(4)} hits  ${String(sg.lines.length).padStart(2)} lines  ${t.maqam}/${t.bpm}bpm/${t.voices}`;
-    }).join("\n"),
-  );
-
-  section("Maqām theory");
-  const hijaz = theory.degreeToFreq(57, "hijaz", 2);
-  const tonic = theory.degreeToFreq(57, "hijaz", 0);
-  assert("degree 2 in Ḥijāz is a major third up", Math.abs(hijaz / tonic - Math.pow(2, 4 / 12)) < 1e-6);
-  assert("octave wraps", Math.abs(theory.degreeToFreq(57, "hijaz", 7) / tonic - 2) < 1e-6);
-  assert("negative degrees wrap down", Math.abs(theory.degreeToFreq(57, "hijaz", -7) / tonic - 0.5) < 1e-6);
-  const rastThird = theory.degreeToFreq(60, "rast", 2) / theory.degreeToFreq(60, "rast", 0);
-  assert("Rāst keeps its quarter tone", Math.abs(rastThird - Math.pow(2, 3.5 / 12)) < 1e-6, `${rastThird.toFixed(4)} ratio`);
-  assert("note names resolve", theory.noteName(60) === "C4", theory.noteName(60));
-
-  section("Syllabifier");
-  const latin = theory.syllabifyLine("Mawlāya ṣalli wa sallim dāʾiman abadā", undefined);
-  assert("transliteration splits into words", latin.words.length === 6, `${latin.words.length}: ${latin.words.join(" ")}`);
-  assert("and into more syllables than words", latin.syllables.length > latin.words.length, `${latin.syllables.length} syllables`);
-  assert("vowels are extracted", latin.syllables.every((s) => "aeioum".includes(s.vowel)));
-  const arabic = theory.syllabifyLine(undefined, "طَلَعَ البَدْرُ عَلَيْنَا");
-  assert("Arabic-only lines syllabify", arabic.syllables.length >= 4, `${arabic.syllables.length} syllables`);
-  const english = theory.syllabifyLine("The full moon rose upon us", undefined);
-  assert("English lines syllabify", english.syllables.length >= 6, `${english.syllables.length} syllables`);
-
-  section("Search & curator");
-  assert("title search", catalog.searchTracks("badru").length > 0);
-  assert("lyric-line search", catalog.searchTracks("gratitude").length > 0);
-  assert("artist search", catalog.searchArtists("cairo").length > 0);
-  assert("maqām search", catalog.searchTracks("hijaz").length > 0);
-  assert("nonsense search returns nothing", catalog.searchTracks("zzzqqq").length === 0);
-
-  const { generateNurMix, buildTaste } = await import("../src/lib/nur");
-  const emptyMix = generateNurMix({ liked: [], history: [], size: 8, seedKey: "smoke-a" });
-  assert("Nūr builds a mix from nothing", emptyMix.trackIds.length === 8);
-  assert("Nūr mix has no duplicate tracks", new Set(emptyMix.trackIds).size === emptyMix.trackIds.length);
-  assert("every pick has a reason", emptyMix.picks.every((p) => p.reason.length > 12));
-  const deterministic = generateNurMix({ liked: [], history: [], size: 8, seedKey: "smoke-a" });
-  assert("same seed, same mix", deterministic.trackIds.join() === emptyMix.trackIds.join());
-  const taste = buildTaste(["talaa-al-badru", "sakina"], [{ id: "la-ilaha-illa-allah", at: Date.now(), count: 3 }]);
-  assert("taste vector learns tags", Object.keys(taste.tags).length > 0);
-  const seededMix = generateNurMix({ liked: ["sakina", "dust-and-light", "ya-rabb"], history: [], size: 8, seedKey: "smoke-b", moodId: "still" });
-  assert("mood-constrained mix still fills up", seededMix.trackIds.length === 8);
-  assert("taste shifts the picks", seededMix.trackIds.join() !== emptyMix.trackIds.join());
-
-  /* ---- audio engine ---- */
-  section("Audio engine (fake context)");
-  const { engine } = await import("../src/lib/audio/engine");
-  const target = catalog.getTrack("talaa-al-badru")!;
-  const song = songFor(target);
-  let ended = 0;
-  engine.handlers.onEnded = () => {
-    ended++;
-  };
-  await engine.load(song, 0);
-  assert("loaded at t=0", Math.abs(engine.getTime()) < 0.01);
-  await engine.play();
-  assert("playing after play()", engine.isPlaying);
-  await sleep(420);
-  const advanced = engine.getTime();
-  assert("the clock advances", advanced > 0.05, `${advanced.toFixed(2)}s`);
-  assert("sources were scheduled", startedSources > 4, `${startedSources} started, ${nodeCount} nodes built`);
-  const spectrum = engine.readSpectrum();
-  assert("analyser spectrum is readable", spectrum.length > 0 && spectrum[0] !== undefined);
-  assert("level meter reads", engine.readLevel() >= 0 && engine.readLevel() <= 1);
-
-  /* The intro is one long hum drone, so jump into a sung verse and let the
-     scheduler run through a few phrases before inspecting what it built. */
-  await engine.seek(song.lines[2]!.t + 0.05);
-  await sleep(1600);
-
-  /* ---- white-box: inspect the graph the engine actually built ---- */
-  const { FORMANTS } = await import("../src/lib/voice-types");
-  const gains = liveNodes.filter((n): n is FakeGain => n instanceof FakeGain);
-  const saws = liveNodes.filter((n): n is FakeOsc => n instanceof FakeOsc && n.type === "sawtooth");
-  const bandpass = liveNodes.filter((n): n is FakeFilter => n instanceof FakeFilter && n.type === "bandpass");
-  const convs = liveNodes.filter((n): n is FakeConvolver => n instanceof FakeConvolver);
-
-  assert("voices are sawtooth sources, not sine beeps", saws.length >= 12, `${saws.length} sawtooth oscillators`);
-  assert(
-    "every voice is shaped by three formant resonators",
-    bandpass.length >= saws.length,
-    `${bandpass.length} band-passes for ${saws.length} saws`,
-  );
-
-  const bpFreqs = new Set(bandpass.map((b) => Math.round(b.frequency.value)));
-  const vowelsUsed = Object.entries(FORMANTS)
-    .map(([v, cfg]) => ({ v, hits: cfg.f.filter((f) => bpFreqs.has(Math.round(f))).length }))
-    .filter((x) => x.hits >= 2);
-  assert(
-    "their frequencies come from the vowel table",
-    vowelsUsed.length >= 2,
-    vowelsUsed.map((x) => `${x.v} ${x.hits}/3`).join(", "),
-  );
-
-  assert("one convolver carries the whole mix", convs.length === 1, `${convs.length} convolvers`);
-  const irBefore = convs[0]?.buffer?.duration ?? 0;
-  engine.setSpace("masjid");
-  const irAfter = convs[0]?.buffer?.duration ?? 0;
-  assert(
-    "changing space rebuilds a longer impulse response",
-    irAfter > irBefore + 1,
-    `${irBefore.toFixed(2)}s → ${irAfter.toFixed(2)}s`,
-  );
-  assert("and the engine reports the new space", engine.currentSpace === "masjid");
-
-  /* Identify buses by what moves, not by guessing values. */
-  const beforeVolume = gains.map((g) => g.gain.value);
-  engine.setVolume(4);
-  const master = gains.filter((g, i) => g.gain.value !== beforeVolume[i]);
-  assert(
-    "out-of-range volume is clamped onto exactly one bus",
-    master.length === 1 && master[0]!.gain.value === 1,
-    `${master.length} bus(es) moved, value ${master[0]?.gain.value}`,
-  );
-  engine.setVolume(0.4);
-  assert("0.4 reaches the same master bus", Math.abs(master[0]!.gain.value - 0.4) < 1e-9);
-
-  const beforeDuff = gains.map((g) => g.gain.value);
-  engine.setDuff(false);
-  const drumBus = gains.filter((g, i) => g.gain.value !== beforeDuff[i]);
-  assert(
-    "duff off silences one bus and leaves the voices alone",
-    drumBus.length === 1 && drumBus[0]!.gain.value === 0 && Math.abs(master[0]!.gain.value - 0.4) < 1e-9,
-    `${drumBus.length} bus(es) moved`,
-  );
-  assert("the engine remembers the choice", engine.duffEnabled === false);
-  engine.setDuff(true);
-  assert("duff on restores that bus to 0.5", Math.abs(drumBus[0]!.gain.value - 0.5) < 1e-9);
-  assert("and reports it", engine.duffEnabled === true);
-
-  await engine.seek(2);
-  assert("seek lands near the target", Math.abs(engine.getTime() - 2) < 0.4, engine.getTime().toFixed(2));
-
-  engine.pause();
-  assert("paused", !engine.isPlaying);
-  const pausedAt = engine.getTime();
-  await sleep(120);
-  assert("the clock holds while paused", Math.abs(engine.getTime() - pausedAt) < 0.05);
-
-  await engine.seek(song.duration - 0.25);
-  await engine.play();
-  await sleep(600);
-  assert("reaches the end and fires onEnded", ended >= 1, `ended=${ended}`);
-  assert("engine stopped itself", !engine.isPlaying);
-
-  // a second track, to be sure the graph survives a rebuild
-  const second = songFor(catalog.getTrack("sakina")!);
-  await engine.load(second, 0);
-  await engine.play();
-  await sleep(260);
-  assert("a second track plays after the first finished", engine.isPlaying && engine.getTime() > 0.05);
-  engine.stop();
-  assert("stop resets the clock", engine.getTime() === 0);
-
-  /* ---- routes ---- */
-  section("Routes (jsdom render)");
-  const React = await import("react");
-  const { createRoot } = await import("react-dom/client");
-  const { default: App } = await import("../src/App");
-
-  const routes: [string, string][] = [
-    ["/", "Most played nasheeds"],
-    ["/search", "Every nasheed"],
-    ["/search?q=hijaz", "Matching"],
-    ["/search?mood=still", "Stillness"],
-    ["/library", "Library"],
-    ["/queue", "The queue"],
-    ["/about", "A streaming app for nasheeds"],
-    ["/c/nur", "Nūr"],
-    ["/c/ramadan-nights", "Ramadan"],
-    ["/c/does-not-exist", "does not exist"],
-    ["/a/yusuf", "Yusuf Karim"],
-    ["/a/halabi", "Ḥalabī"],
-    ["/t/talaa-al-badru", "Ṭalaʿa al-Badru"],
-    ["/t/sakina", "Sakīna"],
-    ["/t/nur-ala-nur", "Nūrun"],
-    ["/t/nope", "No such nasheed"],
-    ["/p/missing", "That set is gone"],
-    ["/somewhere-else", "not in the catalogue"],
-  ];
-
-  const container = w.document.createElement("div");
-  w.document.body.appendChild(container);
-
-  for (const [route, expect] of routes) {
-    w.history.pushState({}, "", route);
-    const root = createRoot(container);
-    let error: unknown = null;
-    try {
-      await React.act(async () => {
-        root.render(React.createElement(App));
-      });
-      await sleep(30);
-    } catch (e) {
-      error = e;
-    }
-    const html = container.innerHTML;
-    assert(`${route} renders`, !error && html.length > 800, error ? String(error).slice(0, 160) : `${html.length} chars`);
-    assert(`${route} contains “${expect}”`, html.includes(expect), html.includes(expect) ? "" : html.slice(0, 90).replace(/\s+/g, " "));
-    try {
-      await React.act(async () => {
-        root.unmount();
-      });
-    } catch {
-      /* ignore unmount noise */
-    }
-  }
-
-  /* ---- interactions ---- */
-  section("Lyrics view");
-  {
-    const { Lyrics } = await import("../src/components/player/Lyrics");
-    const { usePlayer: usePlayerStore } = await import("../src/store/player");
-    const song = songFor(catalog.TRACKS.find((t) => t.id === "sakina")!);
-    const host = w.document.createElement("div");
-    w.document.body.appendChild(host);
-    const lyrRoot = createRoot(host);
-    await React.act(async () => {
-      lyrRoot.render(React.createElement(Lyrics, { song, variant: "immersive" }));
-    });
-    await sleep(80);
-
-    const rendered = host.querySelectorAll(".lyric-line");
-    assert(
-      "every timed line is rendered",
-      rendered.length === song.lines.length,
-      `${rendered.length} of ${song.lines.length}`,
-    );
-    const karaoke = host.querySelectorAll(".lyric-word");
-    assert("per-word karaoke spans exist", karaoke.length > 30, `${karaoke.length} words`);
-    const fill = host.querySelectorAll(".lyric-word .fill");
-    assert("each word has its fill layer", fill.length === karaoke.length);
-    const text = host.textContent ?? "";
-    assert("repetitions are labelled, not duplicated", text.includes("the answer — a step higher"), "pass divider");
-    assert("script switcher is present", text.includes("Transliteration") && text.includes("العربية"));
-    assert("the rail offers one jump per line", host.querySelectorAll('button[aria-label^="Jump to line"]').length === song.lines.length);
-
-    const railJump = host.querySelectorAll<HTMLButtonElement>('button[aria-label^="Jump to line"]')[5];
-    if (railJump) {
-      await React.act(async () => {
-        usePlayerStore.getState().playTrack(song.trackId);
-      });
-      await sleep(150);
-      const target = song.lines[5]!.t;
-      await React.act(async () => {
-        railJump.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
-      });
-      const after = usePlayerStore.getState().time;
-      assert(
-        "jumping from the rail seeks the song",
-        Math.abs(after - target) < 2,
-        `seeked to ${after.toFixed(1)}s for a line at ${target.toFixed(1)}s`,
-      );
-    }
-
-    await React.act(async () => {
-      lyrRoot.unmount();
-    });
-    host.remove();
-  }
-
-  section("Persistence (a reload from localStorage)");
-  {
-    const { useLibrary } = await import("../src/store/library");
-    const key = "coolnasheed:library:v2";
-    const payload = {
-      state: {
-        liked: ["sakina", "a-track-that-no-longer-exists"],
-        likedCollections: ["nur"],
-        followedArtists: ["yusuf"],
-        playlists: [
-          {
-            id: "pl-seeded",
-            name: "Fajr set",
-            blurb: "Seeded by the test.",
-            seed: "playlist-seeded",
-            accent: "jade",
-            trackIds: ["city-of-fajr", "also-gone"],
-            createdAt: 1700000000000,
-          },
-        ],
-        history: [{ id: "laylat-al-qadr", at: Date.now(), count: 3 }],
-        tasbih: { id: "istighfar", count: 41 },
-        // deliberately missing reduceMotion + showTranslation: an older save
-        settings: { theme: "dawn", space: "masjid", duff: false, volume: 0.6, lyricScript: "ar", showArabic: false },
+  const payload = {
+    songs: ROWS.map((r) => wire.songFromRow(r as never)),
+    artists: [
+      {
+        id: "hafsa.noor",
+        profileId: OWNER,
+        handle: "hafsa.noor",
+        name: "Hafsa Noor",
+        nameAr: null,
+        role: "Publisher",
+        origin: "—",
+        bio: "",
+        accent: "gold" as const,
+        verified: false,
+        kind: "artist" as const,
+        songs: 3,
+        followers: 2,
       },
-      version: 0,
-    };
-    w.localStorage.setItem(key, JSON.stringify(payload));
-    await React.act(async () => {
-      useLibrary.persist.rehydrate();
-    });
-    const st = useLibrary.getState();
+      {
+        id: "maryam.q",
+        profileId: SECOND,
+        handle: "maryam.q",
+        name: "Maryam Q.",
+        nameAr: null,
+        role: "Publisher",
+        origin: "Algiers",
+        bio: "",
+        accent: "jade" as const,
+        verified: false,
+        kind: "artist" as const,
+        songs: 0,
+        followers: 0,
+      },
+    ],
+    collections: [
+      {
+        id: "col_1",
+        kind: "mukhtarat" as const,
+        title: "Ramadan nights",
+        titleAr: null,
+        curator: "CoolNasheed",
+        blurb: "Sung after tarāwīḥ.",
+        accent: "turq" as const,
+        tags: ["ramadan"],
+        year: 2026,
+        songIds: [ROWS[0].id as string, ROWS[2].id as string],
+      },
+    ],
+    tags: [
+      { tag: "traditional", count: 1 },
+      { tag: "dhikr", count: 1 },
+    ],
+    generatedAt: Date.now(),
+  };
+  const hydrated = catalog.hydrateCatalog(payload);
+  assert(
+    `hydrating fills the registry in place (${hydrated} nasheeds)`,
+    catalog.TRACKS.length === 3,
+  );
+  assert(
+    "and tells whoever is listening",
+    notified === 1,
+    `${notified} notification`,
+  );
+  assert(
+    "lookups resolve",
+    catalog.getTrack(ROWS[0].id as string)?.title === "Ṭalaʿa al-Badru ʿAlaynā",
+  );
+  assert(
+    "a set walks its own tracks",
+    catalog.tracksOf(payload.collections[0]!).length === 2,
+  );
+  assert(
+    "an unknown id is undefined, not a guess",
+    catalog.getTrack("sng_nope") === undefined,
+  );
+  assert(
+    "a nasheed's publisher resolves",
+    catalog.artistOf(catalog.TRACKS[0]!).name === "Hafsa Noor",
+  );
+  assert(
+    "a set is found from a nasheed",
+    catalog.collectionsOf(catalog.TRACKS[0]!).length === 1,
+  );
+  assert("tags are counted from the payload", catalog.tagCounts().length === 2);
+  assert("the newest shelf is first", catalog.latestSongs(10).length === 3);
+  assert(
+    "the popular shelf is ordered by plays",
+    catalog.popularSongs(1)[0]!.title === "Subḥān Allāh",
+  );
+  assert(
+    "search finds a nasheed by a word in its lyrics",
+    catalog.searchTracks("farewell").some((t) => t.id === ROWS[0].id),
+  );
+  assert(
+    "search finds a publisher",
+    catalog.searchArtists("hafsa").length === 1,
+  );
+  assert(
+    "searching for nothing finds nothing",
+    catalog.searchTracks("   ").length === 0,
+  );
 
-    // the library belongs to the account now: localStorage keeps preferences and the
-    // tasbīḥ, and nothing that a server could disagree with
-    assert(
-      "loved nasheeds are not read from localStorage any more",
-      st.liked.length === 0,
-      `liked=${JSON.stringify(st.liked)}`,
+  const shuffleA = (await import("../src/lib/math")).seededShuffle(
+    [1, 2, 3, 4, 5, 6, 7, 8],
+    "smoke",
+  );
+  const shuffleB = (await import("../src/lib/math")).seededShuffle(
+    [1, 2, 3, 4, 5, 6, 7, 8],
+    "smoke",
+  );
+  assert(
+    "a seeded shuffle is a shuffle, and it is stable",
+    JSON.stringify(shuffleA) === JSON.stringify(shuffleB) &&
+      shuffleA.length === 8,
+    shuffleA.join(""),
+  );
+
+  /* ------------------------------------------------------ the media element */
+
+  section("The player: one <audio> element, one mp3");
+  const { player } = await import("../src/lib/audio/player");
+  const { usePlayer } = await import("../src/store/player");
+  const { DEFAULT_CONTEXT } = await import("../src/store/player");
+
+  const ids = ROWS.map((r) => r.id as string);
+  act(() =>
+    usePlayer
+      .getState()
+      .playIds(ids, 0, { ...DEFAULT_CONTEXT, label: "Smoke" }),
+  );
+  await sleep(30);
+
+  const store = usePlayer.getState();
+  assert(
+    "playIds loads the element and starts it",
+    store.trackId === ROWS[0].id && store.queue.length === 3,
+    `track=${store.trackId} queue=${store.queue.length}`,
+  );
+  assert(
+    "the element was given a real url",
+    audioElements[0]?.src.length
+      ? audioElements[0]!.src.includes("talaa.mp3")
+      : false,
+    audioElements[0]?.src ?? "no element",
+  );
+  assert(
+    "and the element was asked to play",
+    audioElements.length === 1 && audioElements[0]!.playCalls >= 1,
+    `${audioElements[0]?.playCalls ?? 0} play() calls`,
+  );
+  assert(
+    "exactly one element exists, reused for every track",
+    audioElements.length === 1,
+    `${audioElements.length} created`,
+  );
+
+  audioElements[0]!.advance(7.5);
+  await sleep(10);
+  assert(
+    "time comes from the element, not a timer",
+    Math.abs(usePlayer.getState().time - 7.5) < 0.01,
+    `${usePlayer.getState().time}s`,
+  );
+
+  act(() => usePlayer.getState().seek(90));
+  assert(
+    "seeking moves the element",
+    Math.abs(audioElements[0]!.currentTime - 90) < 0.01,
+    `${audioElements[0]!.currentTime}s`,
+  );
+
+  act(() => usePlayer.getState().next());
+  await sleep(30);
+  assert(
+    "next walks the queue",
+    usePlayer.getState().trackId === ROWS[1].id,
+    String(usePlayer.getState().trackId),
+  );
+  act(() => usePlayer.getState().prev());
+  await sleep(20);
+  assert(
+    "and prev walks it back",
+    usePlayer.getState().trackId === ROWS[0].id,
+    String(usePlayer.getState().trackId),
+  );
+
+  act(() => usePlayer.getState().toggle());
+  assert(
+    "pause stops the element",
+    audioElements[0]!.paused === true && usePlayer.getState().playing === false,
+  );
+  act(() => usePlayer.getState().toggle());
+  await sleep(20);
+  assert("and play starts it again", usePlayer.getState().playing === true);
+
+  act(() => usePlayer.getState().setVolume(0.3));
+  act(() => usePlayer.getState().toggleMute());
+  assert(
+    "mute is a real mute, and the volume is remembered",
+    audioElements[0]!.volume === 0 && player.volumeLevel === 0.3,
+  );
+  act(() => usePlayer.getState().toggleMute());
+  assert(
+    "unmuting restores the volume",
+    Math.abs(audioElements[0]!.volume - 0.3) < 0.001,
+  );
+
+  act(() => usePlayer.getState().addToQueue(ROWS[2].id as string));
+  assert(
+    "a nasheed can be queued",
+    usePlayer.getState().queue.includes(ROWS[2].id as string),
+  );
+  act(() => usePlayer.getState().clearQueue());
+  assert(
+    "and the queue can be emptied",
+    usePlayer.getState().queue.length === 0 &&
+      usePlayer.getState().trackId === null,
+  );
+
+  /* --------------------------------------------------------- error handling */
+
+  section("When the recording will not play");
+  act(() => usePlayer.getState().playIds(ids, 0, DEFAULT_CONTEXT));
+  await sleep(30);
+  const fatal = audioElements[0]!;
+  fatal.fail(1); // MEDIA_ERR_ABORTED is our own stop, not an error worth showing
+  await sleep(10);
+  assert(
+    "an aborted load is not reported as a failure",
+    usePlayer.getState().error === null,
+    String(usePlayer.getState().error),
+  );
+
+  /* a dropped connection is worth another go, from where it got to */
+  const loadsBefore = fatal.loadCalls;
+  fatal.fail(2);
+  await sleep(120);
+  assert(
+    "a dropped connection is not given up on at once",
+    usePlayer.getState().error === null,
+    String(usePlayer.getState().error),
+  );
+  await sleep(900);
+  assert(
+    "and it is picked back up from where it stopped",
+    fatal.loadCalls > loadsBefore,
+    `${loadsBefore} → ${fatal.loadCalls}`,
+  );
+
+  /* a file that is not there will not be there in two seconds either */
+  fatal.fail(4);
+  await sleep(80);
+  const message = usePlayer.getState().error ?? "";
+  assert(
+    "a missing file is reported at once, in words",
+    message.includes("could not be played"),
+    message,
+  );
+  act(() => usePlayer.getState().dismissError());
+  assert(
+    "and the message can be dismissed",
+    usePlayer.getState().error === null,
+  );
+
+  /* ------------------------------------------------------------- the beacon */
+
+  section("The play beacon");
+  const beacon = await import("../src/lib/beacon");
+  const sent: { songId: string; seconds: number; completed: boolean }[] = [];
+  const realPlay = api.play;
+  (api as unknown as { play: unknown }).play = async (input: {
+    songId: string;
+    seconds: number;
+    completed: boolean;
+  }) => {
+    sent.push(input);
+    return { ok: true, counted: input.seconds >= 15, plays: 1 };
+  };
+
+  beacon.beaconStart("sng_smoke_0001");
+  beacon.beaconTick(1.5);
+  beacon.beaconTick(60); // a backgrounded tab handing back a silly delta
+  beacon.beaconFlush();
+  await sleep(20);
+  assert(
+    "a skip under three seconds is dropped, not sent",
+    sent.length === 0,
+    JSON.stringify(sent),
+  );
+
+  beacon.beaconStart("sng_smoke_0001");
+  beacon.beaconTick(4);
+  beacon.beaconTick(4);
+  beacon.beaconComplete();
+  await sleep(20);
+  assert(
+    "a finished listen is one event, with its seconds",
+    sent.length === 1 &&
+      sent[0]!.completed === true &&
+      Math.abs(sent[0]!.seconds - 8) < 0.001,
+    JSON.stringify(sent),
+  );
+  assert("and nothing is left waiting", beacon.beaconIdle() === true);
+
+  (api as unknown as { play: unknown }).play = realPlay;
+
+  /* ------------------------------------------------------------------ gate */
+
+  section("Writing needs an account; listening does not");
+  const { useLibrary } = await import("../src/store/library");
+  const { useUi } = await import("../src/store/ui");
+  act(() => useUi.setState({ authOpen: false }));
+
+  const refusedLike = useLibrary.getState().toggleLike(ROWS[0].id as string);
+  assert(
+    "loving a nasheed while signed out is refused",
+    refusedLike === null,
+    `returned ${String(refusedLike)}`,
+  );
+  assert(
+    "and the sign-in sheet opens instead",
+    useUi.getState().authOpen === true,
+  );
+  assert("nothing was written", useLibrary.getState().liked.length === 0);
+  act(() => useUi.setState({ authOpen: false }));
+
+  const count = useLibrary.getState().dhikrTick();
+  assert("the dhikr counter counts", count === 1, `${count}`);
+  useLibrary.getState().dhikrSelect("istighfar");
+  useLibrary.getState().dhikrTick();
+  useLibrary.getState().dhikrTick();
+  assert(
+    "each phrase keeps its own count",
+    useLibrary.getState().dhikr.istighfar?.count === 2,
+    JSON.stringify(useLibrary.getState().dhikr),
+  );
+  useLibrary.getState().dhikrReset("istighfar");
+  assert(
+    "and can be reset",
+    useLibrary.getState().dhikr.istighfar?.count === 0,
+  );
+
+  assert(
+    "settings have defaults even with no account",
+    useLibrary.getState().settings.theme === "night" &&
+      useLibrary.getState().settings.volume > 0,
+  );
+
+  /* ------------------------------------------------------------- lyrics view */
+
+  section("The lyric view");
+  const { Lyrics } = await import("../src/components/player/Lyrics");
+  const host = w.document.createElement("div");
+  w.document.body.appendChild(host);
+  const lyricRoot = createRoot(host);
+  const song = catalog.TRACKS[0]!;
+  await act(async () => {
+    lyricRoot.render(
+      createElement(Lyrics, {
+        song: song as never,
+        variant: "immersive" as never,
+      }),
     );
-    assert("playlists wait for the account that owns them", st.playlists.length === 0);
-    assert("followed reciters wait for the account too", st.followedArtists.length === 0);
-    assert(
-      "the local history mirror comes back until the server's copy lands",
-      st.history.some((h) => h.id === "laylat-al-qadr" && h.count === 3),
-    );
-    assert("the tasbīḥ keeps its count and phrase", st.tasbih.count === 41 && st.tasbih.id === "istighfar");
-    assert(
-      "preferences come back — theme, room, duff, script",
-      st.settings.theme === "dawn" && st.settings.space === "masjid" && st.settings.duff === false && st.settings.lyricScript === "ar",
-    );
-    assert(
-      "keys an older save never had fall back to defaults",
-      st.settings.reduceMotion === false && st.settings.showTranslation === true,
-      `reduceMotion=${String(st.settings.reduceMotion)} showTranslation=${String(st.settings.showTranslation)}`,
-    );
-
-    /* a stale save must degrade, not crash */
-    w.history.pushState({}, "", "/library");
-    const host = w.document.createElement("div");
-    w.document.body.appendChild(host);
-    const libRoot = createRoot(host);
-    await React.act(async () => {
-      libRoot.render(React.createElement(App));
-    });
-    await sleep(80);
-    const text = host.textContent ?? "";
-    assert("the library still renders around a stale save", text.includes("Library") || text.includes("library"));
-    assert("and the dead id is never rendered", !text.includes("a-track-that-no-longer-exists"));
-    await React.act(async () => {
-      libRoot.unmount();
-    });
-    host.remove();
-
-    /* put the store back to defaults so later sections test the normal path */
-    w.localStorage.removeItem(key);
-    await React.act(async () => {
-      useLibrary.persist.rehydrate();
-      useLibrary.setState({
-        liked: [],
-        playlists: [],
-        history: [],
-        tasbih: { id: "subhanallah", count: 0 },
-        settings: { ...useLibrary.getState().settings, theme: "night" },
-      });
-    });
-  }
-
-  section("The gate (writing needs an account, listening does not)");
-  {
-    const { useLibrary } = await import("../src/store/library");
-    const { useUi } = await import("../src/store/ui");
-
-    await React.act(async () => {
-      useUi.setState({ authOpen: false });
-    });
-
-    const refused = useLibrary.getState().toggleLike("sakina");
-    assert("loving a nasheed while signed out is refused", refused === null, `returned ${String(refused)}`);
-    assert("and it opens the sign-in sheet instead", useUi.getState().authOpen === true);
-    assert("nothing was written to the store", useLibrary.getState().liked.length === 0);
-
-    await React.act(async () => {
-      useUi.setState({ authOpen: false });
-    });
-    const refusedSet = await useLibrary.getState().createPlaylist("Fajr set", ["city-of-fajr"]);
-    assert("building a set while signed out is refused", refusedSet === null);
-    assert("and asks for an account", useUi.getState().authOpen === true);
-
-    await React.act(async () => {
-      useUi.setState({ authOpen: false });
-    });
-  }
-
-  section("Interaction");
-  w.history.pushState({}, "", "/");
-  const root = createRoot(container);
-  await React.act(async () => {
-    root.render(React.createElement(App));
   });
   await sleep(60);
+  const text = host.textContent ?? "";
+  assert(
+    "every line of the nasheed is rendered",
+    text.includes("ṭalaʿa al-badru") && text.includes("min thaniyyāti"),
+    "",
+  );
+  assert(
+    "the script switcher is there",
+    text.includes("Transliteration") || text.includes("العربية"),
+    "",
+  );
+  await act(async () => {
+    lyricRoot.unmount();
+  });
+  host.remove();
 
-  const playButtons = container.querySelectorAll<HTMLButtonElement>('button[aria-label^="Play"], button[aria-label^="Pause"]');
-  assert("play controls are present", playButtons.length > 2, `${playButtons.length} found`);
+  /* ------------------------------------------------------------- schema probe */
 
-  const firstPlay = Array.from(playButtons).find((b) => b.getAttribute("aria-label")?.startsWith("Play"));
-  if (firstPlay) {
-    await React.act(async () => {
-      firstPlay.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
+  section("Asking the database which version it is");
+
+  const schemaLib = await import("../src/lib/schema");
+  assert(
+    "the client knows what it writes against",
+    schemaLib.EXPECTED_SCHEMA_VERSION === "audio-only-2",
+  );
+  assert(
+    "a database that is behind is not usable",
+    schemaLib.isUsable({ state: "behind", version: "old", detail: "" }) ===
+      false,
+  );
+  assert(
+    "an unreachable one is not held against it",
+    schemaLib.isUsable({ state: "unknown", detail: "" }) === true,
+  );
+
+  /* The real Supabase client is left in place and the network under it is stubbed, so
+     what is exercised is the actual PostgREST call and its real error codes. */
+  const realFetch = globalThis.fetch;
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
     });
-    await sleep(200);
-    assert("clicking play starts the engine", engine.isPlaying || engine.isReady);
-  }
+  const missingTable = (table: string) =>
+    json(
+      {
+        code: "PGRST205",
+        message: `Could not find the table 'public.${table}' in the schema cache`,
+        details: null,
+        hint: null,
+      },
+      404,
+    );
 
-  const starButtons = container.querySelectorAll<HTMLButtonElement>('button[aria-label^="Love"], button[aria-label^="Remove from loved"]');
-  assert("love buttons are present", starButtons.length > 0, `${starButtons.length} found`);
-  if (starButtons[0]) {
-    const { useLibrary } = await import("../src/store/library");
-    const { useUi } = await import("../src/store/ui");
-    await React.act(async () => {
-      useUi.setState({ authOpen: false });
-      starButtons[0]!.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
+  const stubFetch = (handler: (url: string) => Response) => {
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: (input: RequestInfo | URL) =>
+        Promise.resolve(handler(String(input))),
     });
-    await sleep(40);
-    assert("a love tap in the page reaches the gate", useUi.getState().authOpen === true);
-    assert("and writes nothing without an account", useLibrary.getState().liked.length === 0);
-    await React.act(async () => {
-      useUi.setState({ authOpen: false });
+  };
+  const restoreFetch = () => {
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: realFetch,
     });
-  }
+    schemaLib.invalidateSchema();
+  };
 
-  const tasbih = container.querySelector<HTMLButtonElement>('button[aria-label^="Tasbīḥ"]');
-  assert("the tasbīḥ counter is in the sidebar", !!tasbih);
-  if (tasbih) {
-    await React.act(async () => {
-      tasbih.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
-    });
-    const { useLibrary } = await import("../src/store/library");
-    assert("tasbīḥ counts up", useLibrary.getState().tasbih.count >= 1);
-  }
+  stubFetch((url) =>
+    url.includes("/rest/v1/app_schema")
+      ? json([{ version: "audio-only-2" }])
+      : json([]),
+  );
+  const fresh = await schemaLib.checkSchema(true);
+  assert(
+    "a matching version reads as ready",
+    fresh.state === "ok",
+    JSON.stringify(fresh),
+  );
 
-  await React.act(async () => {
-    root.unmount();
+  stubFetch((url) =>
+    url.includes("/rest/v1/app_schema")
+      ? json([{ version: "vocals-of-light-3" }])
+      : json([]),
+  );
+  const older = await schemaLib.checkSchema(true);
+  assert(
+    "an older version is reported as behind",
+    older.state === "behind",
+    JSON.stringify(older),
+  );
+  assert(
+    "and the sentence names exactly what to run",
+    (schemaLib.schemaProblem(older) ?? "").includes("npm run setup"),
+    schemaLib.schemaProblem(older) ?? "",
+  );
+
+  stubFetch(() => json([]));
+  const noVersion = await schemaLib.checkSchema(true);
+  assert(
+    "an empty version table is reported as behind",
+    noVersion.state === "behind",
+    JSON.stringify(noVersion),
+  );
+
+  stubFetch((url) =>
+    missingTable(
+      url.includes("studio_drafts")
+        ? "studio_drafts"
+        : url.includes("/rest/v1/songs")
+          ? "songs"
+          : "app_schema",
+    ),
+  );
+  const noTables = await schemaLib.checkSchema(true);
+  assert(
+    "a project with no tables at all reads as missing",
+    noTables.state === "missing",
+    JSON.stringify(noTables),
+  );
+  assert(
+    "and says so with the fix",
+    (schemaLib.schemaProblem(noTables) ?? "").includes("no tables yet"),
+    schemaLib.schemaProblem(noTables) ?? "",
+  );
+
+  /* The state a real project was in: tables that answer, just not the ones this build
+     writes against. Telling somebody their project has no tables when it has a catalogue
+     in it sends them to set up a project that is already set up. */
+  stubFetch((url) =>
+    url.includes("/rest/v1/app_schema") || url.includes("studio_drafts")
+      ? missingTable(
+          url.includes("studio_drafts") ? "studio_drafts" : "app_schema",
+        )
+      : json([]),
+  );
+  const preAudio = await schemaLib.checkSchema(true);
+  assert(
+    "a project with the older tables reads as behind, not as empty",
+    preAudio.state === "behind",
+    JSON.stringify(preAudio),
+  );
+  const preAudioSentence = schemaLib.schemaProblem(preAudio) ?? "";
+  assert(
+    "and its sentence does not claim there are no tables",
+    preAudioSentence.includes("older version") &&
+      !/no tables yet/.test(preAudioSentence),
+    preAudioSentence,
+  );
+
+  stubFetch((url) =>
+    url.includes("/rest/v1/app_schema") ? missingTable("app_schema") : json([]),
+  );
+  const stale = await schemaLib.checkSchema(true);
+  assert(
+    "the old tables without a version marker read as behind",
+    stale.state === "behind",
+    JSON.stringify(stale),
+  );
+
+  /* A dropped connection, not an unhappy project: supabase-js retries a 5xx itself for
+     about seven seconds, and a test that waits for that is a test nobody runs. */
+  stubFetch(() => {
+    throw new TypeError("Network request failed");
+  });
+  const unreachable = await schemaLib.checkSchema(true);
+  assert(
+    "a failing project is not called a broken database",
+    unreachable.state === "unknown",
+    JSON.stringify(unreachable),
+  );
+  assert(
+    "and it produces no alarming sentence",
+    schemaLib.schemaProblem(unreachable) === null,
+  );
+  assert(
+    "while an unknown schema never blocks the app",
+    schemaLib.isUsable(unreachable) === true,
+  );
+
+  restoreFetch();
+
+  /* ------------------------------------------------------------- draft saving */
+
+  section("Saving the draft, and saying when it cannot");
+
+  const apiModule0 = await import("../src/lib/api");
+  const studio = await import("../src/store/studio");
+  const apiObject = apiModule0.api;
+  const realSaveDraft = apiObject.saveDraft;
+  const session = await import("../src/store/session");
+
+  /* Sign-in is the gate on every draft write, and the gate reads the store, so the store
+     is what the test sets — no Supabase Auth involved. */
+  const signedOutUser = session.useSession.getState().user;
+  session.useSession.setState({
+    user: {
+      id: OWNER,
+      handle: "hafsa.noor",
+      name: "Hafsa Noor",
+      role: "member",
+    } as never,
+    currentId: OWNER,
+  });
+  assert(
+    "the harness can act as a signed-in publisher",
+    session.isSignedIn() === true,
+  );
+
+  let saveCalls = 0;
+  Object.defineProperty(apiObject, "saveDraft", {
+    configurable: true,
+    writable: true,
+    value: async () => {
+      saveCalls += 1;
+    },
+  });
+  await studio.useStudio.getState().saveDraft();
+  assert(
+    "a save that works records the time and clears the complaint",
+    saveCalls === 1 &&
+      studio.useStudio.getState().savedAt > 0 &&
+      studio.useStudio.getState().draftError === null,
+    `calls=${saveCalls}`,
+  );
+
+  Object.defineProperty(apiObject, "saveDraft", {
+    configurable: true,
+    writable: true,
+    value: async () => {
+      throw new Error("permission denied for table studio_drafts");
+    },
+  });
+  await studio.useStudio.getState().saveDraft();
+  const failed = studio.useStudio.getState();
+  assert(
+    "a save that fails says so instead of pretending",
+    failed.saving === false &&
+      /permission denied/.test(failed.draftError ?? ""),
+    String(failed.draftError),
+  );
+
+  Object.defineProperty(apiObject, "saveDraft", {
+    configurable: true,
+    writable: true,
+    value: realSaveDraft,
+  });
+  assert(
+    "nothing pending means nothing to flush",
+    studio.flushDraftSave() === false,
+  );
+
+  /* and the debounce really does write what was queued, before the tab goes away */
+  let flushed = 0;
+  Object.defineProperty(apiObject, "saveDraft", {
+    configurable: true,
+    writable: true,
+    value: async () => {
+      flushed += 1;
+    },
+  });
+  studio.useStudio.getState().setDraft({ title: "Halved by a hidden tab" });
+  studio.flushDraftSave();
+  await sleep(30);
+  assert(
+    "a page going away writes what was still in the queue",
+    flushed === 1,
+    `${flushed} writes`,
+  );
+  Object.defineProperty(apiObject, "saveDraft", {
+    configurable: true,
+    writable: true,
+    value: realSaveDraft,
+  });
+  session.useSession.setState({
+    user: signedOutUser,
+    currentId: signedOutUser?.id ?? null,
   });
 
-  const realErrors = consoleErrors.filter(
-    (e) => !e.includes("act(") && !e.includes("ReactDOMTestUtils") && !e.includes("wrapped into act"),
-  );
-  assert("no console.error noise", realErrors.length === 0, realErrors.slice(0, 2).join(" | ").slice(0, 220));
+  /* ------------------------------------------------- errors that name the cause */
 
-  /* ---- output ---- */
+  section("When the database says no, it says which column");
+
+  /* The exact failure an older schema produces: `maqam` is NOT NULL and the audio-only
+     client does not send it. This used to be reported as "a nasheed needs its recording
+     uploaded", which sent somebody looking for a file they had already uploaded. */
+  const { apiErrorFromDb } = await import("../src/lib/api");
+  const oldColumn = apiErrorFromDb({
+    code: "23502",
+    message:
+      'null value in column "maqam" of relation "songs" violates not-null constraint',
+    details: "Failing row contains (sng_1, null, Ṭalʿa, ...).",
+  });
+  assert(
+    "an old database is named as an old database, not as a missing file",
+    /older version of CoolNasheed's schema/.test(oldColumn.message) &&
+      !/recording uploaded/.test(oldColumn.message),
+    oldColumn.message.slice(0, 90),
+  );
+  assert(
+    "and the message says what to run",
+    /npm run setup/.test(oldColumn.message),
+    oldColumn.message.slice(0, 90),
+  );
+  assert(
+    "and it is filed as a schema problem, so the studio can act on it",
+    oldColumn.field === "schema",
+    String(oldColumn.field),
+  );
+
+  const noAudio = apiErrorFromDb({
+    code: "23502",
+    message:
+      'null value in column "audio_path" of relation "songs" violates not-null constraint',
+    details:
+      'null value in column "audio_path" of relation "songs" violates not-null constraint',
+  });
+  assert(
+    "a recording that really is missing says so, and says where to put it",
+    /no recording attached yet/.test(noAudio.message) &&
+      /step 1/.test(noAudio.message) &&
+      noAudio.field === "audio",
+    noAudio.message,
+  );
+
+  const noTitle = apiErrorFromDb({
+    code: "23502",
+    message: 'null value in column "title"',
+    details: 'null value in column "title"',
+  });
+  assert(
+    "a missing title is called a missing title",
+    /needs a title/.test(noTitle.message),
+    noTitle.message,
+  );
+
+  const required = apiErrorFromDb({
+    code: "23514",
+    message:
+      'new row for relation "songs" violates check constraint "songs_audio_required"',
+  });
+  assert(
+    "a nasheed that cannot go live without audio says which step to do",
+    /cannot go live without its recording/.test(required.message) &&
+      /step 1/.test(required.message),
+    required.message,
+  );
+  assert(
+    "and the raw constraint name never reaches the screen",
+    !/check constraint|songs_audio_required/.test(required.message),
+    required.message,
+  );
+
+  const other = apiErrorFromDb({
+    code: "23514",
+    message:
+      'new row for relation "songs" violates check constraint "songs_year_shape"',
+  });
+  assert(
+    "any other rule names itself rather than printing SQL",
+    other.message === 'That does not satisfy "songs_year_shape".',
+    other.message,
+  );
+
+  const unbuilt = apiErrorFromDb({
+    code: "PGRST205",
+    message: "Could not find the table 'public.songs'",
+  });
+  assert(
+    "a project with no schema says so",
+    /no tables yet/.test(unbuilt.message) && unbuilt.field === "schema",
+    unbuilt.message,
+  );
+
+  /* -------------------------------------------------- typing in a real field */
+
+  section("Handing over the SQL that repairs a project");
+
+  /* The button fetches this file, so the file has to exist, be current, and carry the
+     table the app reads at boot. A stale copy here is a repair that does not repair. */
+  const served = join(process.cwd(), "public/setup.sql");
+  const canonical = readFileSync(
+    join(process.cwd(), "supabase/setup.sql"),
+    "utf8",
+  );
+  assert(
+    "the repair SQL is served with the app, and is the current bundle",
+    readFileSync(served, "utf8") === canonical,
+    `${canonical.length} bytes served, ${readFileSync(served, "utf8").length} on disk`,
+  );
+  /* Every file that applies the schema must discover it. A remembered list is how a
+     project ends up four migrations in and sure it is current: this exact bug left a real
+     project with the pre-audio schema while `npm run setup` reported success. */
+  for (const file of [
+    "scripts/setup.mjs",
+    "scripts/sql-bundle.mjs",
+    "scripts/pg-test.mjs",
+  ]) {
+    const source = readFileSync(join(process.cwd(), file), "utf8");
+    assert(
+      `${file} reads the migrations folder rather than a remembered list`,
+      source.includes("supabase/migrations") &&
+        !/MIGRATIONS\s*=\s*\[/.test(source),
+      /MIGRATIONS\s*=\s*\[/.test(source)
+        ? "the migrations are listed in the script instead of read from the folder"
+        : "",
+    );
+  }
+
+  assert(
+    "and it contains the table the app asks about its schema",
+    canonical.includes("public.app_schema") &&
+      canonical.includes("audio-only-2"),
+  );
+
+  /* The file gets pasted onto databases that are already part way through — a project one
+     migration behind, or one that has them all — so every migration inside it has to carry
+     the guard that skips what is done. Without the guard a second paste dies on migration
+     2: its `trending()` body selects a column a later migration drops. */
+  const guards = (canonical.match(/do \$cn_migration\$/g) ?? []).length;
+  const migrationCount = readdirSync(
+    join(process.cwd(), "supabase/migrations"),
+  ).filter((name) => name.endsWith(".sql")).length;
+  assert(
+    `each of the ${migrationCount} migrations in the paste is guarded`,
+    guards === migrationCount,
+    `${guards} guards for ${migrationCount} migrations`,
+  );
+  assert(
+    "and the paste keeps its own record of what it has applied",
+    canonical.includes(
+      "create table if not exists public.applied_migrations",
+    ) &&
+      canonical.includes(
+        "revoke all on public.applied_migrations from anon, authenticated",
+      ),
+    "the ledger is there, and closed to the API",
+  );
+
+  const { SetupSqlButton } = await import("../src/components/SetupSqlButton");
+  const setupHost = w.document.createElement("div");
+  w.document.body.appendChild(setupHost);
+  const setupRoot = createRoot(setupHost);
+  const sqlText =
+    "create table if not exists public.songs (id text primary key);\n";
+
+  let askedFor = "";
+  const fetchBeforeSetupButton = globalThis.fetch;
+  setGlobal("fetch", async (input: RequestInfo | URL) => {
+    askedFor = String(input);
+    return { ok: true, status: 200, text: async () => sqlText } as Response;
+  });
+
+  let copied = "";
+  Object.defineProperty(w.navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: async (text: string) => void (copied = text) },
+  });
+
+  await act(async () => {
+    setupRoot.render(createElement(SetupSqlButton));
+  });
+  const button = setupHost.querySelector("button")!;
+  assert(
+    "the button says what it will do before it is pressed",
+    /sql/i.test(button.textContent ?? ""),
+    button.textContent ?? "",
+  );
+  assert("and nothing is fetched until it is pressed", askedFor === "");
+
+  await act(async () => {
+    button.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
+  });
+  setupRoot.unmount();
+  assert(
+    "one click puts the whole repair on the clipboard",
+    copied === sqlText && askedFor === "/setup.sql",
+    `asked for ${askedFor || "nothing"}, copied ${copied.length} characters`,
+  );
+
+  /* Inside an iframe that was not granted `clipboard-write` — the sandboxed preview this
+     app is usually looked at in — the clipboard API throws. It must not end there: the
+     legacy copy path runs, and if that is gone too the SQL appears in a box on the page,
+     already selected, where ⌘C always works. */
+  Object.defineProperty(w.navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: async () => {
+        throw new Error("NotAllowedError: clipboard-write is not granted");
+      },
+    },
+  });
+
+  let legacyCopied = "";
+  const realExecCommand = (w.document as unknown as { execCommand?: unknown })
+    .execCommand;
+  (w.document as unknown as { execCommand: unknown }).execCommand = (
+    command: string,
+  ) => {
+    if (command !== "copy") return false;
+    const scratch = w.document.querySelector("textarea[readonly]");
+    legacyCopied = scratch ? (scratch as HTMLTextAreaElement).value : "";
+    return legacyCopied.length > 0;
+  };
+
+  const legacyHost = w.document.createElement("div");
+  w.document.body.appendChild(legacyHost);
+  const legacyRoot = createRoot(legacyHost);
+  await act(async () => {
+    legacyRoot.render(createElement(SetupSqlButton));
+  });
+  await act(async () => {
+    legacyHost
+      .querySelector("button")!
+      .dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
+  });
+  const legacyText = legacyHost.textContent ?? "";
+  legacyRoot.unmount();
+  assert(
+    "a clipboard that refuses falls back to the legacy copy, and says it copied",
+    legacyCopied === sqlText && /copied/i.test(legacyText),
+    `copied ${legacyCopied.length} characters — ${legacyText}`,
+  );
+
+  /* Neither path available: nothing is swallowed, the SQL is put in front of the person. */
+  (w.document as unknown as { execCommand: unknown }).execCommand = () => false;
+
+  const boxHost = w.document.createElement("div");
+  w.document.body.appendChild(boxHost);
+  const boxRoot = createRoot(boxHost);
+  await act(async () => {
+    boxRoot.render(createElement(SetupSqlButton));
+  });
+  await act(async () => {
+    boxHost
+      .querySelector("button")!
+      .dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
+  });
+  const textarea = boxHost.querySelector(
+    "textarea",
+  ) as HTMLTextAreaElement | null;
+  const boxText = boxHost.textContent ?? "";
+  assert(
+    "and with no clipboard at all the SQL is on the page, whole and selected",
+    textarea?.value === sqlText &&
+      textarea.selectionEnd === sqlText.length &&
+      /⌘C|Ctrl\+C/i.test(boxText),
+    textarea
+      ? `${textarea.value.length} characters, selected ${textarea.selectionStart}–${textarea.selectionEnd}`
+      : "no box appeared",
+  );
+  boxRoot.unmount();
+
+  (w.document as unknown as { execCommand: unknown }).execCommand =
+    realExecCommand;
+
+  setGlobal("fetch", fetchBeforeSetupButton);
+
+  /* The old demo catalogue protected its fictional publishers from impersonation by
+     reserving their handles — in the migration and again in the client. Both lists are
+     the project's own names now, and this keeps them that way: a handle for a character
+     that does not exist is mock data with a job title. */
+  const reservedMigration = readFileSync(
+    join(process.cwd(), "supabase/migrations", "20260914120000_core.sql"),
+    "utf8",
+  );
+  const reservedBlock = reservedMigration.slice(
+    reservedMigration.indexOf("insert into public.reserved_handles"),
+    reservedMigration.indexOf(
+      "on conflict do nothing",
+      reservedMigration.indexOf("insert into public.reserved_handles"),
+    ),
+  );
+  const reservedHandles = [...reservedBlock.matchAll(/'([a-z0-9_.]+)'/g)].map(
+    (m) => m[1],
+  );
+  assert(
+    "the database reserves the project's own names and nobody else's",
+    reservedHandles.length === 5 &&
+      reservedHandles.every((h) =>
+        ["coolnasheed", "admin", "root", "staff", "system"].includes(h),
+      ),
+    reservedHandles.join(", "),
+  );
+
+  const sessionSource = readFileSync(
+    join(process.cwd(), "src/store/session.ts"),
+    "utf8",
+  );
+  const sessionBlock = sessionSource.slice(
+    sessionSource.indexOf("const RESERVED = new Set(["),
+    sessionSource.indexOf(
+      "]);",
+      sessionSource.indexOf("const RESERVED = new Set(["),
+    ),
+  );
+  const sessionHandles = [...sessionBlock.matchAll(/"([a-z0-9_.]+)"/g)].map(
+    (m) => m[1],
+  );
+  assert(
+    "and the client's copy of that list is the same five names",
+    sessionHandles.length === reservedHandles.length &&
+      sessionHandles.every((h) => reservedHandles.includes(h)),
+    sessionHandles.join(", "),
+  );
+
+  section("A keyboard that knows when you are typing");
+
+  const { isTextField, useKeyboard } = await import("../src/lib/hooks");
+
+  const plain = w.document.createElement("div");
+  const field = w.document.createElement("input");
+  const rich = w.document.createElement("div");
+  rich.setAttribute("contenteditable", "true");
+  w.document.body.append(plain, field, rich);
+  assert("an input is a field", isTextField(field) === true);
+  assert("so is a rich-text box", isTextField(rich) === true);
+  assert("a div is not", isTextField(plain) === false);
+
+  const fired: string[] = [];
+  function KeyProbe() {
+    useKeyboard({
+      " ": () => fired.push("space"),
+      "?": () => fired.push("question"),
+      n: () => fired.push("n"),
+      Escape: () => fired.push("escape"),
+      "mod+k": () => fired.push("command"),
+    });
+    return null;
+  }
+  const probeHost = w.document.createElement("div");
+  w.document.body.appendChild(probeHost);
+  const probeRoot = createRoot(probeHost);
+  await act(async () => {
+    probeRoot.render(createElement(KeyProbe));
+  });
+  await sleep(20);
+
+  const press = (el: Element, key: string, mods: KeyboardEventInit = {}) => {
+    el.dispatchEvent(
+      new w.KeyboardEvent("keydown", {
+        key,
+        bubbles: true,
+        cancelable: true,
+        ...mods,
+      }),
+    );
+  };
+
+  press(field, " ");
+  assert(
+    "a space in a text field is a space, not play/pause",
+    fired.length === 0,
+    fired.join(","),
+  );
+  press(field, "?");
+  assert(
+    "and a question mark does not open a panel over the form",
+    fired.length === 0,
+    fired.join(","),
+  );
+  press(field, "n");
+  assert(
+    "and a letter does not skip a track",
+    fired.length === 0,
+    fired.join(","),
+  );
+  press(field, "k", { metaKey: true });
+  assert(
+    "modified combinations still work while typing",
+    fired.includes("command"),
+    fired.join(","),
+  );
+  press(field, "Escape");
+  assert(
+    "and Escape still closes what is open",
+    fired.includes("escape"),
+    fired.join(","),
+  );
+
+  fired.length = 0;
+  press(w.document.body, " ");
+  press(w.document.body, "?");
+  press(w.document.body, "n");
+  assert(
+    "with nothing focused, the shortcuts are shortcuts again",
+    fired.join(",") === "space,question,n",
+    fired.join(","),
+  );
+  await act(async () => {
+    probeRoot.unmount();
+  });
+  probeHost.remove();
+
+  /* ------------------------------------------------------- dialogs and focus */
+
+  section("A dialog that opens on the field, not on its close button");
+
+  const { Modal } = await import("../src/components/ui/Primitives");
+  const dialogHost = w.document.createElement("div");
+  w.document.body.appendChild(dialogHost);
+  const dialogRoot = createRoot(dialogHost);
+  const renderDialog = (close: () => void) =>
+    createElement(Modal, {
+      open: true,
+      onClose: close,
+      title: "Welcome back",
+      children: renderFields(),
+    });
+  const renderFields = () =>
+    createElement(
+      "form",
+      null,
+      createElement("input", { className: "field", defaultValue: "" }),
+      createElement("input", { className: "field", defaultValue: "" }),
+    );
+
+  await act(async () => {
+    dialogRoot.render(renderDialog(() => {}));
+  });
+  await sleep(70);
+  const firstField = w.document.querySelector<HTMLInputElement>(`.field`);
+  assert(
+    "the first field takes focus, not the close button",
+    w.document.activeElement === firstField,
+    w.document.activeElement?.tagName ?? "nothing",
+  );
+
+  /* the parent re-renders on every keystroke, handing the dialog a new onClose —
+     which used to re-run its autofocus and yank the caret out of the field */
+  firstField?.focus();
+  for (const ch of "hafsa") {
+    await act(async () => {
+      dialogRoot.render(renderDialog(() => {}));
+    });
+    press(firstField!, ch);
+    await sleep(50);
+  }
+  assert(
+    "typing does not move the caret out of the field",
+    w.document.activeElement === firstField,
+    w.document.activeElement?.tagName ?? "nothing",
+  );
+  await act(async () => {
+    dialogRoot.unmount();
+  });
+  dialogHost.remove();
+
+  /* ------------------------------------------------------------- as a toast */
+
+  section("Errors arrive as toasts");
+
+  const { ToastHost, useErrorToast } =
+    await import("../src/components/ui/Primitives");
+  function ErrorProbe({ message }: { message: string | null }) {
+    useErrorToast(message);
+    return null;
+  }
+  const toastHost = w.document.createElement("div");
+  w.document.body.appendChild(toastHost);
+  const toastRoot = createRoot(toastHost);
+  await act(async () => {
+    toastRoot.render(
+      createElement(
+        ToastHost,
+        null,
+        createElement(ErrorProbe, { message: null }),
+      ),
+    );
+  });
+  await act(async () => {
+    toastRoot.render(
+      createElement(
+        ToastHost,
+        null,
+        createElement(ErrorProbe, {
+          message:
+            "A nasheed needs its recording uploaded before it can be published.",
+        }),
+      ),
+    );
+  });
+  await sleep(40);
+  assert(
+    "a refusal is announced at the bottom of the screen, not above the fold",
+    (w.document.body.textContent ?? "").includes(
+      "needs its recording uploaded",
+    ),
+    (w.document.body.textContent ?? "").slice(-90),
+  );
+  await act(async () => {
+    toastRoot.unmount();
+  });
+  toastHost.remove();
+
+  /* ---------------------------------------------------------- size planning */
+
+  section("Making an upload fit");
+
+  const compress = await import("../src/lib/compress");
+  const { MAX_AUDIO_BYTES, MAX_ARTWORK_BYTES } =
+    await import("../shared/types");
+
+  assert(
+    "a recording is capped at 5 MB",
+    MAX_AUDIO_BYTES === 5 * 1048576,
+    `${MAX_AUDIO_BYTES} bytes`,
+  );
+  assert(
+    "cover art is capped at 2 MB",
+    MAX_ARTWORK_BYTES === 2 * 1048576,
+    `${MAX_ARTWORK_BYTES} bytes`,
+  );
+
+  assert(
+    "something inside the limit is left alone",
+    compress.planAudio(4 * 1048576, 300).action === "keep",
+  );
+  const fiveMinutes = compress.planAudio(6 * 1048576, 300);
+  assert(
+    "a six-megabyte, five-minute recording is re-encoded to fit",
+    fiveMinutes.action === "encode" &&
+      fiveMinutes.kbps >= 48 &&
+      fiveMinutes.kbps <= 160,
+    JSON.stringify(fiveMinutes),
+  );
+  if (fiveMinutes.action === "encode") {
+    const projected = (fiveMinutes.kbps * 1000 * 300) / 8;
+    assert(
+      "and the bitrate it picks actually fits",
+      projected <= MAX_AUDIO_BYTES,
+      `${Math.round(projected / 1048576)} MB projected`,
+    );
+  }
+  assert(
+    "a voice recording is downmixed, a longer one is not",
+    (compress.planAudio(9 * 1048576, 800) as { mono?: boolean }).mono === true,
+  );
+  assert(
+    "twenty minutes cannot honestly be squeezed into 5 MB, so it is refused",
+    compress.planAudio(30 * 1048576, 1200).action === "impossible",
+    JSON.stringify(compress.planAudio(30 * 1048576, 1200)),
+  );
+  assert(
+    "an unknown duration is refused rather than guessed at",
+    compress.planAudio(9 * 1048576, 0).action === "impossible",
+  );
+
+  const box = compress.fitWithin(4000, 2000, 1600);
+  assert(
+    "a wide image is scaled to fit the box, keeping its shape",
+    box.width === 1600 && box.height === 800,
+    `${box.width}×${box.height}`,
+  );
+  const small = compress.fitWithin(300, 200, 1600);
+  assert(
+    "and a small one is never blown up",
+    small.width === 300 && small.height === 200,
+  );
+
+  const tinyArt = new File([new Uint8Array(1024)], "cover.png", {
+    type: "image/png",
+  });
+  const tinySong = new File([new Uint8Array(1024)], "talaa.mp3", {
+    type: "audio/mpeg",
+  });
+  assert(
+    "an image already under the limit is uploaded untouched",
+    (await compress.shrinkImage(tinyArt)) === tinyArt,
+  );
+  assert(
+    "so is an mp3 under the limit",
+    (await compress.shrinkAudio(tinySong)) === tinySong,
+  );
+
+  /* jsdom has no decoder and no canvas, so an over-limit file has to be refused in
+     words there — which is the honest outcome in any browser that cannot do it */
+  const heavySong = new File([new Uint8Array(6 * 1048576)], "long.mp3", {
+    type: "audio/mpeg",
+  });
+  let heavyError: unknown = null;
+  try {
+    await compress.shrinkAudio(heavySong, MAX_AUDIO_BYTES);
+  } catch (err) {
+    heavyError = err;
+  }
+  assert(
+    "a browser that cannot re-encode says so instead of uploading a broken file",
+    heavyError instanceof Error && /re-encode|decoded/.test(heavyError.message),
+    heavyError instanceof Error
+      ? heavyError.message.slice(0, 80)
+      : String(heavyError),
+  );
+
+  /* ------------------------------------------------------------------ routes */
+
+  section("Every route renders with nothing published and no backend");
+  const App = (await import("../src/App")).default;
+  const container = w.document.getElementById("root")!;
+
+  for (const route of [
+    "/",
+    "/search",
+    "/library",
+    "/queue",
+    "/about",
+    `/t/${ROWS[0].id}`,
+    "/a/hafsa.noor",
+    "/c/col_1",
+    "/p/whatever",
+    "/studio",
+    "/me",
+    "/admin",
+    "/nope",
+  ]) {
+    w.history.pushState({}, "", route);
+    const routeHost = w.document.createElement("div");
+    w.document.body.appendChild(routeHost);
+    const root = createRoot(routeHost);
+    try {
+      await act(async () => {
+        root.render(createElement(App));
+      });
+      await sleep(40);
+      const rendered = (routeHost.textContent ?? "").length;
+      assert(`${route} renders`, rendered > 0, `${rendered} characters`);
+      if (route === "/") {
+        /* the shell's motion layer: the page settles in, the frost covers the reading
+           area and nothing else, and the top bar carries the material that dissolves
+           at its foot rather than a border */
+        const main = routeHost.querySelector("main");
+        assert(
+          "the page settles in rather than appearing",
+          main?.classList.contains("route-in") === true,
+          main?.className ?? "no main",
+        );
+        const veil = routeHost.querySelector(".route-veil");
+        assert("a frosted veil covers the reading area", veil !== null);
+        assert(
+          "and it sits beside the scroller, above it",
+          veil?.parentElement ===
+            routeHost.querySelector("main")?.parentElement?.parentElement,
+        );
+        assert(
+          "the top bar is the dissolving kind",
+          routeHost.querySelector("header")?.classList.contains("topbar") ===
+            true,
+        );
+      }
+    } catch (err) {
+      assert(
+        `${route} renders`,
+        false,
+        err instanceof Error ? err.message : String(err),
+      );
+    } finally {
+      try {
+        await act(async () => {
+          root.unmount();
+        });
+      } catch {
+        /* unmount noise */
+      }
+      routeHost.remove();
+    }
+  }
+
+  /* the empty catalogue must say so, and must not invent one. The earlier sections
+     hydrated real rows into the registry, so this asks for the state it means to test. */
+  catalog.hydrateCatalog({
+    songs: [],
+    artists: [],
+    collections: [],
+    tags: [],
+  } as never);
+  w.history.pushState({}, "", "/");
+  const homeHost = w.document.createElement("div");
+  w.document.body.appendChild(homeHost);
+  const homeRoot = createRoot(homeHost);
+  await act(async () => {
+    homeRoot.render(createElement(App));
+  });
+  await sleep(60);
+  const homeText = homeHost.textContent ?? "";
+  assert(
+    "the home page tells the truth about an empty catalogue",
+    /Nothing published yet/i.test(homeText),
+    homeText.slice(0, 200),
+  );
+  assert(
+    "and it offers the way in rather than a dead end",
+    /publish|upload/i.test(homeText),
+    homeText.slice(0, 200),
+  );
+  assert(
+    "and it never mentions the synthesised catalogue it used to have",
+    !/maqām|duff|synthes|oscillator|Nūr|on-device/i.test(homeText),
+    homeText.slice(0, 80),
+  );
+  await act(async () => {
+    homeRoot.unmount();
+  });
+  homeHost.remove();
+  void container;
+
+  /* ------------------------------------------------------------------ noise */
+
+  const realErrors = consoleErrors.filter(
+    (e) =>
+      !e.includes("act(") &&
+      !e.includes("ReactDOMTestUtils") &&
+      !e.includes("wrapped into act"),
+  );
+  assert(
+    "no unexpected console.error output",
+    realErrors.length === 0,
+    realErrors.slice(0, 2).join(" | ").slice(0, 240),
+  );
+
+  unsubscribe();
+  console.error = realError;
+
+  /* ----------------------------------------------------------------- output */
+
   console.log(notes.join("\n"));
   if (failures.length) {
     console.log(`\nFAILURES (${failures.length}):`);
     console.log(failures.join("\n"));
     process.exit(1);
   }
-  console.log(`\nAll checks passed — ${totalNotes} notes, ${totalHits} drum hits, ${nodeCount} audio nodes built during the run.`);
+  console.log(
+    `\nAll ${assertions} checks passed — one <audio> element, ${sent.length} beacon${sent.length === 1 ? "" : "s"}, no synthesis anywhere.`,
+  );
   process.exit(0);
 }
 
-main().catch((e) => {
-  console.error("smoke test crashed:", e);
+main().catch((err) => {
+  console.error("smoke test crashed:", err);
   process.exit(1);
 });

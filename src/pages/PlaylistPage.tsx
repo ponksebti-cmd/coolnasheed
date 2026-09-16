@@ -6,7 +6,7 @@ import { HeroPanel } from "../components/collection/HeroPanel";
 import { TrackList } from "../components/track/TrackViews";
 import { getTrack } from "../data/catalog";
 import { plural } from "../lib/format";
-import { shuffle as shuffled, rngFrom } from "../lib/prng";
+import { seededShuffle } from "../lib/math";
 import { usePlayer } from "../store/player";
 import { useLibrary } from "../store/library";
 import type { Track } from "../data/types";
@@ -34,7 +34,7 @@ export default function PlaylistPage() {
       <EmptyState
         icon="library"
         title="That set is gone"
-        msg="Playlists live in this browser's storage. If you cleared it, they went with it."
+        msg="Sets live under your account. If it was deleted, it is gone."
         action={
           <Link to="/library" className="btn btn-primary mt-2 !px-4 !py-2.5">
             <Icon name="library" size={14} /> Library
@@ -52,7 +52,6 @@ export default function PlaylistPage() {
         eyebrow="your set"
         title={playlist.name}
         blurb={playlist.blurb}
-        seed={playlist.seed}
         accent={playlist.accent}
         tracks={tracks}
         playing={inSet && player.playing}
@@ -67,7 +66,7 @@ export default function PlaylistPage() {
             icon: "shuffle",
             onClick: () => {
               if (!ids.length) return;
-              player.playIds(shuffled(rngFrom(playlist.seed), ids), 0, { kind: "queue", id: playlist.id, label: playlist.name });
+              player.playIds(seededShuffle(ids, playlist.id), 0, { kind: "queue", id: playlist.id, label: playlist.name });
             },
           },
           { label: "Rename", icon: "pencil", onClick: () => { setName(playlist.name); setRenaming(true); } },
@@ -97,7 +96,7 @@ export default function PlaylistPage() {
           <EmptyState
             icon="plus"
             title="This set is empty"
-            msg="Use the ⋯ menu on any nasheed to add it here, or let Nūr fill it for you."
+            msg="Add a nasheed to this set from its menu, then it will show up here."
             action={
               <Link to="/search" className="btn btn-primary mt-2 !px-4 !py-2.5">
                 <Icon name="search" size={14} /> Find something
@@ -144,8 +143,7 @@ export default function PlaylistPage() {
       <Modal open={confirming} onClose={() => setConfirming(false)} title="Delete this set?" subtitle={playlist.name}>
         <div className="space-y-4 p-5">
           <p className="text-[13px] leading-relaxed text-text2">
-            The tracks stay in the catalogue; only your grouping disappears. This cannot be undone, because there is no server
-            to undo it from.
+            The nasheeds stay in the catalogue; only this set disappears. This cannot be undone.
           </p>
           <div className="flex gap-2">
             <button

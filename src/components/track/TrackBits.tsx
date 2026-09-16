@@ -3,9 +3,13 @@ import { Link } from "react-router-dom";
 import { Icon } from "../ui/Icons";
 import { DropdownMenu, type MenuItem } from "../ui/Menu";
 import { useToast } from "../ui/Primitives";
-import { PatternArt } from "../art/PatternArt";
-import { artistOf, durationOf, formatCount, getCollection, statsFor } from "../../data/catalog";
-import { maqamLabel } from "../../lib/theory";
+import { CoverArt } from "../art/CoverArt";
+import {
+  artistOf,
+  durationOf,
+  formatCount,
+  collectionsOf,
+} from "../../data/catalog";
 import { formatTime } from "../../lib/format";
 import { usePlayer } from "../../store/player";
 import { useLibrary } from "../../store/library";
@@ -13,9 +17,20 @@ import type { Track } from "../../data/types";
 
 /* --------------------------------------------------------------- equalizer */
 
-export function Equalizer({ active = true, className, bars = 4 }: { active?: boolean; className?: string; bars?: number }) {
+export function Equalizer({
+  active = true,
+  className,
+  bars = 4,
+}: {
+  active?: boolean;
+  className?: string;
+  bars?: number;
+}) {
   return (
-    <span className={clsx("flex h-3.5 items-end gap-[2px]", className)} aria-hidden>
+    <span
+      className={clsx("flex h-3.5 items-end gap-[2px]", className)}
+      aria-hidden
+    >
       {Array.from({ length: bars }).map((_, i) => (
         <span
           key={i}
@@ -61,22 +76,34 @@ export function PlayFab({
         className,
       )}
     >
-      <Icon name={playing ? "pause" : "play"} size={Math.round(size * 0.4)} strokeWidth={2.4} />
+      <Icon
+        name={playing ? "pause" : "play"}
+        size={Math.round(size * 0.4)}
+        strokeWidth={2.4}
+      />
     </button>
   );
 }
 
 /* ------------------------------------------------------------- like button */
 
-export function LikeButton({ trackId, size = 17, className }: { trackId: string; size?: number; className?: string }) {
+export function LikeButton({
+  trackId,
+  size = 17,
+  className,
+}: {
+  trackId: string;
+  size?: number;
+  className?: string;
+}) {
   const liked = useLibrary((s) => s.liked.includes(trackId));
   const toggleLike = useLibrary((s) => s.toggleLike);
   const toast = useToast();
   return (
     <button
       className={clsx(
-        "btn-icon grid place-items-center rounded-full p-2 transition-transform",
-        liked ? "text-gold" : "text-muted hover:text-text2",
+        "btn-icon relative grid place-items-center rounded-full p-2",
+        liked ? "pop-ring text-gold" : "text-muted hover:text-text2",
         className,
       )}
       aria-label={liked ? "Remove from loved" : "Love this nasheed"}
@@ -88,7 +115,7 @@ export function LikeButton({ trackId, size = 17, className }: { trackId: string;
         if (window.navigator.vibrate) window.navigator.vibrate(8);
         toast.push({
           title: now ? "Loved" : "Removed from loved",
-          msg: now ? "It will keep showing up in Nūr mixes." : undefined,
+          msg: now ? "It is in your library." : undefined,
           kind: now ? "ok" : "info",
         });
       }}
@@ -96,7 +123,9 @@ export function LikeButton({ trackId, size = 17, className }: { trackId: string;
       <Icon
         name={liked ? "starFill" : "star"}
         size={size}
-        className={clsx(liked && "drop-shadow-[0_0_10px_rgba(var(--c-glow-2),0.65)]")}
+        className={clsx(
+          liked && "icon-pop drop-shadow-[0_0_10px_rgba(var(--c-glow-2),0.65)]",
+        )}
       />
     </button>
   );
@@ -104,14 +133,23 @@ export function LikeButton({ trackId, size = 17, className }: { trackId: string;
 
 /* -------------------------------------------------------------- track menu */
 
-export function TrackMenu({ track, contextIds }: { track: Track; contextIds?: string[] }) {
+export function TrackMenu({
+  track,
+  contextIds,
+}: {
+  track: Track;
+  contextIds?: string[];
+}) {
   const player = usePlayer();
   const library = useLibrary();
   const toast = useToast();
   const liked = library.liked.includes(track.id);
+  // a nasheed belongs to whatever shelf lists it; the shelves are in the catalogue
   const collections = contextIds?.length
-    ? contextIds.map((id) => getCollection(id)).filter(Boolean)
-    : track.collections.map((id) => getCollection(id)).filter(Boolean);
+    ? contextIds
+        .map((id) => collectionsOf(track).find((c) => c.id === id))
+        .filter(Boolean)
+    : collectionsOf(track);
 
   const items: MenuItem[] = [
     {
@@ -162,9 +200,17 @@ export function TrackMenu({ track, contextIds }: { track: Track; contextIds?: st
     {
       label: `Go to ${artistOf(track).name}`,
       icon: "user",
-      href: `/a/${track.artistId}`,
+      href: `/a/${artistOf(track).id}`,
     },
-    ...(collections[0] ? [{ label: `Go to ${collections[0]!.title}`, icon: "rows" as const, href: `/c/${collections[0]!.id}` }] : []),
+    ...(collections[0]
+      ? [
+          {
+            label: `Go to ${collections[0]!.title}`,
+            icon: "rows" as const,
+            href: `/c/${collections[0]!.id}`,
+          },
+        ]
+      : []),
     {
       label: "Copy link",
       icon: "share",
@@ -180,50 +226,90 @@ export function TrackMenu({ track, contextIds }: { track: Track; contextIds?: st
     },
   ];
 
-  return <DropdownMenu items={items} label={`More options for ${track.title}`} />;
+  return (
+    <DropdownMenu items={items} label={`More options for ${track.title}`} />
+  );
 }
 
 /* --------------------------------------------------------------- thumbnail */
 
-export function ArtThumb({ track, size = 44, className, rounded = "rounded-lg" }: { track: Track; size?: number; className?: string; rounded?: string }) {
+export function ArtThumb({
+  track,
+  size = 44,
+  className,
+  rounded = "rounded-lg",
+}: {
+  track: Track;
+  size?: number;
+  className?: string;
+  rounded?: string;
+}) {
   return (
     <div
-      className={clsx("relative shrink-0 overflow-hidden border border-line", rounded, className)}
+      className={clsx(
+        "relative shrink-0 overflow-hidden border border-line",
+        rounded,
+        className,
+      )}
       style={{ width: size, height: size }}
     >
-      <PatternArt seed={track.seed} accent={track.accent} />
+      <CoverArt
+        path={track.artworkPath}
+        title={track.title}
+        className="h-full w-full"
+        rounded="sm"
+      />
     </div>
   );
 }
 
 /* ----------------------------------------------------------- meta fragments */
 
-export function TrackMeta({ track, className, showMaqam = true }: { track: Track; className?: string; showMaqam?: boolean }) {
+export function TrackMeta({
+  track,
+  className,
+}: {
+  track: Track;
+  className?: string;
+}) {
   const artist = artistOf(track);
   return (
-    <div className={clsx("flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted", className)}>
-      <Link to={`/a/${artist.id}`} className="font-medium text-text2 hover:text-text hover:underline underline-offset-2">
+    <div
+      className={clsx(
+        "flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted",
+        className,
+      )}
+    >
+      <Link
+        to={`/a/${artist.id}`}
+        className="font-medium text-text2 hover:text-text hover:underline underline-offset-2"
+      >
         {artist.name}
       </Link>
       <span aria-hidden>·</span>
-      {showMaqam ? (
-        <span className="tabular-nums">
-          {maqamLabel(track.maqam)}
-          {track.duff ? "" : " · vocals only"}
-        </span>
-      ) : null}
-      <span aria-hidden>·</span>
+
       <span className="tabular-nums">{formatTime(durationOf(track))}</span>
     </div>
   );
 }
 
-export function PlayCount({ track, className }: { track: Track; className?: string }) {
-  const stats = statsFor(track);
+export function PlayCount({
+  track,
+  className,
+}: {
+  track: Track;
+  className?: string;
+}) {
+  if (!track.plays) return null;
   return (
-    <span className={clsx("flex items-center gap-1 text-[11px] tabular-nums text-muted", className)}>
+    <span
+      className={clsx(
+        "flex items-center gap-1 text-[11px] tabular-nums text-muted",
+        className,
+      )}
+    >
       <Icon name="waveform" size={12} />
-      {formatCount(stats.plays)}
+      {formatCount(track.plays)}
     </span>
   );
 }

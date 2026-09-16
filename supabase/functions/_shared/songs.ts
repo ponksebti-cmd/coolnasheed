@@ -6,7 +6,7 @@
  * object in SQL — the keys there and here are meant to match exactly).
  */
 
-import type { Accent, LyricLine, MaqamName, Song, SongStatus } from "../../../shared/types.ts";
+import type { LyricLine, Song, SongStatus } from "../../../shared/types.ts";
 
 export type SongDbRow = {
   id: string;
@@ -14,18 +14,8 @@ export type SongDbRow = {
   title: string;
   title_ar: string | null;
   note: string;
-  maqam: MaqamName;
-  root: number;
-  bpm: number;
-  voices: "solo" | "duet" | "choir";
-  duff: string | null;
-  duff_enter: "intro" | "verse";
-  passes: number;
-  accent: Accent;
-  year: number | null;
   tags: string[] | null;
   lines: LyricLine[] | null;
-  motif_bank: number[] | null;
   audio_path: string | null;
   audio_mime: string | null;
   audio_bytes: number | null;
@@ -39,9 +29,17 @@ export type SongDbRow = {
   notes: number;
 };
 
+/* The owner arrives joined, from the select that carries `owner:profiles(handle, name)`.
+   Anything missing is null rather than invented — a nasheed with no publisher is a row
+   with no publisher, and the interface says so. */
+export type SongOwner = {
+  owner_handle?: string | null;
+  owner_name?: string | null;
+};
+
 /** Every column a select needs in order to build a `Song`. */
 export const SONG_COLUMNS =
-  "id, owner_id, title, title_ar, note, maqam, root, bpm, voices, duff, duff_enter, passes, accent, year, tags, lines, motif_bank, audio_path, audio_mime, audio_bytes, duration_ms, artwork_path, status, published_at, created_at, plays, likes, notes";
+  "id, owner_id, title, title_ar, note, tags, lines, audio_path, audio_mime, audio_bytes, duration_ms, artwork_path, status, published_at, created_at, plays, likes, notes";
 
 function epochMs(value: string | number | null | undefined): number {
   if (value === null || value === undefined) return Date.now();
@@ -50,35 +48,40 @@ function epochMs(value: string | number | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : Date.now();
 }
 
-export function songFromRow(row: SongDbRow, ownerHandle: string | null): Song {
+const numberOr = (value: unknown, fallback: number): number => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+};
+
+export function songFromRow(
+  row: SongDbRow & SongOwner,
+  ownerHandle: string | null,
+  ownerName: string | null = null,
+): Song {
   return {
     id: row.id,
     ownerId: row.owner_id,
     ownerHandle,
+    ownerName,
     title: row.title,
     titleAr: row.title_ar,
     note: row.note ?? "",
-    maqam: row.maqam,
-    root: Number(row.root),
-    bpm: Number(row.bpm),
-    voices: row.voices,
-    duff: row.duff,
-    duffEnter: row.duff_enter ?? "verse",
-    passes: Number(row.passes ?? 2),
-    accent: row.accent ?? "jade",
-    year: row.year === null || row.year === undefined ? null : Number(row.year),
     tags: Array.isArray(row.tags) ? row.tags : [],
     lines: Array.isArray(row.lines) ? row.lines : [],
-    motifBank: Array.isArray(row.motif_bank) ? row.motif_bank : null,
-    audioPath: row.audio_path,
+    /* A live nasheed always has a recording — the table says so. A removed one may not,
+       and the client is told that honestly rather than being handed an empty string. */
+    audioPath: row.audio_path ?? "",
     audioMime: row.audio_mime,
-    durationMs: row.duration_ms === null || row.duration_ms === undefined ? null : Number(row.duration_ms),
+    audioBytes:
+      row.audio_bytes === null || row.audio_bytes === undefined ? null : Math.round(numberOr(row.audio_bytes, 0)),
+    durationMs:
+      row.duration_ms === null || row.duration_ms === undefined ? null : Math.round(numberOr(row.duration_ms, 0)),
     artworkPath: row.artwork_path,
     status: row.status ?? "live",
     publishedAt: epochMs(row.published_at),
-    plays: Number(row.plays ?? 0),
-    likes: Number(row.likes ?? 0),
-    notes: Number(row.notes ?? 0),
+    plays: numberOr(row.plays, 0),
+    likes: numberOr(row.likes, 0),
+    notes: numberOr(row.notes, 0),
   };
 }
 

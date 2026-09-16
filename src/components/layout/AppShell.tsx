@@ -6,18 +6,17 @@ import { TopBar } from "./TopBar";
 import { PlayerBar } from "../player/PlayerBar";
 import { MobileTabBar } from "./MobileTabBar";
 import { ImmersivePlayer } from "../player/ImmersivePlayer";
-import { NurPanel } from "../nur/NurPanel";
 import { CommandPalette } from "../CommandPalette";
 import { ShortcutsSheet } from "../ShortcutsSheet";
 import { AuthModal } from "../auth/AuthModal";
 import { Icon } from "../ui/Icons";
-import { engine } from "../../lib/audio/engine";
 import { useLibrary } from "../../store/library";
 import { usePlayer } from "../../store/player";
 import { useUi } from "../../store/ui";
 import { useKeyboard } from "../../lib/hooks";
 import { getTrack } from "../../data/catalog";
 import { useBoot } from "../../lib/boot";
+import { SetupSqlButton } from "../SetupSqlButton";
 
 export function AppShell() {
   const settings = useLibrary((s) => s.settings);
@@ -26,13 +25,25 @@ export function AppShell() {
   const mobileNavOpen = useUi((s) => s.mobileNavOpen);
   const setMobileNav = useUi((s) => s.setMobileNav);
   const setShortcuts = useUi((s) => s.setShortcuts);
-  const setNur = useUi((s) => s.setNur);
   const location = useLocation();
   const scroller = useRef<HTMLDivElement>(null);
 
   /* the catalogue, the session and the beacon, once, before anything else needs them */
   const boot = useBoot();
   const [noticeClosed, setNoticeClosed] = useState(false);
+
+  /* The route veil is mounted for the length of its animation and then removed rather
+     than parked at opacity 0. Leaving a full-area `backdrop-filter` element in the DOM
+     is how a page stays frosted: browsers disagree about whether the element's own
+     opacity hides a filter applied to what is behind it, and a layer nobody asked for
+     is still a layer. Mounted, played, gone. */
+  const [veilKey, setVeilKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    setVeilKey(location.pathname);
+    const timer = window.setTimeout(() => setVeilKey(null), 520);
+    return () => window.clearTimeout(timer);
+  }, [location.pathname]);
   useEffect(() => {
     if (!boot) return;
     document.documentElement.dataset.backend = boot.source;
@@ -44,33 +55,28 @@ export function AppShell() {
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", settings.theme === "night" ? "#07100D" : "#F4EFE3");
+    if (meta)
+      meta.setAttribute(
+        "content",
+        settings.theme === "night" ? "#07100D" : "#F4EFE3",
+      );
   }, [settings.theme]);
 
-  /* push persisted audio settings into the engine once */
+  /* the volume and mute in the settings row are the audio element's, always */
   useEffect(() => {
-    engine.setVolume(settings.volume);
-    engine.setDuff(settings.duff);
-    engine.setSpace(settings.space);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* keep the engine in step with later setting changes made elsewhere */
-  useEffect(() => {
-    engine.setVolume(settings.volume);
+    usePlayer.getState().setVolume(settings.volume);
   }, [settings.volume]);
+
   useEffect(() => {
-    engine.setDuff(settings.duff);
-  }, [settings.duff]);
-  useEffect(() => {
-    engine.setSpace(settings.space);
-  }, [settings.space]);
+    usePlayer.getState().setMuted(settings.muted);
+  }, [settings.muted]);
 
   /* scroll to top on navigation */
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    if (typeof el.scrollTo === "function") el.scrollTo({ top: 0, behavior: "auto" });
+    if (typeof el.scrollTo === "function")
+      el.scrollTo({ top: 0, behavior: "auto" });
     else el.scrollTop = 0;
   }, [location.pathname]);
 
@@ -101,8 +107,7 @@ export function AppShell() {
     n: () => player.next(),
     b: () => player.prev(),
     i: () => player.setImmersive(!player.immersive),
-    d: () => player.setDuff(!settings.duff),
-    m: () => player.setVolume(settings.volume > 0 ? 0 : 0.85),
+    m: () => player.toggleMute(),
     l: () => {
       const id = player.trackId;
       if (id) toggleLike(id);
@@ -112,7 +117,6 @@ export function AppShell() {
       window.dispatchEvent(new CustomEvent("coolnasheed:focus-search"));
     },
     "?": () => setShortcuts(true),
-    g: () => setNur(true),
   });
 
   return (
@@ -125,8 +129,12 @@ export function AppShell() {
       {/* mobile drawer */}
       {mobileNavOpen ? (
         <div className="fixed inset-0 z-[95] lg:hidden veil-enter">
-          <div className="absolute inset-0 bg-[rgba(3,9,7,0.7)] backdrop-blur-sm" onClick={() => setMobileNav(false)} aria-hidden />
-          <div className="absolute inset-y-0 left-0 w-[86vw] max-w-[320px] bg-bg2 shadow-[30px_0_90px_-30px_rgba(0,0,0,1)] toast-enter">
+          <div
+            className="absolute inset-0 bg-[rgba(3,9,7,0.7)] backdrop-blur-sm"
+            onClick={() => setMobileNav(false)}
+            aria-hidden
+          />
+          <div className="materialize absolute inset-y-0 left-0 w-[86vw] max-w-[320px] border-r border-line2 bg-bg2/98 shadow-[30px_0_90px_-30px_rgba(0,0,0,1)] backdrop-blur-xl">
             <button
               className="btn-icon absolute right-2 top-3 z-10 rounded-full p-2"
               onClick={() => setMobileNav(false)}
@@ -141,53 +149,83 @@ export function AppShell() {
 
       {/* main */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <div ref={scroller} className="scroll-slim relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-          <TopBar onMenu={() => setMobileNav(true)} />
+        {/* the reading area, and the veil that covers exactly it */}
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <div
+            ref={scroller}
+            className="scroll-slim relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+          >
+            <TopBar onMenu={() => setMobileNav(true)} />
 
-          {/* The backend answering badly is worth one line on the page. The bundled
-              catalogue keeps playing underneath it, so this is a notice, not a wall. */}
-          {boot?.error && !noticeClosed ? (
-            <div
-              role="status"
-              className="mx-4 mt-3 flex items-start gap-2.5 rounded-xl border border-line bg-surface2/60 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-muted sm:mx-6 lg:mx-8"
-            >
-              <Icon name="server" size={14} className="mt-0.5 shrink-0 text-gold" />
-              <div className="min-w-0 flex-1">
-                <p className="text-text/90">{boot.error}</p>
-                {boot.needsSetup ? (
-                  <p className="mt-1">
-                    One command fixes it: <code className="rounded bg-bg/70 px-1.5 py-0.5 font-mono text-[11.5px] text-goldsoft">npm run setup</code>{" "}
-                    — or paste <code className="rounded bg-bg/70 px-1.5 py-0.5 font-mono text-[11.5px]">supabase/setup.sql</code> into Studio&apos;s SQL
-                    editor. Until then the bundled catalogue is what you hear.
-                  </p>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                onClick={() => setNoticeClosed(true)}
-                className="btn-icon -mr-1 -mt-1 shrink-0 rounded-full p-1.5"
-                aria-label="Dismiss"
+            {/* The backend answering badly is worth one line on the page — the shell
+              still renders, the catalogue is simply empty until it answers. */}
+            {boot?.error && !noticeClosed ? (
+              <div
+                role="status"
+                className="mx-4 mt-3 flex items-start gap-2.5 rounded-xl border border-line bg-surface2/60 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-muted sm:mx-6 lg:mx-8"
               >
-                <Icon name="close" size={13} />
-              </button>
-            </div>
+                <Icon
+                  name="server"
+                  size={14}
+                  className="mt-0.5 shrink-0 text-gold"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-text/90">{boot.error}</p>
+                  {boot.needsSetup ? (
+                    <p className="mt-1">
+                      {/* The sentence above already explains which state the database is
+                          in and what to run; this is the part that says how, right here,
+                          without a terminal. */}
+                      Copy the SQL below, paste it into Supabase&apos;s SQL
+                      editor and press Run, then reload this page. It is safe to
+                      run more than once: it only adds what is missing. (On your
+                      own machine,{" "}
+                      <code className="rounded bg-bg/70 px-1.5 py-0.5 font-mono text-[11.5px] text-goldsoft">
+                        npm run setup
+                      </code>{" "}
+                      does the same thing from the terminal.)
+                    </p>
+                  ) : null}
+                  {boot.needsSetup ? <SetupSqlButton /> : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNoticeClosed(true)}
+                  className="btn-icon -mr-1 -mt-1 shrink-0 rounded-full p-1.5"
+                  aria-label="Dismiss"
+                >
+                  <Icon name="close" size={13} />
+                </button>
+              </div>
+            ) : null}
+            <main
+              key={location.pathname}
+              className={clsx(
+                "route-in mx-auto w-full max-w-[1400px] px-4 pb-10 pt-5 sm:px-6 lg:px-8",
+              )}
+            >
+              <Outlet />
+            </main>
+          </div>
+
+          {/* Frosts over and clears while the new page settles in. A sibling of the
+              scroller, not a child, so it stays out of the scroll coordinate space: it
+              always covers the reading area and leaves the transport below untouched. */}
+          {veilKey ? (
+            <div key={`veil:${veilKey}`} className="route-veil" aria-hidden />
           ) : null}
-          <main key={location.pathname} className={clsx("page-enter mx-auto w-full max-w-[1400px] px-4 pb-10 pt-5 sm:px-6 lg:px-8")}>
-            <Outlet />
-          </main>
         </div>
         <PlayerBar />
         <MobileTabBar />
       </div>
 
       <ImmersivePlayer />
-      <NurPanel />
       <CommandPalette />
       <ShortcutsSheet />
       <AuthModal />
 
       {/* tiny footer note, always available */}
-      <div className="pointer-events-none fixed bottom-[92px] left-1/2 z-20 hidden -translate-x-1/2 items-center gap-2 rounded-full border border-line bg-elev/85 px-3 py-1.5 text-[10.5px] text-muted backdrop-blur-md xl:flex">
+      <div className="glass pointer-events-none fixed bottom-[92px] left-1/2 z-20 hidden -translate-x-1/2 items-center gap-2 rounded-full px-3 py-1.5 text-[10.5px] text-muted xl:flex">
         <Icon name="command" size={11} />
         <span>+ K for commands · ? for shortcuts</span>
         {player.trackId ? (

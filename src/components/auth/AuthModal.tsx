@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "../ui/Icons";
 import { Modal, useToast } from "../ui/Primitives";
-import { PatternArt } from "../art/PatternArt";
+import { Avatar } from "../art/CoverArt";
 import { useUi } from "../../store/ui";
 import { useSession, validateEmail, validateHandle, validateName, validatePassword } from "../../store/session";
 import { hasSupabase } from "../../lib/supabase";
-import type { Accent } from "../../data/types";
 
 type Tab = "signin" | "signup";
 type Errors = Partial<Record<"name" | "handle" | "email" | "password" | "identity" | "form", string>>;
@@ -14,7 +13,7 @@ const UNLOCKED: { icon: Parameters<typeof Icon>[0]["name"]; label: string }[] = 
   { icon: "star", label: "Love nasheeds and keep them in your library" },
   { icon: "plus", label: "Build playlists that survive a reload — and a new phone" },
   { icon: "lyrics", label: "Leave a note on a line, and amen someone else's" },
-  { icon: "mic", label: "Publish your own nasheed — words, maqām, tempo, a recording" },
+  { icon: "mic", label: "Publish your own nasheed — an mp3 you recorded, with the words" },
 ];
 
 export function AuthModal() {
@@ -48,7 +47,7 @@ export function AuthModal() {
   }, [open, requestedMode]);
 
   /* the account you would become, drawn live from the handle you are typing */
-  const previewSeed = useMemo(() => `listener-${handle.trim().toLowerCase() || "you"}-preview`, [handle]);
+  const previewName = useMemo(() => (name.trim() || handle.trim() || "you"), [name, handle]);
   const handleHint = useMemo(() => {
     const raw = handle.trim().toLowerCase().replace(/^@/, "");
     if (raw.length < 3) return null;
@@ -144,7 +143,8 @@ export function AuthModal() {
               <code className="rounded bg-surface2 px-1 py-0.5 text-[11.5px]">VITE_SUPABASE_URL</code> and{" "}
               <code className="rounded bg-surface2 px-1 py-0.5 text-[11.5px]">VITE_SUPABASE_ANON_KEY</code> to{" "}
               <code className="rounded bg-surface2 px-1 py-0.5 text-[11.5px]">.env</code> and reload — everything below
-              will work, and the catalogue you are hearing is the bundled one.
+              will work. There is no catalogue to listen to until a project is connected:
+              the catalogue is the database.
             </span>
           </p>
         ) : null}
@@ -152,10 +152,10 @@ export function AuthModal() {
         {tab === "signup" ? (
           <div className="flex items-center gap-3 rounded-xl border border-line bg-surface2/40 p-3">
             <span className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full ring-1 ring-line2">
-              <PatternArt seed={previewSeed} accent={"gold" as Accent} showVignette={false} />
+              <Avatar name={previewName} accent="gold" size={48} />
             </span>
             <p className="text-[12.5px] leading-relaxed text-muted">
-              Your face is a pattern generated from your handle — no photo, no upload, nothing to moderate.
+              Your name and handle are what people see. There is no photo to upload and nothing to moderate.
             </p>
           </div>
         ) : null}
@@ -165,6 +165,7 @@ export function AuthModal() {
             <span className="field-label">Name</span>
             <input
               className="field"
+              data-autofocus
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="What should we call you?"
@@ -224,6 +225,7 @@ export function AuthModal() {
           <input
             className="field"
             type="email"
+            data-autofocus
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"

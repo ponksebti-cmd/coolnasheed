@@ -30,7 +30,7 @@ export function QueuePanel({ compact }: { compact?: boolean }) {
       <EmptyState
         icon="queue"
         title="The queue is empty"
-        msg="Play anything and it will gather here. Nūr can also build you a mix from what you have loved."
+        msg="Play anything and it will gather here."
         action={
           <Link to="/" className="btn btn-primary mt-1 px-4 py-2.5">
             <Icon name="home" size={14} /> Find something

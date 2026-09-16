@@ -2,25 +2,24 @@
  * The wire contract.
  *
  * Plain types, no runtime imports, one file — so the browser bundle (`src/`), the
- * Edge Functions (`supabase/functions/`) and the scripts that generate the seed all
- * describe a nasheed, a note or a play the same way. Deno imports this as
+ * Edge Functions (`supabase/functions/`) and the test scripts all describe a
+ * nasheed, a note or a play the same way. Deno imports this as
  * `../../../shared/types.ts`; the client imports it as `../../shared/types`.
  *
- * Shapes here mirror what Postgres actually returns. Where the database speaks
- * snake_case (`trending()` returns `song_id`), the raw row type says so and the
- * client mapper turns it into the camelCase the UI uses. Nothing in this file
- * invents a field the database does not have.
+ * A nasheed is a recording. The row carries an mp3 that a publisher uploaded to
+ * the `nasheed-audio` bucket, its metadata, its lyrics and its counters — and
+ * nothing about how the music should be performed, because nothing performs it.
+ *
+ * Where the database speaks snake_case, the raw row types say so and the client
+ * mappers in `src/lib/wire.ts` turn them into the camelCase the UI uses. Nothing
+ * in this file invents a field the database does not have.
  */
 
 /* -------------------------------------------------------------------- people */
 
 export type UserRole = "listener" | "staff";
 
-/**
- * `listener` is somebody who signed up; `artist` is a publisher in the catalogue.
- * Both are rows in `profiles`. Seeded artists have no auth user behind them, so they
- * can be followed and credited but nobody can sign in as them.
- */
+/** `listener` is anybody with an account; `artist` is somebody with a published nasheed. */
 export type UserKind = "listener" | "artist";
 
 export type Accent = "jade" | "gold" | "turq" | "madder" | "cobalt";
@@ -34,12 +33,10 @@ export type User = {
   handle: string;
   name: string;
   nameAr: string | null;
-  /** what they do, e.g. "seven voices & duff" */
+  /** what they do, e.g. "singer in Algiers" */
   tagline: string;
   bio: string;
   city: string;
-  /** seed for the generated avatar pattern */
-  seed: string;
   accent: Accent;
   role: UserRole;
   kind: UserKind;
@@ -79,41 +76,52 @@ export type ListenerStats = {
 /** A signed-in account and its counters — what `me()` and a sign-in return. */
 export type SessionUser = { user: User; stats: ListenerStats };
 
-/* --------------------------------------------------------------------- songs */
+/* ------------------------------------------------------------------- prefs */
 
-export type MaqamName =
-  | "rast"
-  | "bayati"
-  | "hijaz"
-  | "nahawand"
-  | "kurd"
-  | "ajam"
-  | "saba"
-  | "nikriz"
-  | "hijazkar"
-  | "ushshaq";
+export type LyricScript = "tr" | "en" | "ar";
 
-export const MAQAM_NAMES: MaqamName[] = [
-  "rast",
-  "bayati",
-  "hijaz",
-  "nahawand",
-  "kurd",
-  "ajam",
-  "saba",
-  "nikriz",
-  "hijazkar",
-  "ushshaq",
-];
+/**
+ * Player settings, stored per account in `user_prefs`. These used to live in the
+ * browser; they no longer do, so a listener who signs in elsewhere finds their
+ * own theme, volume and lyric preferences waiting for them.
+ */
+export type PlayerPrefs = {
+  theme: "night" | "dawn";
+  volume: number;
+  muted: boolean;
+  lyricScript: LyricScript;
+  showArabic: boolean;
+  showTranslation: boolean;
+  reduceMotion: boolean;
+};
+
+export const DEFAULT_PREFS: PlayerPrefs = {
+  theme: "night",
+  volume: 0.85,
+  muted: false,
+  lyricScript: "tr",
+  showArabic: true,
+  showTranslation: true,
+  reduceMotion: false,
+};
+
+/** One row of `dhikr_counts`, keyed by phrase id in `{ [phrase]: DhikrState }`. */
+export type DhikrState = { count: number; target: number };
+
+/* ------------------------------------------------------------------- songs */
 
 export type LyricLine = {
-  /** transliteration — what the synthesis engine sings when there is no upload */
+  /** transliteration, when a publisher supplied one */
   tr?: string;
   ar?: string;
   en?: string;
   /** attribution, e.g. "traditional" or "Qurʾān 9:128" */
   note?: string;
-  /** seconds from the start; supplied for a recording so the karaoke view can sync */
+  /**
+   * Seconds from the start of the recording. Optional, and only ever what a
+   * publisher typed or imported: nothing derives timings from the audio, so a
+   * lyric view only scrolls in time when real timings exist.
+   */
   t?: number;
 };
 
@@ -124,28 +132,18 @@ export type Song = {
   id: string;
   ownerId: string | null;
   ownerHandle: string | null;
+  ownerName: string | null;
   title: string;
   titleAr: string | null;
   note: string;
-  maqam: MaqamName;
-  /** tonic as a MIDI note (60 = middle C) */
-  root: number;
-  bpm: number;
-  voices: "solo" | "duet" | "choir";
-  /** 16-step frame-drum pattern; null means vocals only */
-  duff: string | null;
-  duffEnter: "intro" | "verse";
-  passes: number;
-  accent: Accent;
-  year: number | null;
   tags: string[];
   lines: LyricLine[];
-  motifBank: number[] | null;
-  /** storage path inside the `nasheed-audio` bucket; null means the engine sings it */
-  audioPath: string | null;
+  /** storage path inside `nasheed-audio`; every live nasheed has one */
+  audioPath: string;
   audioMime: string | null;
+  audioBytes: number | null;
   durationMs: number | null;
-  /** storage path inside the `nasheed-artwork` bucket; null means generated pattern */
+  /** storage path inside `nasheed-artwork`, or null for a plain tile */
   artworkPath: string | null;
   status: SongStatus;
   publishedAt: number;
@@ -154,32 +152,42 @@ export type Song = {
   notes: number;
 };
 
-/** What the publish function accepts. Paths, not files — uploads go to Storage first. */
+/** What the publish function accepts. A path, not a file: the upload goes first. */
 export type SongInput = {
   title: string;
   titleAr?: string | null;
   note?: string | null;
-  maqam: MaqamName;
-  root: number;
-  bpm: number;
-  voices: Song["voices"];
-  duff?: string | null;
-  duffEnter?: Song["duffEnter"];
-  passes?: number;
-  accent?: Accent;
-  year?: number | null;
   tags?: string[];
   lines?: LyricLine[];
-  motifBank?: number[] | null;
-  durationMs?: number | null;
-  audioPath?: string | null;
+  /** required: the mp3 in the `nasheed-audio` bucket */
+  audioPath: string;
   audioMime?: string | null;
   audioBytes?: number | null;
+  durationMs?: number | null;
   artworkPath?: string | null;
 };
 
 /** Fields a publisher may change after the fact. */
 export type SongPatch = Partial<SongInput> & { status?: SongStatus };
+
+/** What the studio keeps per account while a nasheed is still being written. */
+export type DraftLine = { tr: string; ar: string; en: string; note: string; t: number | null };
+
+export type SongDraft = {
+  title: string;
+  titleAr: string;
+  note: string;
+  tags: string[];
+  lines: DraftLine[];
+  audioPath: string | null;
+  audioMime: string | null;
+  audioBytes: number | null;
+  durationMs: number | null;
+  artworkPath: string | null;
+  /** editing an existing nasheed rather than writing a new one */
+  songId: string | null;
+  updatedAt: number;
+};
 
 /* ----------------------------------------------------------------- catalogue */
 
@@ -191,11 +199,10 @@ export type ArtistCard = {
   handle: string;
   name: string;
   nameAr: string | null;
-  /** the tagline, mapped onto the word the UI already uses */
+  /** the tagline, mapped onto the word the UI uses for it */
   role: string;
   origin: string;
   bio: string;
-  seed: string;
   accent: Accent;
   verified: boolean;
   kind: UserKind;
@@ -212,7 +219,6 @@ export type CatalogCollection = {
   titleAr: string | null;
   curator: string;
   blurb: string;
-  seed: string;
   accent: Accent;
   tags: string[];
   year: number;
@@ -221,18 +227,19 @@ export type CatalogCollection = {
 
 export type TagCount = { tag: string; count: number };
 
-/** One call loads the whole catalogue — the `catalog` function caches it for 60s. */
+/**
+ * One call loads the whole catalogue. Every field is real: nothing is generated
+ * for display, so an empty catalogue answers with empty arrays.
+ */
 export type CatalogResponse = {
   artists: ArtistCard[];
   songs: Song[];
   collections: CatalogCollection[];
   tags: TagCount[];
   generatedAt: number;
-  /** true when the seeded catalogue is in there, not only what people published */
-  seeded: boolean;
 };
 
-/* ------------------------------------------------------------------- social */
+/* -------------------------------------------------------------------- social */
 
 /** A note as the UI shows it. */
 export type Comment = {
@@ -241,7 +248,6 @@ export type Comment = {
   authorId: string;
   authorName: string;
   authorHandle: string;
-  authorSeed: string;
   authorAccent: Accent;
   authorVerified: boolean;
   text: string;
@@ -272,7 +278,6 @@ export type CommentRow = {
     id: string;
     handle: string;
     name: string;
-    seed: string;
     accent: Accent;
     verified: boolean;
   } | null;
@@ -283,7 +288,6 @@ export type Playlist = {
   ownerId: string;
   name: string;
   blurb: string;
-  seed: string;
   accent: Accent;
   songIds: string[];
   createdAt: number;
@@ -295,21 +299,19 @@ export type PlaylistRow = {
   owner_id: string;
   name: string;
   blurb: string;
-  seed: string;
   accent: Accent;
   song_ids: string[];
   created_at: string;
 };
 
-export type PlaylistInput = { name: string; blurb?: string; songIds?: string[]; accent?: Accent; seed?: string };
+export type PlaylistInput = { name: string; blurb?: string; songIds?: string[]; accent?: Accent };
 
-/* ---------------------------------------------------------------- analytics */
+/* ----------------------------------------------------------------- analytics */
 
 export type PlayInput = {
   songId: string;
   seconds: number;
   completed?: boolean;
-  clientId?: string | null;
 };
 
 export type PlayReceipt = { ok: boolean; counted?: boolean; duplicate?: boolean; plays?: number; error?: string };
@@ -319,7 +321,6 @@ export type TrendingDbRow = {
   song_id: string;
   title: string;
   accent: Accent;
-  maqam: MaqamName;
   owner_name: string | null;
   plays: number;
   listeners: number;
@@ -330,8 +331,6 @@ export type TrendingDbRow = {
 export type TrendingRow = {
   songId: string;
   title: string;
-  accent: Accent;
-  maqam: MaqamName;
   ownerName: string | null;
   plays: number;
   listeners: number;
@@ -344,7 +343,6 @@ export type TrendingWindow = "24h" | "7d" | "30d" | "all";
 export type HistoryRow = {
   songId: string;
   title: string;
-  accent: Accent;
   ownerName: string | null;
   plays: number;
   seconds: number;
@@ -400,14 +398,13 @@ export type AdminSummary = {
     id: string;
     title: string;
     owner: string | null;
-    hasAudio: boolean;
     status: SongStatus;
     plays: number;
     publishedAt: number;
   }[];
 };
 
-/* ------------------------------------------------------------------ results */
+/* ------------------------------------------------------------------- results */
 
 export type ApiError = { error: string; field?: string; status: number };
 
@@ -415,6 +412,9 @@ export type ApiError = { error: string; field?: string; status: number };
 export type BootstrapResponse = {
   user: User | null;
   stats: ListenerStats;
+  prefs: PlayerPrefs;
+  dhikr: Record<string, DhikrState>;
+  draft: SongDraft | null;
   liked: string[];
   followed: string[];
   savedCollections: string[];
@@ -431,27 +431,45 @@ export type PublisherProfile = {
   totals: { plays: number; likes: number; notes: number };
 };
 
-/* ------------------------------------------------------------------ storage */
+/* ------------------------------------------------------------------- storage */
 
 export type StorageBucket = "nasheed-audio" | "nasheed-artwork";
 
 export const AUDIO_BUCKET: StorageBucket = "nasheed-audio";
 export const ARTWORK_BUCKET: StorageBucket = "nasheed-artwork";
 
-/** The free tier gives 1 GB of storage; these keep one upload from eating it. */
-export const MAX_AUDIO_BYTES = 60 * 1024 * 1024;
-export const MAX_ARTWORK_BYTES = 8 * 1024 * 1024;
+/**
+ * What one upload may weigh. The browser brings anything larger inside these before it
+ * uploads (`src/lib/compress.ts`), the buckets refuse anything larger, and the `songs`
+ * table refuses a row that describes anything larger — the same two numbers, enforced
+ * three times, because a limit that lives only in the interface is a suggestion.
+ *
+ *   a recording    5 MB   mp3, transcoded down to the best bitrate that fits
+ *   cover art      2 MB   webp/jpeg, scaled down until it fits
+ */
+export const MAX_AUDIO_BYTES = 5242880;
+export const MAX_ARTWORK_BYTES = 2097152;
+
+/** mp3 only, and the two MIME spellings browsers and Supabase disagree about. */
+export const AUDIO_MIME_TYPES = ["audio/mpeg", "audio/mp3", "audio/x-mpeg"] as const;
+
+/** The bytes an mp3 starts with: an ID3 tag, or a raw MPEG frame header. */
+export function looksLikeMp3(head: Uint8Array): boolean {
+  if (head.length >= 3 && head[0] === 0x49 && head[1] === 0x44 && head[2] === 0x33) return true; // "ID3"
+  if (head.length >= 2 && head[0] === 0xff && (head[1]! & 0xe0) === 0xe0) return true; // frame sync
+  return false;
+}
 
 export type PublishResult = { ok: true; song: Song };
 
-/* ------------------------------------------------------------------- health */
+/* -------------------------------------------------------------------- health */
 
 export type HealthResponse = {
   ok: boolean;
   version: string;
   driver: "supabase";
   project: string;
-  checks: { database: boolean; storage: boolean; auth: boolean; seed: boolean };
+  checks: { database: boolean; storage: boolean; auth: boolean };
   counts: { profiles: number; songs: number; comments: number; playEvents: number };
   storageBytes: number;
   tookMs: number;

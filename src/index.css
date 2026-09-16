@@ -43,7 +43,9 @@
   --c-glow: 47, 191, 143;
   --c-glow-2: 217, 184, 113;
 
-  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 18px 40px -24px rgba(0, 0, 0, 0.9);
+  --shadow-card:
+    0 1px 0 rgba(255, 255, 255, 0.03) inset,
+    0 18px 40px -24px rgba(0, 0, 0, 0.9);
   --grain-opacity: 0.16;
   color-scheme: dark;
 }
@@ -80,9 +82,37 @@
   --c-glow: 20, 138, 99;
   --c-glow-2: 157, 122, 44;
 
-  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 14px 30px -22px rgba(20, 40, 32, 0.5);
+  --shadow-card:
+    0 1px 0 rgba(255, 255, 255, 0.7) inset,
+    0 14px 30px -22px rgba(20, 40, 32, 0.5);
   --grain-opacity: 0.07;
   color-scheme: light;
+}
+
+/* ------------------------------------------------------------------
+   Motion + material tokens (theme-independent)
+
+   The motion is iOS-flavoured: things do not fade in on a straight line, they
+   settle. `--ease-material` is the curve UIKit uses for a presented sheet —
+   fast out of the gate, then a long deceleration — and `--ease-spring` gives
+   the tiniest overshoot for taps and switches, which is what makes a control
+   feel physical rather than scripted.
+------------------------------------------------------------------ */
+
+:root {
+  --ease-material: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-spring: cubic-bezier(0.34, 1.32, 0.44, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --dur-tap: 130ms;
+  --dur-quick: 240ms;
+  --dur-base: 420ms;
+  --dur-settle: 560ms;
+
+  /* one place to tune every pane of glass */
+  --glass-blur: 24px;
+  --glass-sat: 165%;
+  --glass-sheen: rgba(255, 255, 255, 0.06);
 }
 
 @theme inline {
@@ -114,9 +144,12 @@
   --color-madder: var(--c-madder);
   --color-cobalt: var(--c-cobalt);
 
-  --font-sans: "Plus Jakarta Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-sans:
+    "Plus Jakarta Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-display: "Marcellus", "Cormorant Garamond", ui-serif, Georgia, serif;
-  --font-arabic: "Amiri", "Scheherazade New", "Noto Naskh Arabic", "Traditional Arabic", serif;
+  --font-arabic:
+    "Amiri", "Scheherazade New", "Noto Naskh Arabic", "Traditional Arabic",
+    serif;
 
   --radius-xs: 0.375rem;
   --radius-sm: 0.5rem;
@@ -168,20 +201,115 @@
     transform: scale(1.06);
   }
 }
-@keyframes riseIn {
+/* A pane of glass arriving: it comes in from slightly smaller and soft, which
+   reads as depth rather than as a slide. */
+@keyframes materialize {
   from {
     opacity: 0;
-    transform: translateY(14px);
+    transform: translateY(8px) scale(0.965);
+    filter: blur(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+/* The route veil: the content sitting behind it is blurred, and then it is not.
+   Only `opacity` animates — the backdrop filter is a constant on the layer —
+   so the cost is one composited fade instead of a per-frame re-raster. */
+@keyframes veilFlash {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+/* Incoming page: close the distance, do not travel. */
+@keyframes settleIn {
+  from {
+    opacity: 0;
+    transform: translateY(9px) scale(0.995);
   }
   to {
     opacity: 1;
     transform: none;
   }
 }
-@keyframes pageIn {
+@keyframes iconPop {
+  0% {
+    transform: scale(0.82);
+  }
+  55% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes sheenSweep {
+  from {
+    transform: translateX(-130%) rotate(8deg);
+  }
+  to {
+    transform: translateX(230%) rotate(8deg);
+  }
+}
+@keyframes sheetUp {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.995);
+    transform: translateY(3%) scale(1.015);
+    filter: blur(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(-4px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+@keyframes swapIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+    filter: blur(7px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+@keyframes pulseRing {
+  0% {
+    opacity: 0.55;
+    transform: scale(0.9);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
   }
   to {
     opacity: 1;
@@ -194,16 +322,6 @@
   }
   to {
     opacity: 1;
-  }
-}
-@keyframes toastIn {
-  from {
-    opacity: 0;
-    transform: translateY(12px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: none;
   }
 }
 
@@ -286,22 +404,72 @@
 @layer components {
   /* ---- surfaces ---- */
   .panel {
-    background:
-      linear-gradient(180deg, color-mix(in oklab, var(--c-surface) 92%, white 2%), var(--c-surface));
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--c-surface) 92%, white 2%),
+      var(--c-surface)
+    );
     border: 1px solid var(--c-line);
     box-shadow: var(--shadow-card);
   }
 
+  /* ---- glass ----
+     Not a translucent box: a stack. A tint that is slightly lighter at the top
+     where a light source would be, a saturated backdrop blur, a hairline that is
+     brighter along the top edge than the bottom (the specular rim), and a soft
+     drop shadow so it floats instead of sticking. */
   .glass {
-    background: color-mix(in oklab, var(--c-elev) 72%, transparent);
-    backdrop-filter: blur(22px) saturate(140%);
-    -webkit-backdrop-filter: blur(22px) saturate(140%);
-    border: 1px solid var(--c-line);
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--c-elev) 86%, transparent),
+      color-mix(in oklab, var(--c-elev) 68%, transparent)
+    );
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+    border: 1px solid color-mix(in oklab, var(--c-line-2) 80%, transparent);
+    box-shadow:
+      inset 0 1px 0 var(--glass-sheen),
+      inset 0 0 0 0.5px color-mix(in oklab, var(--c-line) 60%, transparent),
+      0 22px 60px -34px rgba(0, 0, 0, 0.95);
+  }
+
+  /* heavier tint for bars that carry text over busy artwork */
+  .glass-bar {
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--c-elev) 92%, transparent),
+      color-mix(in oklab, var(--c-elev) 78%, transparent)
+    );
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+    box-shadow: inset 0 1px 0 var(--glass-sheen);
+  }
+
+  /* The bottom edge of a scroll view, done the way iOS does it: the material
+     dissolves instead of stopping at a border. */
+  .scroll-edge::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    bottom: -20px;
+    height: 20px;
+    pointer-events: none;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--c-bg) 86%, transparent),
+      transparent
+    );
   }
 
   .hairline {
     height: 1px;
-    background: linear-gradient(90deg, transparent, var(--c-line-2) 18%, var(--c-line-2) 82%, transparent);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--c-line-2) 18%,
+      var(--c-line-2) 82%,
+      transparent
+    );
   }
 
   /* ---- buttons ---- */
@@ -325,7 +493,9 @@
     white-space: nowrap;
   }
   .btn:active {
-    transform: scale(0.96);
+    transform: scale(0.955);
+    transition-duration: 90ms;
+    transition-timing-function: ease-out;
   }
   .btn:disabled {
     opacity: 0.4;
@@ -395,6 +565,9 @@
     background: color-mix(in oklab, var(--c-surface-2) 60%, transparent);
     transition: all 0.18s ease;
   }
+  .chip:active {
+    transform: scale(0.94);
+  }
   .chip[data-active="true"] {
     color: var(--c-jade-ink);
     background: linear-gradient(180deg, var(--c-jade-soft), var(--c-jade));
@@ -407,16 +580,23 @@
     border: 1px solid var(--c-line);
     background: color-mix(in oklab, var(--c-surface) 80%, transparent);
     transition:
-      transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1),
-      border-color 0.3s ease,
-      background-color 0.3s ease,
-      box-shadow 0.35s ease;
+      transform var(--dur-base) var(--ease-material),
+      border-color var(--dur-quick) ease,
+      background-color var(--dur-quick) ease,
+      box-shadow var(--dur-base) var(--ease-material);
   }
   .card:hover {
-    transform: translateY(-4px);
+    transform: translateY(-3px);
     border-color: var(--c-line-2);
     background: var(--c-surface);
-    box-shadow: 0 26px 50px -30px rgba(0, 0, 0, 0.95);
+    box-shadow:
+      inset 0 1px 0 var(--glass-sheen),
+      0 26px 50px -30px rgba(0, 0, 0, 0.95);
+  }
+  /* a card that lifts on hover also gives on press — the same surface, both ways */
+  .card:active {
+    transform: translateY(-1px) scale(0.988);
+    transition-duration: 110ms;
   }
 
   /* ---- text ---- */
@@ -442,6 +622,180 @@
     overflow: hidden;
   }
 
+  /* ---- the bar at the top of a scroll view ----
+     The material does not stop at a border, it thins out, so what scrolls under it
+     dissolves instead of being cut off. Two layers, and deliberately no `mask-image`:
+     masking an element that carries a `backdrop-filter` is the kind of combination
+     engines disagree about, and a header that loses its tint is a header the page
+     shows through. The dissolve is painted instead — page colour fading out over the
+     foot of the material — which renders the same everywhere. */
+  .topbar::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 -1.5rem;
+    z-index: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--c-bg) 92%, transparent),
+      color-mix(in oklab, var(--c-bg) 78%, transparent)
+    );
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  }
+  .topbar::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 -1.5rem;
+    height: 1.5rem;
+    z-index: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--c-bg) 72%, transparent),
+      transparent
+    );
+  }
+
+  /* ---- the sliding selection pills ----
+     One element travels between destinations instead of each destination lighting
+     up on its own. Movement is the whole message: it says where you came from. */
+  .nav-pill {
+    position: absolute;
+    top: 0;
+    left: 0.625rem;
+    right: 0.625rem;
+    border-radius: var(--radius-lg);
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--c-surface-3) 78%, transparent),
+      color-mix(in oklab, var(--c-surface-2) 62%, transparent)
+    );
+    box-shadow:
+      inset 0 1px 0 var(--glass-sheen),
+      0 10px 24px -18px rgba(0, 0, 0, 0.95);
+    pointer-events: none;
+    transition:
+      transform var(--dur-base) var(--ease-spring),
+      height var(--dur-base) var(--ease-spring),
+      opacity var(--dur-quick) ease;
+  }
+  .nav-pill::before {
+    content: "";
+    position: absolute;
+    left: -0.375rem;
+    top: 7px;
+    bottom: 7px;
+    width: 3px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, var(--c-jade-soft), var(--c-gold));
+  }
+
+  .tab-lens {
+    position: absolute;
+    top: 5px;
+    bottom: 5px;
+    left: 0;
+    border-radius: 18px;
+    background: color-mix(in oklab, var(--c-surface-3) 70%, transparent);
+    box-shadow: inset 0 1px 0 var(--glass-sheen);
+    pointer-events: none;
+    transition:
+      transform var(--dur-base) var(--ease-spring),
+      width var(--dur-base) var(--ease-spring),
+      opacity var(--dur-quick) ease;
+  }
+  .seg-thumb {
+    position: absolute;
+    top: 0.25rem;
+    bottom: 0.25rem;
+    left: 0;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--c-jade) 16%, transparent);
+    box-shadow: inset 0 0 0 1px var(--c-line-2);
+    pointer-events: none;
+    transition:
+      transform var(--dur-base) var(--ease-spring),
+      width var(--dur-base) var(--ease-spring);
+  }
+
+  /* a menu opened from a control: it grows out of the thing that opened it */
+  .pop-in {
+    animation: popIn var(--dur-quick) var(--ease-spring) both;
+    transform-origin: var(--pop-origin, top center);
+  }
+
+  /* the now-playing block when the track changes: it does not cut, it settles */
+  .swap-in {
+    animation: swapIn var(--dur-base) var(--ease-material) both;
+  }
+
+  /* a full-screen sheet rising over the page */
+  .sheet-in {
+    animation: sheetUp var(--dur-base) var(--ease-material) both;
+  }
+
+  /* ---- microinteractions ----
+     One class for "this responds to a finger". The press is quick and the
+     release springs back, because a tap that returns on a straight line feels
+     like a bug even when the geometry is identical. */
+  .pressable {
+    transition:
+      transform var(--dur-tap) var(--ease-spring),
+      background-color var(--dur-quick) ease,
+      color var(--dur-quick) ease,
+      border-color var(--dur-quick) ease,
+      box-shadow var(--dur-quick) ease;
+  }
+  .pressable:active {
+    transform: scale(0.965);
+    transition-duration: 90ms;
+    transition-timing-function: ease-out;
+  }
+
+  /* A highlight that crosses a surface once, the first time it is pointed at. */
+  .sheen {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .sheen::after {
+    content: "";
+    position: absolute;
+    inset: -40% -60%;
+    z-index: 1;
+    pointer-events: none;
+    background: linear-gradient(
+      100deg,
+      transparent 38%,
+      color-mix(in oklab, white 12%, transparent) 50%,
+      transparent 62%
+    );
+    opacity: 0;
+    transform: translateX(-130%) rotate(8deg);
+  }
+  .sheen:hover::after,
+  .sheen:focus-visible::after {
+    opacity: 1;
+    animation: sheenSweep 900ms var(--ease-out) 1;
+  }
+
+  /* an icon that answers a state change rather than just recolouring */
+  .icon-pop {
+    animation: iconPop var(--dur-base) var(--ease-spring) 1;
+  }
+
+  /* the ring that leaves a control when it is switched on */
+  .pop-ring::before {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    pointer-events: none;
+    border: 1.5px solid currentColor;
+    animation: pulseRing 620ms var(--ease-out) 1;
+  }
+
   /* ---- overlays / motion ---- */
   .grain::after {
     content: "";
@@ -453,16 +807,43 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
   }
 
-  .page-enter {
-    animation: pageIn 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  /* the incoming route */
+  .route-in {
+    animation: settleIn var(--dur-base) var(--ease-material) both;
+  }
+
+  /* the frosted sheet that wipes across a route change and then dissolves */
+  .route-veil {
+    position: absolute;
+    inset: 0;
+    z-index: 55;
+    pointer-events: none;
+    background: color-mix(in oklab, var(--c-bg) 34%, transparent);
+    backdrop-filter: blur(26px) saturate(130%);
+    -webkit-backdrop-filter: blur(26px) saturate(130%);
+    animation: veilFlash var(--dur-base) var(--ease-material) both;
+  }
+
+  /* No backdrop filter, no veil. Without this guard, a browser that cannot blur has no
+     way to make a frosted sheet and would flash an opaque grey rectangle over the page
+     on every navigation — which is the definition of broken. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .route-veil {
+      display: none;
+    }
   }
 
   .veil-enter {
     animation: veilIn 0.3s ease both;
   }
 
+  /* sheets, dialogs, the palette: presented, not faded in */
+  .materialize {
+    animation: materialize var(--dur-base) var(--ease-material) both;
+  }
+
   .toast-enter {
-    animation: toastIn 0.32s cubic-bezier(0.2, 0.9, 0.2, 1) both;
+    animation: materialize var(--dur-base) var(--ease-spring) both;
   }
 
   .reveal {
@@ -650,7 +1031,12 @@
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--c-jade-deep), var(--c-jade) 60%, var(--c-gold));
+  background: linear-gradient(
+    90deg,
+    var(--c-jade-deep),
+    var(--c-jade) 60%,
+    var(--c-gold)
+  );
 }
 .seek:hover .seek-track {
   height: 6px;
@@ -666,5 +1052,20 @@
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+  /* the veil is motion of a kind: with reduced motion the route simply appears */
+  .route-veil {
+    display: none;
+  }
+}
+
+/* Anyone who has asked the system for less transparency gets the layout, the
+   motion and none of the glass. */
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .glass-bar {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--c-elev);
   }
 }

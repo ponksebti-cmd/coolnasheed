@@ -5,8 +5,11 @@
 --  Supabase's storage CDN with no function in the way, so a listener streaming
 --  a nasheed costs nothing from the Edge Function allowance.
 --
---    nasheed-audio    <uid>/<songId>.<ext>   ≤ 60 MB, audio only
---    nasheed-artwork  <uid>/<name>.<ext>     ≤  8 MB, images only
+--    nasheed-audio    <uid>/<songId>.<ext>   ≤ 5 MB, mp3 only
+--    nasheed-artwork  <uid>/<name>.<ext>     ≤ 2 MB, images only
+--
+--  (A later migration restates both; the browser compresses anything larger before it
+--   uploads, so these are a ceiling rather than a thing people are expected to hit.)
 --
 --  Size and MIME limits live on the bucket, so the storage API rejects bad
 --  uploads before RLS is even consulted. The policies only answer one
@@ -15,13 +18,11 @@
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values
-  ('nasheed-audio', 'nasheed-audio', true, 62914560, array[
-    'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/wave',
-    'audio/ogg', 'audio/opus', 'audio/mp4', 'audio/m4a', 'audio/x-m4a',
-    'audio/aac', 'audio/webm', 'audio/flac'
+  ('nasheed-audio', 'nasheed-audio', true, 5242880, array[
+    'audio/mpeg', 'audio/mp3', 'audio/x-mpeg'
   ]),
-  ('nasheed-artwork', 'nasheed-artwork', true, 8388608, array[
-    'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif', 'image/svg+xml'
+  ('nasheed-artwork', 'nasheed-artwork', true, 2097152, array[
+    'image/png', 'image/jpeg', 'image/webp', 'image/avif'
   ])
 on conflict (id) do update
   set public = excluded.public,

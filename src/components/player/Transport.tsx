@@ -1,16 +1,20 @@
+/**
+ * Transport controls and the seek row.
+ *
+ * Everything here reads the recording's own clock: the duration comes from the file,
+ * the position comes from the audio element, and seeking moves the element. There is
+ * no second clock to drift away from the first one.
+ */
+
 import { clsx } from "clsx";
+import { useState } from "react";
 import { Icon } from "../ui/Icons";
 import { SeekBar } from "../ui/Primitives";
-import { getTrack, durationOf } from "../../data/catalog";
-import { songFor } from "../../lib/song";
-import { peaksFor } from "../../lib/envelope";
+import { durationOf, getTrack } from "../../data/catalog";
 import { formatTime } from "../../lib/format";
 import { usePlayer } from "../../store/player";
 import { useLibrary } from "../../store/library";
 import { useSmoothTime } from "../../lib/hooks";
-import { SPACE_LABELS } from "../../lib/audio/engine";
-import { useMemo, useState } from "react";
-import { DropdownMenu } from "../ui/Menu";
 
 export function TransportButtons({ size = 40 }: { size?: number }) {
   const playing = usePlayer((s) => s.playing);
@@ -58,28 +62,25 @@ export function TransportButtons({ size = 40 }: { size?: number }) {
   );
 }
 
-export function TimeRow({ showWave = true, className }: { showWave?: boolean; className?: string }) {
+export function TimeRow({ className }: { className?: string }) {
   const trackId = usePlayer((s) => s.trackId);
   const playing = usePlayer((s) => s.playing);
   const storeTime = usePlayer((s) => s.time);
+  const duration = usePlayer((s) => s.duration);
+  const error = usePlayer((s) => s.error);
   const seek = usePlayer((s) => s.seek);
   const t = useSmoothTime(playing) || storeTime;
   const track = getTrack(trackId);
-  const duration = track ? durationOf(track) : 0;
-  const peaks = useMemo(() => (track && showWave ? peaksFor(songFor(track)) : undefined), [track, showWave]);
+  const total = duration || (track ? durationOf(track) : 0);
 
   return (
-    <div className={clsx("flex w-full items-center gap-3", className)}>
-      <span className="w-10 shrink-0 text-right text-[11px] font-semibold tabular-nums text-muted">{formatTime(t)}</span>
-      <SeekBar
-        value={t}
-        max={duration}
-        peaks={peaks}
-        onChange={seek}
-        className="flex-1"
-        label="Seek within the nasheed"
-      />
-      <span className="w-10 shrink-0 text-[11px] font-semibold tabular-nums text-muted">{formatTime(duration)}</span>
+    <div className={clsx("flex w-full flex-col gap-1", className)}>
+      <div className="flex w-full items-center gap-3">
+        <span className="w-10 shrink-0 text-right text-[11px] font-semibold tabular-nums text-muted">{formatTime(t)}</span>
+        <SeekBar value={t} max={total} onChange={seek} className="flex-1" label="Seek within the nasheed" />
+        <span className="w-10 shrink-0 text-[11px] font-semibold tabular-nums text-muted">{formatTime(total)}</span>
+      </div>
+      {error ? <div className="text-center text-[11px] text-madder">{error}</div> : null}
     </div>
   );
 }
@@ -87,8 +88,10 @@ export function TimeRow({ showWave = true, className }: { showWave?: boolean; cl
 export function VolumeControl({ className }: { className?: string }) {
   const settings = useLibrary((s) => s.settings);
   const setVolume = usePlayer((s) => s.setVolume);
+  const setMuted = usePlayer((s) => s.setMuted);
   const [lastNonZero, setLastNonZero] = useState(0.85);
-  const v = settings.volume;
+  const muted = settings.muted;
+  const v = muted ? 0 : settings.volume;
 
   const icon = v === 0 ? "volumeMute" : v < 0.45 ? "volumeLow" : "volume";
 
@@ -98,10 +101,12 @@ export function VolumeControl({ className }: { className?: string }) {
         className="btn-icon grid place-items-center rounded-full p-1.5"
         aria-label={v === 0 ? "Unmute" : "Mute"}
         onClick={() => {
-          if (v === 0) setVolume(lastNonZero || 0.85);
-          else {
+          if (v === 0) {
+            setMuted(false);
+            setVolume(lastNonZero || 0.85);
+          } else {
             setLastNonZero(v);
-            setVolume(0);
+            setMuted(true);
           }
         }}
       >
@@ -119,7 +124,10 @@ export function VolumeControl({ className }: { className?: string }) {
           max={1}
           step={0.01}
           value={v}
-          onChange={(e) => setVolume(Number(e.target.value))}
+          onChange={(e) => {
+            if (muted) setMuted(false);
+            setVolume(Number(e.target.value));
+          }}
           aria-label="Volume"
           className="absolute inset-0 h-full w-full opacity-0"
         />
@@ -129,34 +137,5 @@ export function VolumeControl({ className }: { className?: string }) {
         />
       </div>
     </div>
-  );
-}
-
-export function SpaceMenu({ compact }: { compact?: boolean }) {
-  const space = useLibrary((s) => s.settings.space);
-  const setSpace = usePlayer((s) => s.setSpace);
-  const label = SPACE_LABELS.find((s) => s.id === space)?.label ?? "Hall";
-  return (
-    <DropdownMenu
-      label="Reverb space"
-      align="right"
-      items={SPACE_LABELS.map((s) => ({
-        label: s.label,
-        icon: s.id === "masjid" ? ("mosque" as const) : s.id === "hall" ? ("home" as const) : ("waveform" as const),
-        checked: s.id === space,
-        onClick: () => setSpace(s.id),
-        hint: s.id === "studio" ? "dry" : s.id === "masjid" ? "4.6s" : undefined,
-      }))}
-      renderTrigger={({ onClick }) => (
-        <button
-          onClick={onClick}
-          className={clsx("btn btn-ghost !px-2.5 !py-1.5", compact && "!px-2")}
-          title="Reverb space — the synthesized voices are convolved with a procedural impulse response"
-        >
-          <Icon name="mosque" size={14} />
-          {compact ? null : <span>{label}</span>}
-        </button>
-      )}
-    />
   );
 }

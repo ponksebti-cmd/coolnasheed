@@ -2,33 +2,40 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { clsx } from "clsx";
 import { Icon } from "../components/ui/Icons";
-import { Chip, EmptyState, Reveal, SectionHeader } from "../components/ui/Primitives";
+import { Chip, EmptyState, SectionHeader } from "../components/ui/Primitives";
 import { ArtistCard, CollectionCard } from "../components/collection/Cards";
 import { TrackCardGrid, TrackList } from "../components/track/TrackViews";
-import { ALL_TAGS, ARTISTS, COLLECTIONS, MOODS, TRACKS, durationOf, searchArtists, searchCollections, searchTracks, statsFor } from "../data/catalog";
-import { MAQAM_NAMES, maqamLabel } from "../lib/theory";
+import {
+  ARTISTS,
+  COLLECTIONS,
+  TRACKS,
+  durationOf,
+  searchArtists,
+  searchCollections,
+  searchTracks,
+  statsFor,
+  tagCounts,
+} from "../data/catalog";
+import { useCatalogVersion } from "../lib/hooks";
 import { plural } from "../lib/format";
 import type { Track } from "../data/types";
 
-type Sort = "relevance" | "plays" | "slow" | "fast" | "az";
+type Sort = "relevance" | "plays" | "newest" | "longest" | "shortest" | "az";
 
 const SORTS: { id: Sort; label: string }[] = [
   { id: "relevance", label: "Relevance" },
   { id: "plays", label: "Most played" },
-  { id: "slow", label: "Slowest" },
-  { id: "fast", label: "Fastest" },
+  { id: "newest", label: "Newest" },
+  { id: "longest", label: "Longest" },
+  { id: "shortest", label: "Shortest" },
   { id: "az", label: "A–Z" },
 ];
 
-const SUGGESTIONS = ["Ḥijāz", "Ramadan", "vocals only", "dhikr", "Madinah", "Qurʾān", "quarter tone", "Cairo", "sleep"];
-
 export default function Search() {
   const [params, setParams] = useSearchParams();
+  const version = useCatalogVersion();
   const q = params.get("q") ?? "";
-  const mood = params.get("mood");
-  const [maqam, setMaqam] = useState<string | null>(null);
-  const [tag, setTag] = useState<string | null>(null);
-  const [duffOnly, setDuffOnly] = useState<"any" | "with" | "without">("any");
+  const tagParam = params.get("tag");
   const [sort, setSort] = useState<Sort>("relevance");
   const [view, setView] = useState<"rows" | "grid">("rows");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -39,35 +46,34 @@ export default function Search() {
     return () => window.removeEventListener("coolnasheed:focus-search", focus);
   }, []);
 
-  const setQ = (value: string) => {
+  const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params);
-    if (value) next.set("q", value);
-    else next.delete("q");
+    if (value) next.set(key, value);
+    else next.delete(key);
     setParams(next, { replace: true });
   };
 
+  const tag = tagParam;
+  const tags = useMemo(() => tagCounts(), [version]);
+  const suggestions = useMemo(() => tags.slice(0, 9).map((entry) => entry.tag), [tags]);
+
   const results = useMemo<Track[]>(() => {
     let list = q.trim() ? searchTracks(q) : TRACKS.slice();
-
-    if (mood) {
-      const m = MOODS.find((x) => x.id === mood);
-      if (m) list = list.filter((t) => m.match(t));
-    }
-    if (maqam) list = list.filter((t) => t.maqam === maqam);
-    if (tag) list = list.filter((t) => t.tags.includes(tag));
-    if (duffOnly === "with") list = list.filter((t) => !!t.duff);
-    if (duffOnly === "without") list = list.filter((t) => !t.duff);
+    if (tag) list = list.filter((track) => track.tags.includes(tag));
 
     const sorted = list.slice();
     switch (sort) {
       case "plays":
         sorted.sort((a, b) => statsFor(b).plays - statsFor(a).plays);
         break;
-      case "slow":
-        sorted.sort((a, b) => a.bpm - b.bpm);
+      case "newest":
+        sorted.sort((a, b) => b.publishedAt - a.publishedAt);
         break;
-      case "fast":
-        sorted.sort((a, b) => b.bpm - a.bpm);
+      case "longest":
+        sorted.sort((a, b) => durationOf(b) - durationOf(a));
+        break;
+      case "shortest":
+        sorted.sort((a, b) => durationOf(a) - durationOf(b));
         break;
       case "az":
         sorted.sort((a, b) => a.title.localeCompare(b.title));
@@ -76,26 +82,18 @@ export default function Search() {
         break;
     }
     return sorted;
-  }, [q, mood, maqam, tag, duffOnly, sort]);
+  }, [q, tag, sort, version]);
 
-  const artists = useMemo(() => (q.trim() ? searchArtists(q) : []), [q]);
-  const collections = useMemo(() => (q.trim() ? searchCollections(q) : []), [q]);
-  const activeMood = MOODS.find((m) => m.id === mood);
-  const filtersOn = !!maqam || !!tag || duffOnly !== "any" || !!mood;
+  const artists = useMemo(() => (q.trim() ? searchArtists(q) : []), [q, version]);
+  const collections = useMemo(() => (q.trim() ? searchCollections(q) : []), [q, version]);
+  const filtersOn = !!tag;
 
   return (
     <div className="space-y-8">
       {/* search field */}
       <section className="relative overflow-hidden rounded-2xl border border-line bg-surface/40 p-5 md:p-7">
-        <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 opacity-[0.14]">
-          <svg viewBox="0 0 100 100" className="h-full w-full animate-spinslow" aria-hidden>
-            <path
-              d="M50 6 60 30 86 24 74 48 96 62 70 68 74 94 50 78 26 94 30 68 4 62 26 48 14 24 40 30Z"
-              fill="none"
-              stroke="var(--c-gold)"
-              strokeWidth="0.8"
-            />
-          </svg>
+        <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 opacity-[0.14] text-gold">
+          <Icon name="starFill" size={224} />
         </div>
         <div className="relative">
           <div className="label mb-2">search</div>
@@ -106,87 +104,39 @@ export default function Search() {
             <input
               ref={inputRef}
               value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="A title, a reciter, a maqām, a city, or a line of poetry…"
+              onChange={(e) => setParam("q", e.target.value || null)}
+              placeholder="A title, a publisher, a tag, or a line of poetry…"
               className="w-full rounded-2xl border border-line2 bg-bg2/70 py-3.5 pl-11 pr-24 text-[15px] text-text outline-none transition-all placeholder:text-muted/80 focus:border-jade/45 focus:shadow-[0_0_0_5px_rgba(var(--c-glow),0.09)]"
               aria-label="Search nasheeds"
             />
             {q ? (
-              <button className="btn-icon absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-2" onClick={() => setQ("")} aria-label="Clear search">
+              <button className="btn-icon absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-2" onClick={() => setParam("q", null)} aria-label="Clear search">
                 <Icon name="close" size={16} />
               </button>
             ) : (
               <span className="absolute right-4 top-1/2 hidden -translate-y-1/2 text-[11px] text-muted sm:block">
-                {plural(TRACKS.length, "nasheed")} · {ARTISTS.length} reciters
+                {plural(TRACKS.length, "nasheed")} · {ARTISTS.length} publishers
               </span>
             )}
           </div>
 
-          {/* moods */}
-          <div className="mt-4 flex flex-wrap items-center gap-1.5">
-            <span className="label mr-1">mood</span>
-            {MOODS.map((m) => (
-              <Chip
-                key={m.id}
-                active={mood === m.id}
-                onClick={() => {
-                  const next = new URLSearchParams(params);
-                  if (mood === m.id) next.delete("mood");
-                  else next.set("mood", m.id);
-                  setParams(next, { replace: true });
-                }}
-              >
-                {m.label}
-              </Chip>
-            ))}
-          </div>
-
-          {/* filters */}
-          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            <span className="label mr-1">maqām</span>
-            {MAQAM_NAMES.map((m) => (
-              <Chip key={m} active={maqam === m} onClick={() => setMaqam(maqam === m ? null : m)}>
-                {maqamLabel(m)}
-              </Chip>
-            ))}
-            <span className="mx-2 hidden h-4 w-px bg-line2 sm:block" />
-            <span className="label mr-1">duff</span>
-            {(["any", "with", "without"] as const).map((v) => (
-              <Chip key={v} active={duffOnly === v} onClick={() => setDuffOnly(v)}>
-                {v === "any" ? "either" : v === "with" ? "with drum" : "vocals only"}
-              </Chip>
-            ))}
-          </div>
-
-          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            <span className="label mr-1">tag</span>
-            {ALL_TAGS.slice(0, 14).map((t) => (
-              <Chip key={t} active={tag === t} onClick={() => setTag(tag === t ? null : t)}>
-                {t}
-              </Chip>
-            ))}
-          </div>
+          {tags.length ? (
+            <div className="mt-4 flex flex-wrap items-center gap-1.5">
+              <span className="label mr-1">tag</span>
+              {tags.slice(0, 14).map((entry) => (
+                <Chip key={entry.tag} active={tag === entry.tag} onClick={() => setParam("tag", tag === entry.tag ? null : entry.tag)}>
+                  {entry.tag}
+                  <span className="ml-1.5 tabular-nums text-muted">{entry.count}</span>
+                </Chip>
+              ))}
+            </div>
+          ) : null}
         </div>
       </section>
 
-      {activeMood ? (
-        <Reveal>
-          <div className="flex items-center gap-3 rounded-xl border border-jade/25 bg-jade/[0.06] px-4 py-3">
-            <Icon name="compass" size={16} className="shrink-0 text-jade" />
-            <p className="text-[12.5px] leading-relaxed text-text2">
-              <span className="font-semibold text-text">{activeMood.label}</span> — {activeMood.blurb}.{" "}
-              <span className="text-muted">
-                {activeMood.labelAr ? <span className="arabic mr-1 text-[13px] text-goldsoft/80">{activeMood.labelAr}</span> : null}
-                Filtering by tempo, maqām and intent rather than by keyword.
-              </span>
-            </p>
-          </div>
-        </Reveal>
-      ) : null}
-
-      {/* artists + collections when searching */}
+      {/* artists + sets when searching */}
       {artists.length ? (
-        <Rail2 label="reciters" title={`Voices matching “${q}”`}>
+        <Rail2 label="publishers" title={`Publishers matching “${q}”`}>
           {artists.map((a, i) => (
             <div key={a.id} className="w-[168px] shrink-0 sm:w-[190px]">
               <ArtistCard artist={a} index={i} />
@@ -208,8 +158,8 @@ export default function Search() {
       {/* results */}
       <section>
         <SectionHeader
-          label={q ? `${results.length} results` : filtersOn ? `${results.length} filtered` : "the catalogue"}
-          title={q ? `Matching “${q}”` : activeMood ? `${activeMood.label}, sorted` : "Every nasheed we have"}
+          label={q ? `${results.length} results` : filtersOn ? `${results.length} tagged ${tag}` : "the catalogue"}
+          title={q ? `Matching “${q}”` : filtersOn ? `Tagged ${tag}` : TRACKS.length ? "Every nasheed here" : "Nothing published yet"}
           action={
             <div className="flex items-center gap-2">
               <div className="hidden items-center gap-1 sm:flex">
@@ -246,48 +196,50 @@ export default function Search() {
           }
         />
 
-        {results.length === 0 ? (
+        {TRACKS.length === 0 ? (
+          <EmptyState
+            icon="cloudOff"
+            title="The catalogue is empty"
+            msg="Nothing has been published yet. When a reciter uploads an mp3 it appears here — there is no demo catalogue behind this."
+            action={
+              <Link to="/studio" className="btn btn-primary mt-2 !px-4 !py-2.5">
+                <Icon name="upload" size={14} /> Publish the first one
+              </Link>
+            }
+          />
+        ) : results.length === 0 ? (
           <EmptyState
             icon="search"
             title="Nothing matched that"
-            msg="The catalogue is small and honest. Try a maqām, a mood, or one of these."
+            msg={filtersOn ? "Nothing carries that tag yet." : "Try a title, a publisher's name, or one of these."}
             action={
-              <div className="mt-1 flex flex-wrap justify-center gap-1.5">
-                {SUGGESTIONS.map((s) => (
-                  <button key={s} className="chip hover:border-line2 hover:text-text" onClick={() => setQ(s)}>
-                    {s}
-                  </button>
-                ))}
-              </div>
+              suggestions.length ? (
+                <div className="mt-1 flex flex-wrap justify-center gap-1.5">
+                  {suggestions.map((s) => (
+                    <button key={s} className="chip hover:border-line2 hover:text-text" onClick={() => setParam("q", s)}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              ) : undefined
             }
           />
         ) : view === "rows" ? (
           <div className="panel rounded-2xl p-2 sm:p-3">
-            <TrackList
-              tracks={results}
-              showHeader
-              context={{ kind: "search", label: q ? `Search · ${q}` : activeMood ? `Mood · ${activeMood.label}` : "Catalogue" }}
-            />
+            <TrackList tracks={results} showHeader context={{ kind: "search", label: q ? `Search · ${q}` : tag ? `Tag · ${tag}` : "Catalogue" }} />
           </div>
         ) : (
           <TrackCardGrid tracks={results} context={{ kind: "search", label: q ? `Search · ${q}` : "Catalogue" }} />
         )}
       </section>
 
-      {!q && !filtersOn ? (
+      {!q && !filtersOn && COLLECTIONS.length ? (
         <section>
           <SectionHeader label="or start here" title="Sets, if you would rather not choose" />
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
             {COLLECTIONS.slice(0, 8).map((c, i) => (
               <CollectionCard key={c.id} collection={c} index={i} />
             ))}
-          </div>
-          <div className="mt-6 flex flex-wrap items-center gap-2 text-[12px] text-muted">
-            <Icon name="info" size={13} />
-            <span>Every reciter in this catalogue is fictional; the texts are traditional, scriptural, or written for the app.</span>
-            <Link to="/about" className="font-semibold text-jade hover:underline underline-offset-2">
-              Read the whole note
-            </Link>
           </div>
         </section>
       ) : null}
@@ -296,10 +248,15 @@ export default function Search() {
         <div className="flex flex-wrap items-center gap-2 text-[11.5px] text-muted">
           <Icon name="waveform" size={13} />
           <span>
-            {results.length} tracks · {plural(results.reduce((s, t) => s + Math.round(durationOf(t) / 60), 0), "minute")} of singing
-            {results.some((t) => !t.duff) ? ` · ${results.filter((t) => !t.duff).length} vocals-only` : ""}
-            {results.some((t) => t.lines.some((l) => l.note?.startsWith("Qurʾān"))) ? " · includes Qurʾānic lines" : ""}
+            {plural(results.length, "nasheed")} · {plural(results.reduce((sum, t) => sum + Math.round(durationOf(t) / 60), 0), "minute")} of
+            singing
+            {results.some((t) => t.lines.some((l) => typeof l.t === "number"))
+              ? ` · ${results.filter((t) => t.lines.some((l) => typeof l.t === "number")).length} with timed lyrics`
+              : ""}
           </span>
+          <Link to="/about" className="ml-auto font-semibold text-jade hover:underline underline-offset-2">
+            How the catalogue works
+          </Link>
         </div>
       ) : null}
     </div>

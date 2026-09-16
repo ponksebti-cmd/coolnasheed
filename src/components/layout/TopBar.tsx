@@ -4,7 +4,6 @@ import { clsx } from "clsx";
 import { Icon } from "../ui/Icons";
 import { Kbd } from "../ui/Primitives";
 import { useLibrary } from "../../store/library";
-import { useUi } from "../../store/ui";
 import { AccountMenu } from "../auth/AccountMenu";
 
 export function TopBar({ onMenu }: { onMenu: () => void }) {
@@ -12,8 +11,6 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
   const location = useLocation();
   const theme = useLibrary((s) => s.settings.theme);
   const setSetting = useLibrary((s) => s.setSetting);
-  const setNur = useUi((s) => s.setNur);
-  const nurOpen = useUi((s) => s.nurOpen);
   const inputRef = useRef<HTMLInputElement>(null);
   const [q, setQ] = useState("");
 
@@ -37,9 +34,13 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
   };
 
   return (
-    <header className="sticky top-0 z-30 border-b border-line bg-bg/72 backdrop-blur-xl">
-      <div className="flex items-center gap-2 px-3 py-2.5 sm:gap-3 sm:px-5">
-        <button className="btn-icon rounded-full p-2 lg:hidden" onClick={onMenu} aria-label="Open menu">
+    <header className="topbar sticky top-0 z-30">
+      <div className="relative z-10 flex items-center gap-2 px-3 py-2.5 sm:gap-3 sm:px-5">
+        <button
+          className="btn-icon rounded-full p-2 lg:hidden"
+          onClick={onMenu}
+          aria-label="Open menu"
+        >
           <Icon name="rows" size={18} />
         </button>
         <button
@@ -52,7 +53,10 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
         </button>
 
         <form
-          className={clsx("relative min-w-0 flex-1 max-w-[520px]", location.pathname === "/search" && "hidden md:block")}
+          className={clsx(
+            "relative min-w-0 flex-1 max-w-[520px]",
+            location.pathname === "/search" && "hidden md:block",
+          )}
           onSubmit={(e) => {
             e.preventDefault();
             onSearch(q);
@@ -69,7 +73,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
               setQ(e.target.value);
               onSearch(e.target.value);
             }}
-            placeholder="Search nasheeds, reciters, maqām, a line of poetry…"
+            placeholder="Search nasheeds, publishers, a line of poetry…"
             aria-label="Search CoolNasheed"
             className="w-full rounded-full border border-line bg-surface2/60 py-2 pl-9 pr-16 text-[13px] text-text outline-none transition-all placeholder:text-muted/80 focus:border-jade/45 focus:bg-surface2 focus:shadow-[0_0_0_4px_rgba(var(--c-glow),0.08)]"
           />
@@ -80,21 +84,10 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
 
         <div className="ml-auto flex items-center gap-1.5">
           <button
-            onClick={() => setNur(!nurOpen)}
-            className={clsx(
-              "btn gap-1.5 !px-3 !py-2",
-              nurOpen ? "btn-gold" : "btn-ghost",
-            )}
-            aria-pressed={nurOpen}
-            title="Nūr — the on-device curator"
-          >
-            <Icon name="sparkle" size={15} />
-            <span className="hidden md:inline">Nūr</span>
-          </button>
-
-          <button
             className="btn-icon hidden rounded-full p-2 md:grid"
-            onClick={() => window.dispatchEvent(new CustomEvent("coolnasheed:command"))}
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("coolnasheed:command"))
+            }
             aria-label="Command palette"
             title="Command palette"
           >
@@ -103,8 +96,14 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
 
           <button
             className="btn-icon grid place-items-center rounded-full p-2"
-            onClick={() => setSetting("theme", theme === "night" ? "dawn" : "night")}
-            aria-label={theme === "night" ? "Switch to daylight theme" : "Switch to night theme"}
+            onClick={() =>
+              setSetting("theme", theme === "night" ? "dawn" : "night")
+            }
+            aria-label={
+              theme === "night"
+                ? "Switch to daylight theme"
+                : "Switch to night theme"
+            }
             title={theme === "night" ? "Daylight theme" : "Night theme"}
           >
             <Icon name={theme === "night" ? "moon" : "sun"} size={17} />

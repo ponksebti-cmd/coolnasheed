@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { clsx } from "clsx";
 import { Icon } from "../components/ui/Icons";
 import { EmptyState, SectionHeader, Tabs, useToast } from "../components/ui/Primitives";
-import { PatternArt } from "../components/art/PatternArt";
+import { Avatar } from "../components/art/CoverArt";
 import { TrackList } from "../components/track/TrackViews";
 import { useAccount } from "../lib/hooks";
 import { useUi } from "../store/ui";
@@ -12,7 +11,6 @@ import { useStudio } from "../store/studio";
 import { useCommunity, timeAgoLabel } from "../store/community";
 import { useLibrary } from "../store/library";
 import { getTrack } from "../data/catalog";
-import { MAQAMAT } from "../lib/theory";
 import { plural } from "../lib/format";
 import type { Track } from "../data/types";
 
@@ -37,22 +35,23 @@ export default function ProfilePage() {
   const setTab = (id: TabId) => setParams(id === "nasheeds" ? {} : { tab: id }, { replace: true });
 
   const entries = useStudio((s) => s.entries);
-  const byOwner = useStudio((s) => s.byOwner);
+  const loadEntries = useStudio((s) => s.loadMine);
   const unpublish = useStudio((s) => s.unpublish);
   const myNotes = useCommunity((s) => s.mine);
-  const loadMine = useCommunity((s) => s.loadMine);
+  const loadNotes = useCommunity((s) => s.loadMine);
   const deleteComment = useCommunity((s) => s.deleteComment);
   const stats = useSession((s) => s.stats);
   const library = useLibrary();
 
   useEffect(() => {
-    void loadMine();
-  }, [loadMine]);
+    void loadEntries();
+    void loadNotes();
+  }, [loadEntries, loadNotes]);
+
 
   const published = useMemo(
-    () => (account ? byOwner(account.id).map((e) => getTrack(e.id)).filter((t): t is Track => !!t) : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entries, account, byOwner],
+    () => (account ? entries.filter((entry) => entry.ownerId === account.id) : []),
+    [entries, account],
   );
   const mine = useMemo(() => (account ? myNotes.filter((c) => c.authorId === account.id) : []), [myNotes, account]);
   const loved = useMemo(() => library.liked.map((id) => getTrack(id)).filter((t): t is Track => !!t), [library.liked]);
@@ -74,7 +73,7 @@ export default function ProfilePage() {
         <EmptyState
           icon="user"
           title="Sign in to see a profile"
-          msg="Accounts live in this browser. There is no server, no email and nothing to sync — which also means nothing to lose by trying."
+          msg="An account is an email, a password and a handle. Everything you keep is stored under it, and nothing is kept on this device."
           action={
             <div className="mt-1 flex flex-wrap justify-center gap-2">
               <button className="btn btn-primary !px-5 !py-3" onClick={() => requestAuth({ label: "Create an account" }, "signup")}>
@@ -94,18 +93,13 @@ export default function ProfilePage() {
     <div className="space-y-6">
       {/* identity */}
       <header className="relative overflow-hidden rounded-2xl border border-line bg-surface/40">
-        <div className="pointer-events-none absolute inset-0 opacity-[0.16]" aria-hidden>
-          <PatternArt seed={account.seed} accent="jade" showVignette={false} />
-        </div>
         <div className="relative flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-6">
-          <span className="grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-xl ring-1 ring-line2 sm:h-24 sm:w-24">
-            <PatternArt seed={account.seed} accent="jade" />
-          </span>
+          <Avatar name={account.name} size={96} className="!text-[2rem] ring-1 ring-line2" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl text-text sm:text-3xl">{account.name}</h1>
               <span className="chip">
-                <Icon name="check" size={10} strokeWidth={3} /> on this device
+                <Icon name="check" size={10} strokeWidth={3} /> signed in
               </span>
             </div>
             <div className="mt-1 text-[13px] text-muted">
@@ -147,7 +141,7 @@ export default function ProfilePage() {
             <SectionHeader
               label="published"
               title={plural(published.length, "nasheed")}
-              subtitle="Written by you, sung by the engine. Searchable like anything else in the catalogue."
+              subtitle="Your uploads. They sit in the catalogue like anything else, and you can take any of them down."
             />
             <TrackList tracks={published} context={{ kind: "studio", label: "Your nasheeds" }} showHeader={false} />
             <ul className="space-y-1.5">
@@ -158,14 +152,13 @@ export default function ProfilePage() {
                   </Link>
                   <span>·</span>
                   <span>
-                    {MAQAMAT[t.maqam].name} at {t.bpm} bpm
+                    {t.status === "live" ? "live" : "draft"}
+                    {t.durationMs ? ` · ${Math.round(t.durationMs / 1000)}s` : ""}
                   </span>
                   <button
                     className="ml-auto flex items-center gap-1 rounded-full border border-line px-2.5 py-1 transition-colors hover:border-madder/50 hover:text-madder"
                     onClick={() => {
-                      void unpublish(t.id).then((done) => {
-                        if (done) toast.push({ title: "Taken down", msg: t.title, kind: "info" });
-                      });
+                      void unpublish(t.id).then(() => toast.push({ title: "Taken down", msg: t.title, kind: "info" }));
                     }}
                   >
                     <Icon name="trash" size={11} /> take down
@@ -178,10 +171,10 @@ export default function ProfilePage() {
           <EmptyState
             icon="mic"
             title="Nothing published yet"
-            msg="Four lines of poetry and a maqām is a whole nasheed here. The studio walks you through it and lets you hear it before anyone else does."
+            msg="Upload an mp3, give it a title and the words, and it is in the catalogue."
             action={
               <Link to="/studio" className="btn btn-primary mt-1 !px-5 !py-3">
-                <Icon name="sparkle" size={15} /> Open the studio
+                <Icon name="upload" size={15} /> Open the studio
               </Link>
             }
           />
@@ -229,7 +222,7 @@ export default function ProfilePage() {
             </ul>
           </section>
         ) : (
-          <EmptyState icon="lyrics" title="No notes yet" msg="Open a nasheed and say what it did to you. Notes are kept on this device, under your account." />
+          <EmptyState icon="lyrics" title="No notes yet" msg="Open a nasheed and say what it did to you. Your notes are stored under your account." />
         )
       ) : null}
 
@@ -244,8 +237,8 @@ export default function ProfilePage() {
                     to={`/p/${pl.id}`}
                     className="flex items-center gap-3 rounded-xl border border-line bg-surface/50 p-3 transition-colors hover:border-line2"
                   >
-                    <span className={clsx("grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-lg ring-1 ring-line2")}>
-                      <PatternArt seed={pl.seed} accent={pl.accent} />
+                    <span className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-lg bg-surface2 ring-1 ring-line2">
+                      <Icon name="library" size={17} className="text-muted" />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13.5px] font-semibold text-text">{pl.name}</span>
@@ -258,7 +251,7 @@ export default function ProfilePage() {
             </ul>
           </section>
         ) : (
-          <EmptyState icon="library" title="No playlists" msg="Save a Nūr mix, or copy your loved list into a set of your own from the library." />
+          <EmptyState icon="library" title="No playlists" msg="Copy your loved list into a set of your own, or build one as you listen." />
         )
       ) : null}
 
@@ -266,7 +259,7 @@ export default function ProfilePage() {
         loved.length ? (
           <TrackList tracks={loved} context={{ kind: "liked", label: "Your loved nasheeds" }} showHeader={false} />
         ) : (
-          <EmptyState icon="star" title="Nothing loved yet" msg="Tap the star on any nasheed. It feeds Nūr, so the mixes get better the more honest you are." />
+          <EmptyState icon="star" title="Nothing loved yet" msg="Tap the star on any nasheed and it collects here." />
         )
       ) : null}
 
@@ -356,7 +349,7 @@ function Settings({ account: accountId, onSignedOut }: { account: string; onSign
             setPwMsg(null);
             setCurrent("");
             setNext("");
-            toast.push({ title: "Password changed", msg: "Still only on this device.", kind: "ok" });
+            toast.push({ title: "Password changed", kind: "ok" });
           }}
         >
           <Icon name="sliders" size={14} /> Change password
@@ -370,7 +363,7 @@ function Settings({ account: accountId, onSignedOut }: { account: string; onSign
             className="btn btn-ghost !px-4 !py-2.5"
             onClick={() => {
               signOut();
-              toast.push({ title: "Signed out", msg: "Everything you made stays on this device.", kind: "info" });
+              toast.push({ title: "Signed out", msg: "Your library stays on your account.", kind: "info" });
               onSignedOut();
             }}
           >
@@ -383,8 +376,8 @@ function Settings({ account: accountId, onSignedOut }: { account: string; onSign
         {confirmDelete ? (
           <div className="space-y-2 rounded-xl border border-madder/30 bg-bg2/60 p-3">
             <p className="text-[12.5px] leading-relaxed text-text2">
-              This removes the account, and with it every nasheed you published. Your notes go with it. There is no
-              server to recover any of it from.
+              This removes the account, and with it every nasheed you published, every note you left and everything you kept.
+              It cannot be undone.
             </p>
             <input
               className="field"
@@ -398,7 +391,7 @@ function Settings({ account: accountId, onSignedOut }: { account: string; onSign
               className="btn w-full !py-2.5 text-madder hover:bg-madder/12"
               disabled={busy || !deletePw}
               onClick={async () => {
-                const gone = await deleteAccount(deletePw);
+                const gone = await deleteAccount();
                 if (!gone) {
                   toast.push({ title: "Password did not match", msg: "The account is untouched.", kind: "warn" });
                   return;

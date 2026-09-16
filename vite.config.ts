@@ -39,7 +39,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 900,
     rollupOptions: {
       output: {
-        // the audio engine and the Supabase client are the two heavy, rarely-changing
+        // the Supabase client and the React runtime are the two heavy, rarely-changing
         // pieces; splitting them keeps a first paint small and a redeploy cheap
         manualChunks: {
           supabase: ["@supabase/supabase-js"],

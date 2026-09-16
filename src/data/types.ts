@@ -1,100 +1,64 @@
-import type { MaqamName } from "../lib/theory";
+/**
+ * The shapes the UI works with.
+ *
+ * They come from `shared/types.ts` — the same file the Edge Functions compile against,
+ * so a nasheed means the same thing in the browser, in Deno and in the tests. This
+ * module exists only so components can `import type { Song } from "../data/types"`
+ * without reaching two directories up, and so the few purely-presentational aliases
+ * live somewhere sensible.
+ */
 
-export type Accent = "jade" | "gold" | "turq" | "madder" | "cobalt";
+export type {
+  Accent,
+  AdminSummary,
+  ArtistCard,
+  CatalogCollection,
+  CatalogResponse,
+  CollectionKind,
+  Comment,
+  CommentRow,
+  DailyPoint,
+  DhikrState,
+  DraftLine,
+  HistoryRow,
+  ListenerStats,
+  LyricLine,
+  LyricScript,
+  PlayerPrefs,
+  Playlist,
+  PlaylistInput,
+  PlaylistRow,
+  ProfileInput,
+  PublisherProfile,
+  Report,
+  SessionUser,
+  Song,
+  SongDraft,
+  SongInput,
+  SongPatch,
+  SongStats,
+  SongStatus,
+  TagCount,
+  TrendingRow,
+  TrendingWindow,
+  User,
+  UserKind,
+  UserRole,
+} from "../../shared/types";
 
-export type Artist = {
-  id: string;
-  name: string;
-  nameAr?: string;
-  role: string;
-  origin: string;
-  bio: string;
-  seed: string;
-  accent: Accent;
-  verified?: boolean;
-};
+import type { Accent, CatalogCollection, Song, SongStatus } from "../../shared/types";
 
-export type LyricLine = {
-  /** Transliteration — the line that is actually "sung" by the engine when present. */
-  tr?: string;
-  /** Arabic script. */
-  ar?: string;
-  /** English rendering. */
-  en?: string;
-  /** Attribution or performance note, e.g. "Qur'an 9:128" or "refrain". */
-  note?: string;
-  /**
-   * Seconds from the start. Only meaningful for an uploaded recording whose publisher
-   * supplied timings; for a synthesized nasheed the composer derives them, which is
-   * why the karaoke view can never drift.
-   */
-  t?: number;
-};
+/** A nasheed as a list row: everything the row needs, nothing it does not. */
+export type TrackRef = Pick<Song, "id" | "title">;
 
-export type Track = {
+export type Shelf = {
   id: string;
   title: string;
-  titleAr?: string;
-  artistId: string;
-  collections: string[];
-  tags: string[];
-  /** maqām (melodic mode) */
-  maqam: MaqamName;
-  /** tonic as a MIDI note (60 = middle C) */
-  root: number;
-  bpm: number;
-  voices: "solo" | "duet" | "choir";
-  /** 16-step frame-drum pattern; omit for a vocals-only nasheed */
-  duff?: string;
-  /** where the duff enters */
-  duffEnter?: "intro" | "verse";
-  introBars?: number;
-  /** how many times the text is sung; later passes lift and settle */
-  passes?: number;
-  motifBank?: number[];
-  blurb: string;
-  year: number;
-  seed: string;
-  accent: Accent;
-  lines: LyricLine[];
-
-  /* --- set when this track came from the server rather than the bundled catalogue --- */
-
-  /** publisher account id on the server */
-  ownerId?: string | null;
-  /** streamed recording; when absent the browser engine sings the composition */
-  audioUrl?: string | null;
-  artworkUrl?: string | null;
-  /** length of the uploaded recording, ms */
-  durationMs?: number | null;
-  /** real counters; when present they replace the generated demo numbers */
-  stats?: { plays: number; likes: number; notes: number };
-  status?: "live" | "removed";
-  publishedAt?: number;
-};
-
-export type CollectionKind = "album" | "mukhtarat" | "mix";
-
-export type Collection = {
-  id: string;
-  kind: CollectionKind;
-  title: string;
-  titleAr?: string;
-  curator: string;
-  blurb: string;
-  seed: string;
-  accent: Accent;
-  tags: string[];
-  year: number;
-  trackIds: string[];
-};
-
-export type Mood = {
-  id: string;
-  label: string;
-  labelAr?: string;
   blurb: string;
   accent: Accent;
-  seed: string;
-  match: (track: Track) => boolean;
+  songs: Song[];
 };
+
+export type { CatalogCollection as Collection };
+export type { Song as Track };
+export type { SongStatus as Status };

@@ -1,97 +1,63 @@
 /**
  * /moderate — the staff room.
  *
- *   POST { action, ... }
+ * Every action here is staff-only, checked against `profiles.role` on the server before
+ * a single row is touched, and every action is written to the log with the request id
+ * so a removal can be accounted for afterwards.
  *
- *     resolveReport  { reportId, hide }   close a report, optionally hiding the note
- *     hideComment    { commentId }        take a note off the page, keep the row
- *     restoreComment { commentId }        put it back
- *     deleteComment  { commentId }        remove the row entirely
- *     removeSong     { songId, files }    take a nasheed down
- *     restoreSong    { songId }           put it back
- *     setRole        { profileId, role }  listener ↔ staff
- *     verify         { profileId, verified }
- *     queue                                the open reports, again, on demand
+ * The writes go through Postgres functions (`resolve_report`) or through the service
+ * client with an explicit, narrow statement. Nothing takes a table name, a column list
+ * or an `owner_id` from the request body: an endpoint that lets a client describe the
+ * write is an endpoint that lets a client describe a write to somebody else's row.
  *
- * Every action needs a staff profile. `requireStaff` checks the caller's JWT against
- * `profiles.role`, and the database checks it a second time inside `resolve_report()`
- * and in the column guards, so a function bug cannot hand out moderation by accident.
+ * GET lists the queue; POST acts on it.
  */
 
-import { requireStaff, type Caller } from "../_shared/auth.ts";
+import { serviceClient, withTimeout } from "../_shared/db.ts";
+import { invalidate } from "../_shared/cache.ts";
 import { HttpError, json, readBody, serve } from "../_shared/json.ts";
-import { ARTWORK_BUCKET, AUDIO_BUCKET, type Report, type UserRole } from "../../../shared/types.ts";
+import { log } from "../_shared/log.ts";
+import { requireStaff } from "../_shared/auth.ts";
+import type { Report } from "../../../shared/types.ts";
 
-type Action =
-  | "resolveReport"
-  | "hideComment"
-  | "restoreComment"
-  | "deleteComment"
-  | "removeSong"
-  | "restoreSong"
-  | "setRole"
-  | "verify"
-  | "queue";
+const ACTIONS = [
+  "resolve_report",
+  "hide_comment",
+  "restore_comment",
+  "delete_comment",
+  "remove_song",
+  "restore_song",
+  "set_role",
+] as const;
 
-const ROLES: UserRole[] = ["listener", "staff"];
+type Action = (typeof ACTIONS)[number];
 
-function need<T>(value: unknown, field: string): T {
-  if (typeof value !== "string" || !value) throw new HttpError(`${field} is required.`, 400, field);
-  return value as T;
+function idOf(value: unknown, field: string): string {
+  const id = typeof value === "string" ? value.trim() : "";
+  if (!id || id.length > 64) throw new HttpError(`A ${field} is required.`, 400, field);
+  return id;
 }
 
-async function setComment(caller: Caller, commentId: string, removed: boolean): Promise<{ id: string; removed: boolean }> {
-  const { data, error } = await caller.client
-    .from("comments")
-    .update({ removed })
-    .eq("id", commentId)
-    .select("id, removed")
-    .maybeSingle();
-  if (error) throw new HttpError(`That note would not change: ${error.message}`, 400);
-  if (!data) throw new HttpError("There is no note by that id.", 404, "commentId");
-  return { id: String(data.id), removed: Boolean(data.removed) };
-}
-
-async function setSong(caller: Caller, songId: string, status: "live" | "removed", files: boolean) {
-  const { data: existing } = await caller.client
-    .from("songs")
-    .select("id, audio_path, artwork_path")
-    .eq("id", songId)
-    .maybeSingle();
-  if (!existing) throw new HttpError("There is no nasheed by that id.", 404, "songId");
-
-  const { error } = await caller.client.from("songs").update({ status }).eq("id", songId);
-  if (error) throw new HttpError(`That nasheed would not change: ${error.message}`, 400);
-
-  let filesRemoved = 0;
-  if (status === "removed" && files) {
-    const targets: { bucket: string; path: string }[] = [];
-    if (existing.audio_path) targets.push({ bucket: AUDIO_BUCKET, path: String(existing.audio_path) });
-    if (existing.artwork_path) targets.push({ bucket: ARTWORK_BUCKET, path: String(existing.artwork_path) });
-
-    for (const target of targets) {
-      const { error: removeError } = await caller.client.storage.from(target.bucket).remove([target.path]);
-      if (!removeError) filesRemoved += 1;
-    }
-  }
-  return { id: songId, status, filesRemoved };
-}
-
-async function queue(caller: Caller): Promise<Report[]> {
-  const { data, error } = await caller.client
-    .from("reports")
-    .select("id, comment_id, reporter_id, reason, resolved, created_at, comment_text, author_handle, song_id, song_title")
-    .eq("resolved", false)
-    .order("created_at", { ascending: false })
-    .limit(50);
-  if (error) throw new HttpError(`The queue would not load: ${error.message}`, 502);
+async function queue(): Promise<Report[]> {
+  const db = serviceClient();
+  const { data, error } = await withTimeout(
+    db
+      .from("reports")
+      .select("id, comment_id, reporter_id, reason, resolved, created_at, comment_text, author_handle, song_id, song_title")
+      .eq("resolved", false)
+      .order("created_at", { ascending: false })
+      .limit(100),
+    6000,
+    "reports.select",
+  );
+  if (error) throw new HttpError("The moderation queue would not load.", 502);
 
   return (data ?? []).map((row) => ({
     id: String(row.id),
     commentId: String(row.comment_id),
     reporterId: String(row.reporter_id),
     reason: String(row.reason ?? ""),
-    createdAt: Date.parse(String(row.created_at)) || Date.now(),
+    createdAt: Date.parse(row.created_at as string) || Date.now(),
     resolved: Boolean(row.resolved),
     commentText: String(row.comment_text ?? ""),
     authorHandle: String(row.author_handle ?? ""),
@@ -100,76 +66,86 @@ async function queue(caller: Caller): Promise<Report[]> {
   }));
 }
 
-Deno.serve(
-  serve(["POST", "GET"], async (req, _url) => {
-    const caller = await requireStaff(req);
+/** Patch one row, and prove that one row was patched. */
+async function patch(table: "comments" | "songs" | "profiles", id: string, values: Record<string, unknown>): Promise<void> {
+  const db = serviceClient();
+  const { data, error } = await withTimeout(
+    db.from(table).update(values).eq("id", id).select("id"),
+    6000,
+    `${table}.update`,
+  );
+  if (error) throw new HttpError(`That change was refused: ${error.message}`, 400);
+  if (!data || data.length === 0) throw new HttpError("Nothing matched that.", 404);
+}
 
-    if (req.method === "GET") return json({ ok: true, reports: await queue(caller) });
+async function deleteRow(table: "comments", id: string): Promise<void> {
+  const db = serviceClient();
+  const { error } = await withTimeout(db.from(table).delete().eq("id", id), 6000, `${table}.delete`);
+  if (error) throw new HttpError(`That delete was refused: ${error.message}`, 400);
+}
 
-    const body = await readBody<Record<string, unknown>>(req);
-    const action = need<Action>(body.action, "action");
+async function act(caller: Awaited<ReturnType<typeof requireStaff>>, body: Record<string, unknown>): Promise<unknown> {
+  const action = body.action as Action;
+  if (!ACTIONS.includes(action)) throw new HttpError("That is not a moderation action.", 400, "action");
 
-    switch (action) {
-      case "queue":
-        return json({ ok: true, reports: await queue(caller) });
-
-      case "resolveReport": {
-        const reportId = need<string>(body.reportId, "reportId");
-        const hide = body.hide === true;
-        const { data, error } = await caller.client.rpc("resolve_report", {
-          p_report_id: reportId,
-          p_hide: hide,
-        });
-        if (error) throw new HttpError(`That report would not close: ${error.message}`, 400);
-        return json({ ok: true, reportId, ...(data as object) });
-      }
-
-      case "hideComment":
-        return json({ ok: true, ...(await setComment(caller, need<string>(body.commentId, "commentId"), true)) });
-
-      case "restoreComment":
-        return json({ ok: true, ...(await setComment(caller, need<string>(body.commentId, "commentId"), false)) });
-
-      case "deleteComment": {
-        const commentId = need<string>(body.commentId, "commentId");
-        const { error } = await caller.client.from("comments").delete().eq("id", commentId);
-        if (error) throw new HttpError(`That note would not delete: ${error.message}`, 400);
-        return json({ ok: true, commentId, deleted: true });
-      }
-
-      case "removeSong":
-        return json({
-          ok: true,
-          ...(await setSong(caller, need<string>(body.songId, "songId"), "removed", body.files === true)),
-        });
-
-      case "restoreSong":
-        return json({ ok: true, ...(await setSong(caller, need<string>(body.songId, "songId"), "live", false)) });
-
-      case "setRole": {
-        const profileId = need<string>(body.profileId, "profileId");
-        const role = body.role;
-        if (typeof role !== "string" || !ROLES.includes(role as UserRole)) {
-          throw new HttpError(`A role is one of: ${ROLES.join(", ")}.`, 400, "role");
-        }
-        if (profileId === caller.id && role !== "staff") {
-          throw new HttpError("You cannot take your own staff away here; ask another member.", 400, "role");
-        }
-        const { error } = await caller.client.from("profiles").update({ role }).eq("id", profileId);
-        if (error) throw new HttpError(`That role would not save: ${error.message}`, 400);
-        return json({ ok: true, profileId, role });
-      }
-
-      case "verify": {
-        const profileId = need<string>(body.profileId, "profileId");
-        const verified = body.verified !== false;
-        const { error } = await caller.client.from("profiles").update({ verified }).eq("id", profileId);
-        if (error) throw new HttpError(`That would not save: ${error.message}`, 400);
-        return json({ ok: true, profileId, verified });
-      }
-
-      default:
-        throw new HttpError("That action does not exist here.", 404, "action");
+  switch (action) {
+    case "resolve_report": {
+      const reportId = idOf(body.reportId, "reportId");
+      const hide = body.hide === true;
+      const { error } = await withTimeout(
+        caller.client.rpc("resolve_report", { p_report_id: reportId, p_hide: hide }),
+        8000,
+        "resolve_report",
+      );
+      if (error) throw new HttpError(error.message, 400);
+      return { ok: true, action, reportId, hidden: hide };
     }
-  }),
+
+    case "hide_comment":
+    case "restore_comment": {
+      const commentId = idOf(body.commentId, "commentId");
+      await patch("comments", commentId, { removed: action === "hide_comment" });
+      return { ok: true, action, commentId };
+    }
+
+    case "delete_comment": {
+      const commentId = idOf(body.commentId, "commentId");
+      await deleteRow("comments", commentId);
+      return { ok: true, action, commentId };
+    }
+
+    case "remove_song":
+    case "restore_song": {
+      const songId = idOf(body.songId, "songId");
+      await patch("songs", songId, { status: action === "remove_song" ? "removed" : "live" });
+      await invalidate("catalog");
+      return { ok: true, action, songId };
+    }
+
+    case "set_role": {
+      const profileId = idOf(body.profileId, "profileId");
+      const role = body.role === "staff" ? "staff" : body.role === "listener" ? "listener" : null;
+      if (!role) throw new HttpError("Role must be staff or listener.", 400, "role");
+      if (profileId === caller.profile!.id && role === "listener") {
+        throw new HttpError("You cannot take your own staff access away.", 400, "role");
+      }
+      await patch("profiles", profileId, { role });
+      return { ok: true, action, profileId, role };
+    }
+  }
+}
+
+Deno.serve(
+  serve(["GET", "POST"], async ({ req }) => {
+    if (req.method === "GET") {
+      await requireStaff(req);
+      return json({ reports: await queue() });
+    }
+
+    const caller = await requireStaff(req);
+    const body = await readBody<Record<string, unknown>>(req);
+    const result = await act(caller, body);
+    log.info("moderate.action", { requestId: caller.id, action: body.action, result });
+    return json(result);
+  }, { timeoutMs: 20_000, write: true }),
 );

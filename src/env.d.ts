@@ -10,6 +10,8 @@
 interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL?: string;
   readonly VITE_SUPABASE_ANON_KEY?: string;
+  /** Where the app is served from — `/`, or a subpath. Vite fills this in. */
+  readonly BASE_URL: string;
 }
 
 interface ImportMeta {

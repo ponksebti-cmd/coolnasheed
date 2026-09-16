@@ -1,80 +1,68 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Icon, type IconName } from "../components/ui/Icons";
-import { PatternArt, StarMark } from "../components/art/PatternArt";
+import { StarMark } from "../components/art/CoverArt";
 import { Chip, EmptyState, Reveal, SectionHeader } from "../components/ui/Primitives";
 import { ARTISTS, COLLECTIONS, TRACKS, formatCount, statsFor } from "../data/catalog";
-import { songFor } from "../lib/song";
-import { MAQAMAT, MAQAM_NAMES, maqamLabel } from "../lib/theory";
 import { plural } from "../lib/format";
-import type { MaqamName } from "../lib/theory";
 
+/** Where a nasheed comes from, end to end. Every step is a real thing the backend does. */
 const FLOW: { icon: IconName; title: string; body: string }[] = [
   {
+    icon: "upload",
+    title: "1 · A reciter uploads an mp3",
+    body: "A signed-in account uploads the recording and, optionally, cover art. Nothing is recorded in the browser and nothing is generated: the file you hear is the file they sent.",
+  },
+  {
+    icon: "shield",
+    title: "2 · The bucket refuses anything else",
+    body: "The audio bucket accepts audio/mpeg only, up to 5 MB, and the row in Postgres records the byte size and the mime type. Cover art is capped at 2 MB. Anything larger is compressed in your browser — resized, or re-encoded at the best bitrate that fits — before a byte leaves the device. A nasheed cannot go live without audio attached.",
+  },
+  {
+    icon: "server",
+    title: "3 · The publish function checks it",
+    body: "An Edge Function verifies the account, the ownership of the uploaded object, the size and the type, and writes the row with a service-grade validation pass. The browser is never trusted with the write.",
+  },
+  {
     icon: "lyrics",
-    title: "1 · Words become syllables",
-    body: "Each line is syllabified — from the transliteration when there is one, otherwise from the Arabic harakāt. Every syllable carries a vowel.",
+    title: "4 · The words travel with it",
+    body: "Lyric lines are stored with the nasheed, and a line may carry a timestamp. When it does, the lyric view follows it; when it does not, the words are still there to read.",
   },
   {
-    icon: "compass",
-    title: "2 · Syllables become a phrase",
-    body: "A motif from the track's maqām is stretched over the syllables, snapped to whole bars, and cadenced on the tonic or the fifth. Some syllables get a melisma.",
+    icon: "library",
+    title: "5 · It joins the catalogue",
+    body: "One read returns the published catalogue. Search, sets, reciter pages and the queue are all views over the same rows — there is no second, bundled copy of the catalogue anywhere.",
   },
   {
-    icon: "waveform",
-    title: "3 · Notes become voices",
-    body: "Three detuned sawtooth oscillators per note, each through a band-pass tuned to the formants of that syllable's vowel, plus delayed vibrato and portamento.",
-  },
-  {
-    icon: "drum",
-    title: "4 · The duff",
-    body: "A frame drum from filtered noise: a pitch-dropping sine for the dum, a bright band-passed burst for the tak. Sixteen steps to a bar, and it can be switched off.",
-  },
-  {
-    icon: "mosque",
-    title: "5 · The room",
-    body: "A convolution reverb whose impulse response is generated at runtime — noise through an exponential decay with early reflections. Studio, room, hall or masjid.",
-  },
-  {
-    icon: "clock",
-    title: "6 · The clock",
-    body: "One scheduler drives both audio and lyrics, so the karaoke fill is reading the same timeline the voices are. It cannot drift, because there is nothing to drift from.",
+    icon: "users",
+    title: "6 · Everything you do is stored under your account",
+    body: "Loves, sets, follows, listening history, your preferences, your dhikr count and an unpublished draft live in Postgres behind row-level security, so they follow you to any device.",
   },
 ];
 
 export default function About() {
   const totals = useMemo(() => {
-    const songs = TRACKS.map((t) => songFor(t));
-    return {
-      notes: songs.reduce((s, x) => s + x.notes.length, 0),
-      hits: songs.reduce((s, x) => s + x.duff.length, 0),
-      lines: songs.reduce((s, x) => s + x.lines.length, 0),
-      minutes: Math.round(songs.reduce((s, x) => s + x.duration, 0) / 60),
-      plays: TRACKS.reduce((s, t) => s + statsFor(t).plays, 0),
-    };
+    const plays = TRACKS.reduce((sum, t) => sum + statsFor(t).plays, 0);
+    const lines = TRACKS.reduce((sum, t) => sum + t.lines.length, 0);
+    const timed = TRACKS.reduce((sum, t) => sum + t.lines.filter((line) => typeof line.t === "number").length, 0);
+    return { plays, lines, timed };
   }, []);
 
-  const maqamUse = useMemo(
-    () =>
-      MAQAM_NAMES.map((m) => ({
-        m,
-        count: TRACKS.filter((t) => t.maqam === m).length,
-        tracks: TRACKS.filter((t) => t.maqam === m).slice(0, 2),
-      })).filter((x) => x.count > 0),
-    [],
-  );
-
-  const traditional = TRACKS.filter((t) => t.lines.some((l) => l.note === "traditional" || l.note === "al-Burda" || l.note === "al-Būṣīrī, d. 1294")).length;
-  const quranic = TRACKS.filter((t) => t.lines.some((l) => l.note?.startsWith("Qurʾān"))).length;
-  const original = TRACKS.filter((t) => t.lines.some((l) => l.note === "original")).length;
+  const tags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const track of TRACKS) for (const tag of track.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 8);
+  }, []);
 
   return (
     <div className="space-y-12 pb-4">
       {/* header */}
       <section className="relative overflow-hidden rounded-3xl border border-line">
-        <div className="absolute inset-0 opacity-70">
-          <PatternArt seed="about-hero" accent="gold" motif="rosette" />
-        </div>
+        <div
+          className="absolute inset-0 opacity-70"
+          style={{ background: "radial-gradient(110% 120% at 10% 0%, color-mix(in oklab, var(--c-gold) 30%, transparent), transparent 62%)" }}
+          aria-hidden
+        />
         <div className="absolute inset-0 bg-gradient-to-r from-[rgba(4,11,9,0.96)] via-[rgba(4,11,9,0.86)] to-[rgba(4,11,9,0.55)]" />
         <div className="grain absolute inset-0" />
         <div className="relative flex flex-col items-start gap-5 p-6 md:p-10">
@@ -83,8 +71,8 @@ export default function About() {
           </span>
           <div>
             <div className="label mb-2">about</div>
-            <h1 className="max-w-[18ch] text-[2.1rem] leading-[0.98] text-text md:text-[3rem]">
-              A streaming app for nasheeds, with the orchestra replaced by mathematics.
+            <h1 className="max-w-[22ch] text-[2.1rem] leading-[0.98] text-text md:text-[3rem]">
+              A streaming app for nasheeds, and nothing it made up.
             </h1>
             <p className="arabic mt-3 text-[1.2rem] text-goldsoft/85" dir="rtl">
               صوتٌ بلا آلة
@@ -92,22 +80,22 @@ export default function About() {
           </div>
           <div className="flex flex-wrap gap-1.5">
             <Chip>
-              <Icon name="waveform" size={11} /> {TRACKS.length} nasheeds
+              <Icon name="waveform" size={11} /> {TRACKS.length} nasheeds published
             </Chip>
             <Chip>
-              <Icon name="user" size={11} /> {ARTISTS.length} reciters
+              <Icon name="user" size={11} /> {ARTISTS.length} publishers
             </Chip>
             <Chip>
               <Icon name="library" size={11} /> {COLLECTIONS.length} sets
             </Chip>
             <Chip>
-              <Icon name="compass" size={11} /> {maqamUse.length} maqāmāt
+              <Icon name="lyrics" size={11} /> {formatCount(totals.lines)} lyric lines
             </Chip>
             <Chip>
-              <Icon name="mic" size={11} /> {formatCount(totals.notes)} synthesised notes
+              <Icon name="clock" size={11} /> {formatCount(totals.timed)} timed lines
             </Chip>
             <Chip>
-              <Icon name="clock" size={11} /> {totals.minutes} minutes
+              <Icon name="trending" size={11} /> {formatCount(totals.plays)} plays counted
             </Chip>
           </div>
         </div>
@@ -120,19 +108,21 @@ export default function About() {
             <SectionHeader label="what this is" title="CoolNasheed, plainly" />
             <div className="space-y-3 text-[13.5px] leading-relaxed text-text2">
               <p>
-                A player for nasheeds — devotional singing, usually unaccompanied or with a frame drum. Everything you would want
-                from a streaming service is here: curated sets, reciter pages, a queue, loves, playlists, search, a line-by-line
-                lyric view that follows the voice, and a small opinionated recommender called Nūr.
+                A player for nasheeds — devotional singing, usually unaccompanied. Everything you would want from a streaming
+                service is here: sets, reciter pages, a queue, loves, playlists, search, a line-by-line lyric view, and a{" "}
+                <Link to="/studio" className="text-jadesoft hover:underline">
+                  publisher studio
+                </Link>{" "}
+                where an mp3 becomes a nasheed in the catalogue.
               </p>
               <p>
-                What is unusual is that there are no audio files. Every performance is composed from the data in{" "}
-                <code className="rounded bg-surface2 px-1.5 py-0.5 text-[12px] text-goldsoft">src/data/tracks.ts</code> and
-                synthesised live in your browser while you listen. That is why playback starts instantly, why the lyrics never
-                drift, and why you can turn the drum off without needing a second mix.
+                The audio is the publisher's own recording, uploaded to object storage and streamed as an mp3. The app does not
+                synthesise voices, it does not generate a drum part, and there is no bundled demo catalogue to fall back on: an
+                empty project shows an empty catalogue, because that is the truth about it.
               </p>
               <p>
-                There is no server, no account and no analytics. Your loves, sets, history and tasbīḥ count live in this browser's
-                local storage and nowhere else.
+                There is no on-device state. Loves, sets, follows, history, playback preferences and the dhikr counter are rows
+                in Postgres under your account, behind row-level security, and they are the only copy.
               </p>
             </div>
           </div>
@@ -141,14 +131,14 @@ export default function About() {
           <div className="rounded-2xl border border-line bg-surface/50 p-5">
             <div className="label mb-3">catalogue, counted</div>
             <dl className="space-y-2.5">
-              <Big k="Lyric lines with timings" v={totals.lines} />
-              <Big k="Scheduled vocal notes" v={totals.notes} />
-              <Big k="Frame-drum hits" v={totals.hits} />
-              <Big k="Minutes of singing" v={totals.minutes} />
-              <Big k="Plays (invented, but stable)" v={totals.plays} format />
+              <Big k="Nasheeds published" v={TRACKS.length} />
+              <Big k="Publishers" v={ARTISTS.length} />
+              <Big k="Sets" v={COLLECTIONS.length} />
+              <Big k="Lyric lines" v={totals.lines} format />
+              <Big k="Plays, counted server-side" v={totals.plays} format />
             </dl>
             <p className="mt-4 border-t border-line pt-3 text-[11.5px] leading-relaxed text-muted">
-              Counts are computed at load by running the composer over every track — the same schedule the audio engine will play.
+              Every number on this page is a count of rows the server returned. Nothing is estimated, seeded or padded.
             </p>
           </div>
         </Reveal>
@@ -156,7 +146,7 @@ export default function About() {
 
       {/* signal flow */}
       <section>
-        <SectionHeader label="how the sound is made" title="From a line of poetry to a voice in your ears" />
+        <SectionHeader label="how a nasheed gets here" title="From a recording to this page" />
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {FLOW.map((f, i) => (
             <Reveal key={f.title} delay={i * 50}>
@@ -174,90 +164,55 @@ export default function About() {
         </div>
       </section>
 
-      {/* maqam table */}
-      <section>
-        <SectionHeader
-          label="modes"
-          title="The maqāmāt in this catalogue"
-          subtitle="Gold dots are quarter tones — the intervals a keyboard cannot play and a voice can."
-        />
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {maqamUse.map(({ m, count, tracks }) => (
-            <Reveal key={m}>
-              <div className="card p-4">
-                <div className="flex items-baseline justify-between gap-3">
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-display text-[19px] text-text">{MAQAMAT[m as MaqamName].name}</span>
-                    <span className="arabic text-[15px] text-goldsoft/80" dir="rtl">
-                      {MAQAMAT[m as MaqamName].ar}
-                    </span>
-                  </div>
-                  <span className="shrink-0 text-[11px] tabular-nums text-muted">{plural(count, "track")}</span>
-                </div>
-                <p className="mt-1 text-[11.5px] text-muted">{MAQAMAT[m as MaqamName].mood}</p>
-                <div className="relative mt-3 h-9">
-                  <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-line2" />
-                  {Array.from({ length: 13 }).map((_, i) => (
-                    <span key={i} className="absolute top-1/2 h-2 w-px -translate-y-1/2 bg-line" style={{ left: `${(i / 12) * 100}%` }} />
-                  ))}
-                  {MAQAMAT[m as MaqamName].steps.map((step, i) => {
-                    const quarter = Math.abs(step - Math.round(step)) > 0.01;
-                    return (
-                      <span
-                        key={i}
-                        className={quarter ? "absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-gold" : "absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-jade"}
-                        style={{ left: `${(step / 12) * 100}%` }}
-                        title={`${step} semitones`}
-                      />
-                    );
-                  })}
-                </div>
-                <div className="mt-3 space-y-1">
-                  {tracks.map((t) => (
-                    <Link key={t.id} to={`/t/${t.id}`} className="flex items-center gap-2 text-[11.5px] text-muted transition-colors hover:text-text2">
-                      <Icon name="chevronRight" size={11} /> <span className="truncate">{t.title}</span>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-      </section>
+      {/* tags */}
+      {tags.length ? (
+        <section>
+          <SectionHeader label="the shelf" title="What is in the catalogue today" subtitle="Tag counts, straight from the published rows." />
+          <div className="flex flex-wrap gap-2">
+            {tags.map(([tag, count]) => (
+              <Chip key={tag}>
+                <Link to={`/search?q=${encodeURIComponent(tag)}`} className="hover:text-text">
+                  {tag} <span className="ml-1.5 tabular-nums text-muted">{count}</span>
+                </Link>
+              </Chip>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
-      {/* sources & honesty */}
+      {/* honesty */}
       <section className="grid gap-3 lg:grid-cols-2">
         <Reveal>
           <div className="card h-full p-5">
-            <div className="label mb-2">sources</div>
-            <h3 className="text-[19px] text-text">Where the words come from</h3>
+            <div className="label mb-2">the rules this app holds itself to</div>
+            <h3 className="text-[19px] text-text">What it will not do</h3>
             <ul className="mt-3 space-y-2.5 text-[13px] leading-relaxed text-text2">
               <li className="flex gap-2.5">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
+                <Icon name="drum" size={14} className="mt-1 shrink-0 text-muted" />
                 <span>
-                  <strong className="font-semibold text-text">Traditional ({traditional} tracks).</strong> Ṭalaʿa al-Badru, Yā
-                  Nabiyy Salām, Mawlāya Ṣalli and similar texts are centuries old and sung across the Muslim world.
+                  <strong className="font-semibold text-text">No generated music.</strong> There is no oscillator bank, no drum
+                  machine, no reverb impulse invented at runtime. Playback is one media element playing one mp3.
                 </span>
               </li>
               <li className="flex gap-2.5">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-jade" />
+                <Icon name="trending" size={14} className="mt-1 shrink-0 text-muted" />
                 <span>
-                  <strong className="font-semibold text-text">Scriptural ({quranic} tracks).</strong> Qurʾānic lines are marked in
-                  the lyric view and quoted in Arabic. The English under them is a rendering of meaning, never scripture, and the
-                  āyah reference is shown so you can check it against a muṣḥaf.
+                  <strong className="font-semibold text-text">No invented counters.</strong> Plays are recorded when they happen
+                  and likes when they are pressed. There is no seed that produces social proof.
                 </span>
               </li>
               <li className="flex gap-2.5">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-turq" />
+                <Icon name="sparkle" size={14} className="mt-1 shrink-0 text-muted" />
                 <span>
-                  <strong className="font-semibold text-text">Original ({original} tracks).</strong> The rest were written for this
-                  app: new devotional verses in English, with Arabic refrains where the line asked for one.
+                  <strong className="font-semibold text-text">No fake notes.</strong> Nothing is written into a comment thread by
+                  the app. An empty thread is an empty thread.
                 </span>
               </li>
               <li className="flex gap-2.5">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-madder" />
+                <Icon name="cloudOff" size={14} className="mt-1 shrink-0 text-muted" />
                 <span>
-                  <strong className="font-semibold text-text">Poetry.</strong> The Burda lines are al-Būṣīrī's (d. 1294).
+                  <strong className="font-semibold text-text">No offline lies.</strong> If the backend cannot be reached, the app
+                  says so rather than showing a shadow catalogue that does not exist.
                 </span>
               </li>
             </ul>
@@ -266,34 +221,32 @@ export default function About() {
 
         <Reveal delay={70}>
           <div className="card h-full p-5">
-            <div className="label mb-2">honesty</div>
-            <h3 className="text-[19px] text-text">What is made up</h3>
+            <div className="label mb-2">where the words come from</div>
+            <h3 className="text-[19px] text-text">Lyrics, credits and respect</h3>
             <ul className="mt-3 space-y-2.5 text-[13px] leading-relaxed text-text2">
               <li className="flex gap-2.5">
-                <Icon name="user" size={14} className="mt-1 shrink-0 text-muted" />
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
                 <span>
-                  Every reciter is fictional. Yusuf Karim, Al-Rawḍa Ensemble, Hanan Siddiqui and the rest were invented for this
-                  catalogue, and no real singer's voice, recording or reputation is imitated or implied.
+                  Line notes travel with each nasheed — <em>traditional</em>, a poet's name, or a Qurʾānic reference — so a
+                  listener can see what they are hearing.
                 </span>
               </li>
               <li className="flex gap-2.5">
-                <Icon name="trending" size={14} className="mt-1 shrink-0 text-muted" />
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-jade" />
                 <span>
-                  Play counts, like counts and the notes under each track are generated from a seed. They are stable, they are
-                  social proof shaped, and they are not real.
+                  Where a line is Qurʾān, it is quoted in Arabic and the English under it is labelled as a rendering of meaning,
+                  with the reference shown so it can be checked against a muṣḥaf.
                 </span>
               </li>
               <li className="flex gap-2.5">
-                <Icon name="sparkle" size={14} className="mt-1 shrink-0 text-muted" />
-                <span>
-                  Nūr is a scoring function with a template writer — no model, no network call. Its confidence is theatrical.
-                </span>
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-turq" />
+                <span>A publisher can correct or remove their own upload at any time from the studio.</span>
               </li>
               <li className="flex gap-2.5">
-                <Icon name="mic" size={14} className="mt-1 shrink-0 text-muted" />
+                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-madder" />
                 <span>
-                  The voices are synthesis: formant-filtered oscillators shaped by the vowels in the lyrics. It is meant to sound
-                  like a choir in a tiled room, not like a person.
+                  Translations are renderings, transliterations may differ from the spelling you know, and neither is a scholarly
+                  position.
                 </span>
               </li>
             </ul>
@@ -304,8 +257,8 @@ export default function About() {
       {/* adab note */}
       <Reveal>
         <section className="relative overflow-hidden rounded-2xl border border-gold/25 bg-gold/[0.05] p-6">
-          <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 opacity-[0.14]">
-            <PatternArt seed="adab" accent="gold" motif="mihrab" />
+          <div className="pointer-events-none absolute -right-10 -top-10 opacity-[0.12] text-gold">
+            <StarMark size={190} />
           </div>
           <div className="relative max-w-[70ch]">
             <div className="label mb-2 text-gold">adab</div>
@@ -313,12 +266,7 @@ export default function About() {
             <p className="mt-2.5 text-[13.5px] leading-relaxed text-text2">
               Nasheeds sit close to worship for many listeners, so the app tries to behave accordingly: no imagery of the
               Prophet ﷺ or the companions, no invented sayings attributed to anyone, Qurʾānic text marked and referenced,
-              translations labelled as meanings, a vocals-only mode for those who prefer no drum, and nothing that interrupts a
-              track with an advertisement or a countdown.
-            </p>
-            <p className="mt-2.5 text-[13.5px] leading-relaxed text-text2">
-              If a maqām is used loosely, or a transliteration you know is spelled differently, that is the app's limitation and
-              not a scholarly position.
+              credits kept with the nasheed, and nothing that interrupts a recording with an advertisement or a countdown.
             </p>
           </div>
         </section>
@@ -326,13 +274,13 @@ export default function About() {
 
       {/* built with */}
       <section>
-        <SectionHeader label="built with" title="Small stack, no backend" />
+        <SectionHeader label="built with" title="A small stack, honestly described" />
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
             { k: "React 19 + Vite", v: "TypeScript throughout, one bundle, no SSR." },
-            { k: "Web Audio API", v: "Oscillators, biquad formants, convolver reverb, analyser — written by hand." },
-            { k: "Tailwind v4", v: "CSS-variable tokens so the night and dawn themes are the same components." },
-            { k: "Zustand + localStorage", v: "Loves, sets, history, tasbīḥ and settings persist on device." },
+            { k: "One <audio> element", v: "The browser's media element does the streaming, seeking and buffering. No DSP graph." },
+            { k: "Supabase", v: "Postgres with row-level security, Storage for mp3 and artwork, Edge Functions for the writes." },
+            { k: "Zustand, server-backed", v: "UI state in memory; loves, sets, history and settings live in the database." },
           ].map((x, i) => (
             <Reveal key={x.k} delay={i * 45}>
               <div className="card h-full p-4">
@@ -346,9 +294,9 @@ export default function About() {
           <Link to="/" className="btn btn-primary !px-5 !py-3">
             <Icon name="home" size={15} /> Back to the music
           </Link>
-          <button className="btn btn-ghost !px-5 !py-3" onClick={() => window.dispatchEvent(new CustomEvent("coolnasheed:command"))}>
-            <Icon name="command" size={15} /> Command palette
-          </button>
+          <Link to="/studio" className="btn btn-ghost !px-5 !py-3">
+            <Icon name="upload" size={15} /> Publish a nasheed
+          </Link>
           <span className="text-[11.5px] text-muted">
             Press <kbd className="rounded border border-line2 bg-surface2 px-1.5 py-0.5 font-sans text-[10px]">?</kbd> anywhere for
             the keyboard map.
@@ -358,7 +306,7 @@ export default function About() {
 
       <div className="hairline" />
       <p className="text-center font-display text-[15px] text-muted">
-        {maqamLabel("hijaz")} at 70 bpm is the closest this app gets to a signature.
+        {TRACKS.length ? `A catalogue of ${plural(TRACKS.length, "nasheed")}, sung by people.` : "The catalogue is empty until someone uploads a nasheed."}
       </p>
     </div>
   );
@@ -378,7 +326,7 @@ export function NotFound() {
     <EmptyState
       icon="compass"
       title="This page is not in the catalogue"
-      msg="Nothing here — no track, no set, no reciter. The music is all still where you left it."
+      msg="Nothing here — no nasheed, no set, no reciter. The music is all still where you left it."
       action={
         <Link to="/" className="btn btn-primary mt-2 !px-4 !py-2.5">
           <Icon name="home" size={14} /> Go home

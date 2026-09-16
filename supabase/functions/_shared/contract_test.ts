@@ -24,7 +24,7 @@ type Case = {
   name: string;
   input: Record<string, unknown>;
   row?: Record<string, unknown> | null;
-  error?: { status: number; field: string; says?: string };
+  error?: { status: number; field?: string; says?: string };
 };
 
 type RowCase = {
@@ -38,12 +38,23 @@ const fixture = JSON.parse(
   await Deno.readTextFile(new URL("../../../shared/fixtures/publish-cases.json", import.meta.url)),
 ) as { owner: string; cases: Case[]; songRows: RowCase[] };
 
-/** The two placeholders the fixture uses instead of writing 41 lines and 600 characters out. */
-function expand(input: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...input };
+/** The three placeholders the fixture uses instead of writing 41 lines and 600 characters out. */
+function expand(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== "object") return input as never;
+  const out = { ...(input as Record<string, unknown>) };
   if (out.lines === "FORTY_ONE") out.lines = Array.from({ length: 41 }, (_, i) => ({ tr: `yā rabbi ${i + 1}` }));
   if (out.note === "SIX_HUNDRED") out.note = "yā rabbi ".repeat(75);
   return out;
+}
+
+/** JSON with object keys in a fixed order, so key order is never mistaken for a difference. */
+function stable(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stable(v)}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
 }
 
 /** Key-by-key comparison, because "they differ" is useless without saying where. */
@@ -51,8 +62,15 @@ function differences(expected: Record<string, unknown> | null | undefined, actua
   const out: string[] = [];
   const keys = new Set([...Object.keys(expected ?? {}), ...Object.keys(actual)]);
   for (const key of [...keys].sort()) {
-    const want = JSON.stringify((expected ?? {})[key] ?? null);
-    const got = JSON.stringify(actual[key] ?? null);
+    const expectedValue = (expected ?? {})[key] ?? null;
+    /* a row whose timestamp is unparseable falls back to "now", which the contract
+       cannot write down — it asks for a number and that is all it can ask for */
+    if (expectedValue === "NOW") {
+      if (typeof actual[key] !== "number") out.push(`${key}: contract says a number, got ${stable(actual[key] ?? null)}`);
+      continue;
+    }
+    const want = stable(expectedValue);
+    const got = stable(actual[key] ?? null);
     if (want !== got) out.push(`${key}: contract ${want}, got ${got}`);
   }
   return out;

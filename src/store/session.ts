@@ -17,9 +17,8 @@
  * one. The first account on a fresh project is made staff, which is how you get into
  * the moderation queue without touching the SQL editor.
  *
- * With no project configured the app still runs: the bundled catalogue plays, and
- * every account-gated action explains that it needs Supabase. Listening offline beats
- * a blank page.
+ * With no project configured the app still runs, but there is nothing to listen to:
+ * the catalogue lives in the database and every account-gated action says so plainly.
  */
 
 import { create } from "zustand";
@@ -34,14 +33,12 @@ export type Account = {
   name: string;
   bio: string;
   city: string;
-  /** seed for the generated avatar pattern */
-  seed: string;
   createdAt: number;
   email: string | null;
   role: UserRole;
 };
 
-export type AccountPatch = Partial<Pick<Account, "name" | "bio" | "city" | "seed">> & {
+export type AccountPatch = Partial<Pick<Account, "name" | "bio" | "city">> & {
   nameAr?: string;
   tagline?: string;
   handle?: string;
@@ -55,13 +52,9 @@ export type SessionResult =
 
 const HANDLE_RE = /^[a-z0-9._]{3,20}$/;
 
-/** handles the catalogue already uses, so nobody impersonates a reciter or a seeded listener */
+/** handles the catalogue reserves for itself, so nobody can impersonate the project */
 const RESERVED = new Set([
-  "coolnasheed", "nur", "admin", "root", "staff", "system",
-  "umm_sumayya", "fajr_walker", "ibn_al_bahr", "quiet_minaret", "sabr_and_coffee", "muhajir_1998",
-  "layla.k", "abu_yusuf", "zaytuna_22", "night_of_qadr", "halabi_in_exile", "dust_and_light",
-  "rawda_listener", "third_of_the_night", "sokoto_sings", "madrassa_dad",
-  "yusuf", "rawda", "hanan", "muadh", "ibrahim", "halabi", "sami", "zayd",
+  "coolnasheed", "admin", "root", "staff", "system",
 ]);
 
 /* --------------------------------------------------------------- validation */
@@ -108,7 +101,6 @@ export function toAccount(user: User): Account {
     name: user.name,
     bio: user.bio,
     city: user.city,
-    seed: user.seed,
     createdAt: user.createdAt,
     email: user.email ?? null,
     role: user.role,
@@ -138,7 +130,7 @@ type SessionState = {
   stats: ListenerStats | null;
   /** the boot request has answered, successfully or not */
   ready: boolean;
-  /** a project is configured and answered — false means the bundled catalogue */
+  /** a project is configured and answered — false means there is no catalogue to read */
   online: boolean;
   /** a project is configured at all */
   configured: boolean;
@@ -157,7 +149,7 @@ type SessionState = {
   signOut: () => Promise<void>;
   update: (patch: AccountPatch) => Promise<SessionResult>;
   changePassword: (current: string, next: string) => Promise<SessionResult>;
-  deleteAccount: (password?: string) => Promise<boolean>;
+  deleteAccount: () => Promise<boolean>;
 };
 
 export const useSession = create<SessionState>()((set, get) => ({
@@ -315,12 +307,12 @@ export const useSession = create<SessionState>()((set, get) => ({
     }
   },
 
-  async deleteAccount(password) {
+  async deleteAccount() {
     const user = get().user;
     if (!user) return false;
     set({ busy: true });
     try {
-      await api.deleteAccount(password);
+      await api.deleteAccount();
       get().setSession(null, null);
       set({ busy: false });
       return true;

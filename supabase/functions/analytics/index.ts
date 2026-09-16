@@ -1,136 +1,139 @@
 /**
- * GET /analytics — the charts, and the staff dashboard behind them.
+ * GET /analytics — the numbers.
  *
- *   ?view=trending&window=7d&limit=10   public, cached 60s
- *   ?view=curve&days=14                 public, cached 60s
- *   ?view=song&id=sng_…                 public, cached 30s
- *   ?view=history&limit=30              yours (or this device's, by client id)
- *   ?view=admin&days=14                 staff only
+ *   ?view=public   (default)  the charts: trending, the daily curve, the tag cloud
+ *   ?view=song&song=<id>      one nasheed's play history
+ *   ?view=admin               the staff dashboard — JWT checked against profiles.role
  *
- * Everything public is cached at the edge, so a chart that a thousand people look at
- * costs the database one query a minute. The admin view is never cached: it is a
- * different number for every minute it is looked at, and only staff can ask.
+ * The public half is cached for a minute at the edge, because charts that are sixty
+ * seconds old are indistinguishable from live ones and cost a fraction of the queries.
+ * The admin half is never cached: it is per-request, staff-only, and must not be able
+ * to leak from one caller to the next through a cache key.
  *
- * Both halves are Postgres functions; this file is the door, the cache and the
- * permission check, which is exactly what an Edge Function should be.
+ * Every read carries a deadline and degrades on its own: a dashboard whose daily curve
+ * timed out still renders its totals, with the missing series empty rather than the
+ * whole page failing.
  */
 
-import { cached } from "../_shared/cache.ts";
-import { anonClient } from "../_shared/db.ts";
-import { HttpError, fail, json, serve } from "../_shared/json.ts";
-import { maybeCaller, requireStaff } from "../_shared/auth.ts";
-import type {
-  AdminSummary,
-  DailyPointDb,
-  HistoryRow,
-  SongStats,
-  TrendingDbRow,
-  TrendingRow,
-  TrendingWindow,
-} from "../../../shared/types.ts";
+import { anonClient, hasServiceKey, optional, serviceClient, withTimeout } from "../_shared/db.ts";
+import { cachedJson } from "../_shared/cache.ts";
+import { HttpError, serve } from "../_shared/json.ts";
+import { requireCaller, requireStaff } from "../_shared/auth.ts";
+import type { AdminSummary, DailyPoint, SongStats, TrendingRow } from "../../../shared/types.ts";
 
-const WINDOWS: TrendingWindow[] = ["24h", "7d", "30d", "all"];
+const CHARTS_SECONDS = 60;
 
-function clamp(value: string | null, min: number, max: number, fallback: number): number {
-  const n = Number(value ?? fallback);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(Math.max(Math.round(n), min), max);
+async function publicCharts(window: string, days: number, wantTags: boolean) {
+  const db = hasServiceKey() ? serviceClient() : anonClient();
+  const [trending, curve, tags] = await Promise.all([
+    optional(
+      withTimeout(db.rpc("trending", { p_window: window, p_limit: 20 }), 6000, "trending"),
+      6000,
+      { data: [] as TrendingRow[], error: null },
+    ),
+    optional(
+      withTimeout(db.rpc("daily_curve", { p_days: days }), 6000, "daily_curve"),
+      6000,
+      { data: [] as DailyPoint[], error: null },
+    ),
+    wantTags
+      ? optional(
+          withTimeout(
+            db.from("songs").select("tags").eq("status", "live").limit(500),
+            5000,
+            "songs.tags",
+          ),
+          5000,
+          { data: [] as { tags: string[] | null }[], error: null },
+        )
+      : Promise.resolve({ data: [] as { tags: string[] | null }[], error: null }),
+  ]);
+
+  const counts = new Map<string, number>();
+  for (const row of (tags.data ?? []) as { tags: string[] | null }[]) {
+    for (const tag of row.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  }
+
+  return {
+    window,
+    days,
+    trending: (trending.data ?? []) as TrendingRow[],
+    daily: (curve.data ?? []) as DailyPoint[],
+    tags: [...counts.entries()]
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag))
+      .slice(0, 40),
+    generatedAt: Date.now(),
+  };
 }
 
-const trendingRow = (row: TrendingDbRow): TrendingRow => ({
-  songId: row.song_id,
-  title: row.title,
-  accent: row.accent,
-  maqam: row.maqam,
-  ownerName: row.owner_name,
-  plays: Number(row.plays ?? 0),
-  listeners: Number(row.listeners ?? 0),
-  seconds: Number(row.seconds ?? 0),
-  likes: Number(row.likes ?? 0),
-});
-
-async function trending(window: TrendingWindow, limit: number): Promise<Response> {
-  const db = anonClient();
-  const { data, error } = await db.rpc("trending", { p_window: window, p_limit: limit });
-  if (error) return fail(`The chart would not load: ${error.message}`, 502);
-  const rows = ((data ?? []) as unknown as TrendingDbRow[]).map(trendingRow);
-  return json({ window, rows, generatedAt: Date.now() }, { cacheSeconds: 60 });
+async function songStats(songId: string): Promise<SongStats> {
+  if (!songId || songId.length > 64) throw new HttpError("Which nasheed?", 400, "song");
+  const db = hasServiceKey() ? serviceClient() : anonClient();
+  const { data, error } = await withTimeout(db.rpc("song_stats", { p_song_id: songId }), 6000, "song_stats");
+  if (error) throw new HttpError("Those numbers would not load.", 502);
+  const stats = (data ?? {}) as Partial<SongStats>;
+  return {
+    plays: Number(stats.plays ?? 0),
+    listeners: Number(stats.listeners ?? 0),
+    seconds: Number(stats.seconds ?? 0),
+    completed: Number(stats.completed ?? 0),
+    daily: stats.daily ?? [],
+  };
 }
 
-async function curve(days: number): Promise<Response> {
-  const db = anonClient();
-  const { data, error } = await db.rpc("daily_curve", { p_days: days });
-  if (error) return fail(`The curve would not load: ${error.message}`, 502);
-  const points = ((data ?? []) as unknown as DailyPointDb[]).map((p) => ({
-    day: String(p.day).slice(0, 10),
-    plays: Number(p.plays ?? 0),
-    listeners: Number(p.listeners ?? 0),
-    signups: Number(p.signups ?? 0),
-  }));
-  return json({ days, points, generatedAt: Date.now() }, { cacheSeconds: 60 });
-}
-
-async function songStats(id: string): Promise<Response> {
-  const db = anonClient();
-  const { data, error } = await db.rpc("song_stats", { p_song_id: id });
-  if (error) return fail(`Those numbers would not load: ${error.message}`, 502);
-  const stats = data as unknown as SongStats;
-  return json(
-    {
-      ...stats,
-      daily: (stats?.daily ?? []).map((d) => ({ ...d, day: String(d.day).slice(0, 10) })),
-    },
-    { cacheSeconds: 30 },
+async function dashboard(req: Request, days: number): Promise<AdminSummary | Response> {
+  // requireStaff throws 401/403 before anything is read
+  const caller = await requireStaff(req);
+  const db = hasServiceKey() ? serviceClient() : caller.client;
+  const { data, error } = await withTimeout(
+    db.rpc("admin_summary", { p_days: days }),
+    12_000,
+    "admin_summary",
   );
+  if (error) {
+    if (/staff-only/i.test(error.message)) throw new HttpError("That is a staff-only page.", 403);
+    if (/does not exist/i.test(error.message)) {
+      throw new HttpError("This project has no tables yet — the backend is not set up.", 503, "schema");
+    }
+    throw new HttpError("The dashboard would not load.", 502);
+  }
+  return (data ?? {}) as AdminSummary;
 }
 
 Deno.serve(
-  serve(["GET"], async (req, url) => {
-    const view = url.searchParams.get("view") ?? "trending";
+  serve(["GET"], async ({ req, url }) => {
+    const view = (url.searchParams.get("view") ?? "public").toLowerCase();
+    const days = Math.min(Math.max(Number(url.searchParams.get("days") ?? "14") || 14, 1), 90);
+    const window = ["24h", "7d", "30d", "all"].includes(url.searchParams.get("window") ?? "")
+      ? url.searchParams.get("window")!
+      : "7d";
 
-    if (view === "trending") {
-      const window = (url.searchParams.get("window") ?? "7d") as TrendingWindow;
-      if (!WINDOWS.includes(window)) throw new HttpError("That window is not a chart.", 400, "window");
-      const limit = clamp(url.searchParams.get("limit"), 1, 50, 10);
-      return cached("trending", `w=${window}&l=${limit}`, 60, () => trending(window, limit));
-    }
-
-    if (view === "curve") {
-      const days = clamp(url.searchParams.get("days"), 1, 90, 14);
-      return cached("curve", `d=${days}`, 60, () => curve(days));
+    if (view === "admin") {
+      const summary = await dashboard(req, days);
+      if (summary instanceof Response) return summary;
+      return Response.json(summary, { headers: { "cache-control": "no-store" } });
     }
 
     if (view === "song") {
-      const id = url.searchParams.get("id");
-      if (!id) throw new HttpError("Which nasheed?", 400, "id");
-      return cached("song-stats", `id=${id}`, 30, () => songStats(id));
-    }
-
-    if (view === "history") {
-      const limit = clamp(url.searchParams.get("limit"), 1, 100, 30);
-      const caller = await maybeCaller(req);
-      const clientId = url.searchParams.get("clientId");
-      const db = caller?.client ?? anonClient();
-      const { data, error } = await db.rpc("my_history", {
-        p_limit: limit,
-        p_client_id: caller ? null : clientId,
-      });
-      if (error) return fail(`Your history would not load: ${error.message}`, 502);
-      return json({ rows: (data ?? []) as unknown as HistoryRow[] });
-    }
-
-    if (view === "admin") {
-      const caller = await requireStaff(req);
-      const days = clamp(url.searchParams.get("days"), 1, 90, 14);
-      const { data, error } = await caller.client.rpc("admin_summary", { p_days: days });
-      if (error) return fail(`The dashboard would not load: ${error.message}`, 502);
-      const summary = data as unknown as AdminSummary;
-      return json({
-        ...summary,
-        daily: (summary.daily ?? []).map((d) => ({ ...d, day: String(d.day).slice(0, 10) })),
+      return Response.json(await songStats(url.searchParams.get("song") ?? ""), {
+        headers: { "cache-control": "public, max-age=30, s-maxage=60" },
       });
     }
 
-    throw new HttpError("That view does not exist here.", 404, "view");
-  }),
+    if (view === "me") {
+      const caller = await requireCaller(req);
+      const { data, error } = await withTimeout(caller.client.rpc("my_history", { p_limit: 40 }), 6000, "my_history");
+      if (error) throw new HttpError("Your history would not load.", 502);
+      return Response.json({ history: data ?? [] }, { headers: { "cache-control": "no-store" } });
+    }
+
+    return await cachedJson(
+      req,
+      "charts",
+      `${window}:${days}`,
+      CHARTS_SECONDS,
+      () => publicCharts(window, days, true),
+    );
+  }, { timeoutMs: 15_000 }),
 );

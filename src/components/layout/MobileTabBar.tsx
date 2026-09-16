@@ -1,7 +1,8 @@
-import { NavLink } from "react-router-dom";
+import { useLayoutEffect, useRef, useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
 import { clsx } from "clsx";
 import { Icon } from "../ui/Icons";
-import { PatternArt } from "../art/PatternArt";
+import { Avatar } from "../art/CoverArt";
 import { useAccount } from "../../lib/hooks";
 import { useStudio } from "../../store/studio";
 
@@ -12,24 +13,77 @@ import { useStudio } from "../../store/studio";
  * away. These five are the ones people actually want one tap away. It sits under the
  * player bar as a flex sibling rather than floating over content, so nothing is ever
  * hidden behind it, and it clears the home indicator on notched phones.
+ *
+ * The selection is one lens that travels between slots rather than five highlights
+ * that switch on and off, because movement is what tells you where you just came
+ * from. Its geometry is measured off the real slot — the widths are fluid, and the
+ * label can wrap at 320px — so the lens is always exactly where the finger expects.
  */
+
+const SLOTS = ["/", "/search", "/studio", "/library", "/me"] as const;
+
 export function MobileTabBar() {
   const account = useAccount();
   const published = useStudio((s) => s.entries.length);
+  const { pathname } = useLocation();
+  const listRef = useRef<HTMLUListElement>(null);
+  const [lens, setLens] = useState<{ x: number; w: number } | null>(null);
+
+  /* The middle slot is the raised Publish button, which announces itself with colour
+     when it is current; a pill behind it would be one signal too many. */
+  const found =
+    SLOTS.find((to) =>
+      to === "/"
+        ? pathname === "/"
+        : pathname === to || pathname.startsWith(`${to}/`),
+    ) ?? null;
+  const activeTo = found === "/studio" ? null : found;
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list || !activeTo) {
+      setLens(null);
+      return;
+    }
+    const measure = () => {
+      const slot = list.querySelector<HTMLElement>(`[data-slot="${activeTo}"]`);
+      if (!slot) {
+        setLens(null);
+        return;
+      }
+      setLens({ x: slot.offsetLeft, w: slot.offsetWidth });
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [activeTo, published]);
 
   return (
     <nav
-      className="safe-bottom z-40 border-t border-line bg-elev/94 backdrop-blur-2xl lg:hidden"
+      className="glass-bar safe-bottom relative z-40 border-t border-line lg:hidden"
       aria-label="Quick navigation"
     >
-      <ul className="flex items-stretch">
-        <li className="flex-1">
+      <ul ref={listRef} className="relative flex items-stretch">
+        {lens ? (
+          <span
+            className="tab-lens"
+            style={{
+              transform: `translateX(${lens.x + 8}px)`,
+              width: Math.max(0, lens.w - 16),
+            }}
+            aria-hidden
+          />
+        ) : null}
+
+        <li className="flex-1" data-slot="/">
           <Tab to="/" icon="home" label="Home" end />
         </li>
-        <li className="flex-1">
+        <li className="flex-1" data-slot="/search">
           <Tab to="/search" icon="search" label="Search" />
         </li>
-        <li className="flex-1">
+        <li className="flex-1" data-slot="/studio">
           <NavLink
             to="/studio"
             className={({ isActive }) =>
@@ -44,7 +98,7 @@ export function MobileTabBar() {
               <>
                 <span
                   className={clsx(
-                    "grid h-11 w-11 -translate-y-2 place-items-center rounded-full shadow-[0_10px_26px_-10px_rgba(var(--c-glow-2),0.9)] transition-transform group-active:scale-95",
+                    "pressable grid h-11 w-11 -translate-y-2 place-items-center rounded-full shadow-[0_10px_26px_-10px_rgba(var(--c-glow-2),0.9)]",
                     isActive
                       ? "bg-gradient-to-b from-goldsoft to-gold text-[#241a06]"
                       : "border border-line2 bg-surface2 text-goldsoft",
@@ -64,25 +118,27 @@ export function MobileTabBar() {
             )}
           </NavLink>
         </li>
-        <li className="flex-1">
+        <li className="flex-1" data-slot="/library">
           <Tab to="/library" icon="library" label="Library" />
         </li>
-        <li className="flex-1">
+        <li className="flex-1" data-slot="/me">
           {account ? (
             <NavLink
               to="/me"
               className={({ isActive }) =>
                 clsx(
-                  "flex min-h-[56px] w-full flex-col items-center justify-center gap-1 pt-1",
+                  "pressable flex min-h-[56px] w-full flex-col items-center justify-center gap-1 pt-1",
                   isActive ? "text-jade" : "text-muted",
                 )
               }
               aria-label="Your profile"
             >
               <span className="grid h-6 w-6 place-items-center overflow-hidden rounded-full ring-1 ring-line2">
-                <PatternArt seed={account.seed} accent="jade" showVignette={false} />
+                <Avatar name={account.name} accent="jade" size={24} />
               </span>
-              <span className="text-[9.5px] font-bold uppercase tracking-[0.12em]">You</span>
+              <span className="text-[9.5px] font-bold uppercase tracking-[0.12em]">
+                You
+              </span>
             </NavLink>
           ) : (
             <Tab to="/me" icon="user" label="You" />
@@ -93,25 +149,39 @@ export function MobileTabBar() {
   );
 }
 
-function Tab({ to, icon, label, end }: { to: string; icon: Parameters<typeof Icon>[0]["name"]; label: string; end?: boolean }) {
+function Tab({
+  to,
+  icon,
+  label,
+  end,
+}: {
+  to: string;
+  icon: Parameters<typeof Icon>[0]["name"];
+  label: string;
+  end?: boolean;
+}) {
   return (
     <NavLink
       to={to}
       end={end}
       className={({ isActive }) =>
         clsx(
-          "relative flex min-h-[56px] w-full flex-col items-center justify-center gap-1 transition-colors",
+          "pressable relative flex min-h-[56px] w-full flex-col items-center justify-center gap-1",
           isActive ? "text-jade" : "text-muted active:text-text2",
         )
       }
     >
       {({ isActive }) => (
         <>
-          {isActive ? (
-            <span className="absolute inset-x-5 top-0 h-[2px] rounded-full bg-jade" aria-hidden />
-          ) : null}
-          <Icon name={icon} size={19} strokeWidth={isActive ? 2.2 : 1.8} />
-          <span className="text-[9.5px] font-bold uppercase tracking-[0.12em]">{label}</span>
+          <Icon
+            name={icon}
+            size={19}
+            strokeWidth={isActive ? 2.2 : 1.8}
+            className={clsx(isActive && "icon-pop")}
+          />
+          <span className="text-[9.5px] font-bold uppercase tracking-[0.12em]">
+            {label}
+          </span>
         </>
       )}
     </NavLink>

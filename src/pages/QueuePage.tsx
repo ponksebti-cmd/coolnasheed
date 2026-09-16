@@ -5,7 +5,6 @@ import { EmptyState, Reveal, SectionHeader } from "../components/ui/Primitives";
 import { QueuePanel } from "../components/player/QueuePanel";
 import { MiniTrack } from "../components/collection/Cards";
 import { TRACKS, durationOf, getTrack } from "../data/catalog";
-import { generateNurMix } from "../lib/nur";
 import { formatTotal, plural } from "../lib/format";
 import { usePlayer } from "../store/player";
 import { useLibrary } from "../store/library";
@@ -17,10 +16,14 @@ export default function QueuePage() {
   const liked = useLibrary((s) => s.liked);
   const history = useLibrary((s) => s.history);
 
+  /* What to put next: what you loved, then what you played, then the newest
+     thing published — all of it real rows, in that order. */
   const suggestions = useMemo(() => {
-    const mix = generateNurMix({ liked, history, size: 6, seedKey: `queue-${new Date().toDateString()}` });
-    return mix.picks.filter((p) => !queue.includes(p.track.id)).slice(0, 5).map((p) => p.track);
-  }, [liked, history, queue]);
+    const seen = new Set(queue);
+    const loved = liked.map((id) => getTrack(id)).filter((t): t is Track => !!t && !seen.has(t.id));
+    const played = history.map((h) => getTrack(h.id)).filter((t): t is Track => !!t && !seen.has(t.id));
+    return [...loved, ...played, ...TRACKS].filter((t, i, all) => all.findIndex((x) => x.id === t.id) === i).slice(0, 5);
+  }, [liked, history, queue, TRACKS.length]);
 
   const recent = useMemo(
     () => history.slice(0, 8).map((h) => getTrack(h.id)).filter((t): t is Track => !!t && !queue.includes(t.id)).slice(0, 5),
@@ -37,7 +40,7 @@ export default function QueuePage() {
           <div className="label mb-1.5">up next</div>
           <h1 className="text-[2rem] leading-none text-text md:text-[2.6rem]">The queue</h1>
           <p className="mt-2 text-[13px] text-muted">
-            {queueTracks.length ? `${plural(queueTracks.length, "track")} · ${formatTotal(queueDuration)} of singing lined up.` : "Nothing lined up yet."}
+            {queueTracks.length ? `${plural(queueTracks.length, "nasheed")} · ${formatTotal(queueDuration)} lined up.` : "Nothing lined up yet."}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -64,7 +67,7 @@ export default function QueuePage() {
         <div className="space-y-6">
           <section>
             <SectionHeader
-              label="nūr suggests"
+              label="from what you loved"
               title="Add these next"
               action={
                 <button
@@ -83,7 +86,7 @@ export default function QueuePage() {
                 suggestions.map((t, i) => <MiniTrack key={t.id} track={t} index={i} queue={[...queue, ...suggestions.map((s) => s.id)]} />)
               ) : (
                 <p className="px-3 py-6 text-center text-[12.5px] text-muted">
-                  Everything Nūr would suggest is already queued. Impressive discipline.
+                  Love something, or play something, and it will show up here.
                 </p>
               )}
             </div>
@@ -118,7 +121,7 @@ export default function QueuePage() {
         <EmptyState
           icon="queue"
           title="Silence, for now"
-          msg="Play any nasheed and it lands here. Nūr can also fill the queue from your loved list."
+          msg="Play a nasheed and it lands here. What you loved fills the rest."
         />
       ) : null}
     </div>

@@ -95,6 +95,12 @@ grant execute on function public.record_play(text, integer, boolean, text) to an
 
 /* ------------------------------------------------------------------- charts */
 
+-- `create or replace` cannot change a function's OUT row, and migration 5 narrows this
+-- one (it drops `maqam`, adds `artwork_path`). Dropping first is what makes this file
+-- re-runnable: without it, `supabase db push` onto a database that already has migration
+-- 5 stops here with "cannot change return type of existing function".
+drop function if exists public.trending(text, integer);
+
 create or replace function public.trending(p_window text default '7d', p_limit integer default 10)
 returns table (
   song_id text,

@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { clsx } from "clsx";
 import { Icon } from "../ui/Icons";
-import { PatternArt } from "../art/PatternArt";
+import { Avatar } from "../art/CoverArt";
 import { useToast } from "../ui/Primitives";
 import { useAccount } from "../../lib/hooks";
 import { useUi } from "../../store/ui";
 import { useCommunity, timeAgoLabel, COMMENT_MAX, type UserComment } from "../../store/community";
 import { useSession } from "../../store/session";
 import type { Track } from "../../data/types";
-import type { Song } from "../../lib/song";
 import { usePlayer } from "../../store/player";
+import type { LyricLine } from "../../../shared/types";
 
 const REPORT_REASONS = [
   "Disrespectful to the dīn",
@@ -22,8 +22,8 @@ const REPORT_REASONS = [
  * The thread under a nasheed.
  *
  * Every note here is a row on the server, written by an account, with an amīn count that
- * counts real amīns. When the server cannot be reached the thread shows generated notes
- * instead and says so — an offline visit should look like a room, not pretend to be one.
+ * counts real amīns. There is no offline copy: when the server cannot be reached the
+ * thread says so rather than showing notes that nobody wrote.
  */
 export function CommentThread({
   track,
@@ -32,7 +32,7 @@ export function CommentThread({
   startAtLine,
 }: {
   track: Track;
-  song?: Song;
+  song?: { lines: LyricLine[] };
   compact?: boolean;
   /** pre-fill "on line N" — the immersive player passes the line you are on */
   startAtLine?: number;
@@ -75,7 +75,9 @@ export function CommentThread({
     if (!line) return;
     const isCurrent = player.trackId === track.id;
     if (!isCurrent) player.playTrack(track.id, { kind: "home", label: track.title });
-    window.setTimeout(() => player.seek(line.t + 0.05), isCurrent ? 0 : 260);
+    const at = line.t;
+    if (typeof at !== "number") return;
+    window.setTimeout(() => player.seek(at + 0.05), isCurrent ? 0 : 260);
   };
 
   const submit = async () => {
@@ -131,7 +133,7 @@ export function CommentThread({
         <div className="rounded-xl border border-line bg-surface/60 p-3">
           <div className="flex gap-3">
             <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full ring-1 ring-line2">
-              <PatternArt seed={account.seed} accent="jade" showVignette={false} />
+              <Avatar name={account.name} accent="jade" size={36} />
             </span>
             <div className="min-w-0 flex-1">
               <textarea
@@ -183,8 +185,8 @@ export function CommentThread({
 
       {!online ? (
         <p className="flex items-center gap-2 rounded-lg border border-line bg-surface2/40 px-3 py-2 text-[11.5px] text-muted">
-          <Icon name="sparkle" size={12} className="text-gold" />
-          Offline — these notes are generated, and your own will not post until the server is back.
+          <Icon name="cloudOff" size={12} className="text-gold" />
+          The backend is unreachable — the thread cannot be read or written until it answers.
         </p>
       ) : null}
 
@@ -222,7 +224,7 @@ export function CommentThread({
               className={clsx("flex gap-3 rounded-xl border p-3.5", mine ? "border-jade/28 bg-jade/[0.05]" : "border-line bg-surface/50")}
             >
               <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full ring-1 ring-line2">
-                <PatternArt seed={c.authorSeed} accent={track.accent} showVignette={false} />
+                <Avatar name={c.authorName} accent={c.authorAccent} size={36} />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px]">
@@ -231,10 +233,10 @@ export function CommentThread({
                   <span
                     className={clsx(
                       "flex items-center gap-1 rounded-full px-1.5 py-px text-[9.5px] font-bold uppercase tracking-wider",
-                      mine ? "bg-jade/14 text-jade" : c.generated ? "bg-surface3 text-muted" : "bg-surface3 text-muted",
+                      mine ? "bg-jade/14 text-jade" : "bg-surface3 text-muted",
                     )}
                   >
-                    <Icon name={c.generated ? "sparkle" : "check"} size={9} strokeWidth={3} /> {mine ? "you" : c.generated ? "generated" : "listener"}
+                    <Icon name="check" size={9} strokeWidth={3} /> {mine ? "you" : "listener"}
                   </span>
                   <span className="text-muted">{timeAgoLabel(c.at)}</span>
                   {c.atLine && song ? (
@@ -312,7 +314,7 @@ export function CommentThread({
                         <Icon name="trash" size={11} /> delete
                       </button>
                     </span>
-                  ) : !mine && !c.generated ? (
+                  ) : !mine ? (
                     <span className="ml-auto">
                       {reporting === c.id ? (
                         <span className="flex flex-wrap items-center gap-1.5">
@@ -358,11 +360,12 @@ export function CommentThread({
 }
 
 /** The line the voice is on right now, 1-based — what "pin to a line" pins to. */
-function currentLine(song: Song): number {
+function currentLine(song: { lines: LyricLine[] }): number {
   const t = usePlayer.getState().time;
   let idx = 0;
   for (let i = 0; i < song.lines.length; i++) {
-    if (song.lines[i]!.t <= t) idx = i;
+    const at = song.lines[i]!.t;
+    if (typeof at === "number" && at <= t) idx = i;
     else break;
   }
   return Math.min(song.lines.length, idx + 1);

@@ -7,17 +7,39 @@
  * paste?" should be one file rather than "four migrations and a seed, in order,
  * and mind the transaction".
  *
+ * Each migration is wrapped in a guard, because this file is pasted onto databases that
+ * are already part way through: a project set up by an older build has migrations 1–4 and
+ * not 5, and one that has already used this file has all of them. Re-running the older
+ * files on a database that has the newer one cannot work — migration 2's `trending()`
+ * body selects `songs.maqam`, which migration 5 drops — so the guard has to know what has
+ * been done. It knows two ways:
+ *
+ *   1. the ledger below, which this file writes as it goes;
+ *   2. evidence, for a database built by something else — `supabase db push`, `npm run
+ *      setup`, or an earlier copy of this file. A migration whose work is visibly already
+ *      done is recorded and skipped, not attempted and failed.
+ *
+ * The second half is the part that matters here, because every database this file has
+ * ever been pasted onto was built before the ledger existed.
+ *
  * It writes two files, because the seed is optional and a smaller paste is a paste
  * that is more likely to survive a browser:
  *
- *   node scripts/sql-bundle.mjs   →   supabase/setup-schema.sql   (the four migrations)
+ *   node scripts/sql-bundle.mjs   →   supabase/setup-schema.sql   (the migrations)
  *                                 →   supabase/setup.sql          (migrations + seed)
+ *                                 →   public/setup.sql            (the same text, served to
+ *                                      the app, so the "copy the SQL" button in the boot
+ *                                      notice can put it on the clipboard in one click)
  */
 
-import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 const root = process.cwd();
+/* `--check` is what `npm run verify` runs: the bundles are the files a person is told to
+   paste into Supabase, so a bundle that no longer matches supabase/migrations is a bug,
+   not a stale artefact. */
+const checkOnly = process.argv.includes("--check");
 const migrations = readdirSync(join(root, "supabase/migrations"))
   .filter((name) => name.endsWith(".sql"))
   .sort();
@@ -33,25 +55,96 @@ ${list}
 ${extra}--
 -- Two ways to run it:
 --
---   supabase link --project-ref <ref> && supabase db push      then, for the seed,
---   psql "$SUPABASE_DB_URL" -f supabase/seed.sql
+--   supabase link --project-ref <ref> && supabase db push
 --
 --   …or open Supabase Studio → SQL Editor → New query, paste this file, and Run.
---      It is safe to run twice: migrations are \`if not exists\` / \`or replace\`,
---      and every seed insert is \`on conflict do nothing\`.
+--      It is safe to run twice: every migration is \`if not exists\` / \`or replace\`.
 `;
+
+/**
+ * What each migration leaves behind, for a database that has no ledger yet.
+ *
+ * `supabase db push` keeps its own record of applied migrations, and so does this file —
+ * but neither can see the other's, and a project set up before the ledger existed has
+ * neither. So the guard also looks for the work itself. A migration with no entry here is
+ * simply applied: a file that says nothing about itself runs, which is the right default.
+ */
+const EVIDENCE = [
+  [":core", "to_regclass('public.songs') is not null"],
+  ["functions", "to_regprocedure('public.catalog_payload()') is not null"],
+  ["rls", "exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'songs')"],
+  ["storage", "exists (select 1 from storage.buckets where id = 'nasheed-audio')"],
+  /* the audio-only schema is the one that names itself */
+  ["audio_only_2",
+    "to_regclass('public.app_schema') is not null and not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'songs' and column_name = 'accent')"],
+  ["audio_only", "to_regclass('public.app_schema') is not null"],
+];
+
+/** The evidence for a file, matched on a marker rather than a whole timestamped name. */
+const evidenceFor = (name) => EVIDENCE.find(([marker]) => name.includes(marker))?.[1] ?? "false";
+
+/* The bookkeeping table every guard reads. It is created by the bundle rather than by a
+   migration, because `supabase db push` tracks applied migrations itself and has no use
+   for it — this is only about the file a person pastes. */
+const LEDGER = `/* ================================================================= bookkeeping */
+
+-- What this file has already applied. One row per migration, written by the guard below.
+-- Nobody but the database owner needs to read it, so it is closed to the API entirely:
+-- RLS on, no policies, and no grants to anon or authenticated.
+create table if not exists public.applied_migrations (
+  name       text primary key,
+  applied_at timestamptz not null default now()
+);
+
+alter table public.applied_migrations enable row level security;
+revoke all on public.applied_migrations from anon, authenticated;`;
+
+/**
+ * One migration, applied once.
+ *
+ * Inside a DO block because "run this only if it has not been run" cannot be said in
+ * plain SQL — and skipped rather than re-run because an older migration describes an
+ * older shape of the same tables.
+ */
+function guarded(name) {
+  const body = readFileSync(join(root, "supabase/migrations", name), "utf8").trimEnd();
+  const evidence = evidenceFor(name);
+  return `/* ================================================================ ${name} */
+
+do $cn_migration$
+begin
+  /* Already applied, or already done by something that did not write the ledger. */
+  if not exists (select 1 from public.applied_migrations where name = '${name}')
+     and (${evidence}) then
+    insert into public.applied_migrations (name) values ('${name}')
+      on conflict (name) do nothing;
+  end if;
+
+  if exists (select 1 from public.applied_migrations where name = '${name}') then
+    raise notice 'CoolNasheed: ${name} is already applied — skipping';
+    return;
+  end if;
+
+  execute $cn_body$
+${body}
+$cn_body$;
+
+  insert into public.applied_migrations (name) values ('${name}')
+    on conflict (name) do nothing;
+end
+$cn_migration$;`;
+}
 
 function schema() {
   const parts = [header("supabase/setup-schema.sql — the database, without the catalogue", "")];
-  for (const name of migrations) {
-    parts.push(`\n/* ================================================================ ${name} */\n`);
-    parts.push(readFileSync(join(root, "supabase/migrations", name), "utf8").trimEnd());
-    parts.push("\n");
-  }
+  parts.push(`\n${LEDGER}\n`);
+  for (const name of migrations) parts.push(`\n${guarded(name)}\n`);
   return parts.join("\n");
 }
 
 const seed = readFileSync(join(root, "supabase/seed.sql"), "utf8").trimEnd();
+/* The seed is kept in the bundle so `db reset` and `db push` stay one story, but it
+   carries no data any more — the catalogue is whatever people upload. */
 const both = `${schema()}
 /* ================================================================== seed.sql */
 
@@ -60,9 +153,39 @@ ${seed}
 
 const schemaPath = join(root, "supabase/setup-schema.sql");
 const bothPath = join(root, "supabase/setup.sql");
+/* The app serves this file so a person can copy the repair in one click. It is the same
+   text as `supabase/setup.sql`, and nothing in it is secret: it is the schema, which is
+   in the repository anyway. */
+const servedPath = join(root, "public/setup.sql");
+
+if (checkOnly) {
+  const stale = [[schemaPath, schema()], [bothPath, both], [servedPath, both]]
+    .filter(([path, want]) => !existsSync(path) || readFileSync(path, "utf8") !== want)
+    .map(([path]) => path.replace(`${root}/`, ""));
+  if (stale.length) {
+    console.error(`stale: ${stale.join(", ")} — run \`npm run sql:bundle\``);
+    process.exit(1);
+  }
+  /* the paste must actually contain the current schema, not merely match a checksum
+     of itself: the tables the client reads at boot have to be in the file */
+  const text = readFileSync(bothPath, "utf8");
+  const missing = ["public.app_schema", "audio-only-1", "create table if not exists public.songs", "studio_drafts"]
+    .filter((needle) => !text.includes(needle));
+  if (missing.length) {
+    console.error(`supabase/setup.sql is missing: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+  console.log("supabase/setup.sql and setup-schema.sql are current — the paste includes app_schema and the audio-only schema");
+  process.exit(0);
+}
+
+mkdirSync(join(root, "public"), { recursive: true });
 writeFileSync(schemaPath, schema());
 writeFileSync(bothPath, both);
+/* `vite build` copies public/ verbatim, so the served copy travels with the app. */
+writeFileSync(servedPath, both);
 
 const kb = (text) => `${(Buffer.byteLength(text) / 1024).toFixed(0)} KB`;
 console.log(`supabase/setup-schema.sql — ${migrations.length} migrations, ${kb(schema())}   (required)`);
-console.log(`supabase/setup.sql        — migrations + seed, ${kb(both)}   (optional: 24 nasheeds)`);
+console.log(`supabase/setup.sql        — migrations + seed, ${kb(both)}   (the same schema, plus an empty seed)`);
+console.log(`public/setup.sql          — ${kb(both)}   (served to the app: one-click copy in the setup notice)`);

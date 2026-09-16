@@ -62,7 +62,9 @@ export type IconName =
   | "users"
   | "server"
   | "cloudOff"
-  | "file";
+  | "file"
+  | "copy"
+  | "external";
 
 type IconDef = {
   d?: string[];
@@ -168,6 +170,8 @@ const ICONS: Record<IconName, IconDef> = {
   server: { d: ["M4 5.2h16v5H4zM4 13.8h16v5H4z", "M7 7.7h.01M7 16.3h.01"], sw: 1.7 },
   cloudOff: { d: ["M6.6 18.4h9.8a3.8 3.8 0 0 0 1.2-7.4 5.6 5.6 0 0 0-8.2-4.2", "M8.4 8.6a4.6 4.6 0 0 0-1.6 8.6", "M4 4l16 16"], sw: 1.7 },
   file: { d: ["M6.4 3.6h7.2l4 4v12.8H6.4z", "M13.6 3.6v4h4", "M9.2 13h5.6M9.2 16.4h4"], sw: 1.7 },
+  copy: { d: ["M9.2 9.2h10v10h-10z", "M5.6 14.8H4.8V4.8h10v.8"], sw: 1.6 },
+  external: { d: ["M13.6 4.4H19.6V10.4", "M19.6 4.4 11.2 12.8", "M18.4 14v4.8a1.6 1.6 0 0 1-1.6 1.6H5.6a1.6 1.6 0 0 1-1.6-1.6V7.6A1.6 1.6 0 0 1 5.6 6h4.8"], sw: 1.6 },
 };
 
 export type IconProps = {

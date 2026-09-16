@@ -1,25 +1,32 @@
-import { useEffect, useMemo, useState } from "react";
+/**
+ * The immersive view: the whole screen for one recording.
+ *
+ * Cover art, the words, the queue and the credits. Everything on it comes from the
+ * row and from the file — the length is the file's, the position is the audio
+ * element's, the plays and loves are the counters the database keeps.
+ */
+
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { clsx } from "clsx";
 import { Icon } from "../ui/Icons";
-import { PatternArt } from "../art/PatternArt";
-import { RadialSpectrum } from "./Visualizer";
-import { TimeRow, TransportButtons, VolumeControl, SpaceMenu } from "./Transport";
+import { CoverArt } from "../art/CoverArt";
+import { TimeRow, TransportButtons, VolumeControl } from "./Transport";
 import { QueuePanel } from "./QueuePanel";
 import { Lyrics } from "./Lyrics";
-import { Equalizer, LikeButton } from "../track/TrackBits";
-import { MOTIF_LABEL, planArt } from "../../lib/art/pattern";
-import { artistOf, collectionsOf, durationOf, formatCount, getTrack, statsFor } from "../../data/catalog";
-import { songFor } from "../../lib/song";
-import { MAQAMAT, hasQuarterTones, maqamLabel, noteName } from "../../lib/theory";
-import { formatTime } from "../../lib/format";
+import { Equalizer, LikeButton, TrackMenu } from "../track/TrackBits";
+import {
+  artistOf,
+  collectionsOf,
+  durationOf,
+  formatCount,
+  getTrack,
+  statsFor,
+} from "../../data/catalog";
+import { formatTime, relativeTime } from "../../lib/format";
 import { useBodyScrollLock, useKeyboard } from "../../lib/hooks";
 import { usePlayer } from "../../store/player";
-import { useLibrary } from "../../store/library";
-import { whyThis } from "../../lib/nur";
-import type { Track } from "../../data/types";
-import type { Song } from "../../lib/song";
 
 type Tab = "lyrics" | "queue" | "details";
 
@@ -27,13 +34,11 @@ export function ImmersivePlayer() {
   const open = usePlayer((s) => s.immersive);
   const trackId = usePlayer((s) => s.trackId);
   const playing = usePlayer((s) => s.playing);
+  const duration = usePlayer((s) => s.duration);
   const context = usePlayer((s) => s.context);
+  const error = usePlayer((s) => s.error);
+  const dismissError = usePlayer((s) => s.dismissError);
   const setImmersive = usePlayer((s) => s.setImmersive);
-  const setDuff = usePlayer((s) => s.setDuff);
-  const duff = useLibrary((s) => s.settings.duff);
-  const liked = useLibrary((s) => (trackId ? s.liked.includes(trackId) : false));
-  const history = useLibrary((s) => s.history);
-  const likes = useLibrary((s) => s.liked);
   const [tab, setTab] = useState<Tab>("lyrics");
 
   useBodyScrollLock(open);
@@ -47,24 +52,45 @@ export function ImmersivePlayer() {
   );
 
   const track = getTrack(trackId);
-  const song = useMemo(() => (track ? songFor(track) : null), [track]);
-  const plan = useMemo(() => (track ? planArt(track.seed, track.accent) : null), [track]);
 
   useEffect(() => {
     if (open) setTab("lyrics");
   }, [open, trackId]);
 
-  if (!open || !track || !song || !plan) return null;
+  if (!open || !track) return null;
 
   const artist = artistOf(track);
   const stats = statsFor(track);
   const sets = collectionsOf(track);
+  const total = duration || durationOf(track);
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex flex-col overflow-hidden bg-bg veil-enter" role="dialog" aria-modal="true" aria-label="Immersive player">
-      {/* backdrop */}
-      <div className="absolute inset-0 scale-[1.6] opacity-[0.55] blur-[46px]">
-        <PatternArt seed={track.seed} accent={track.accent} intensity={1.1} />
+    <div
+      className="sheet-in fixed inset-0 z-[100] flex flex-col overflow-hidden bg-bg"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Immersive player"
+    >
+      {/* the cover, enlarged and blurred, is the backdrop */}
+      <div
+        className="absolute inset-0 scale-[1.5] opacity-[0.45] blur-[52px]"
+        aria-hidden
+      >
+        {track.artworkPath ? (
+          <CoverArt
+            path={track.artworkPath}
+            title={track.title}
+            className="h-full w-full"
+            rounded="sm"
+          />
+        ) : (
+          <div
+            className="h-full w-full"
+            style={{
+              background: `radial-gradient(90% 90% at 30% 20%, color-mix(in oklab, var(--c-jade) 55%, transparent), transparent 70%)`,
+            }}
+          />
+        )}
       </div>
       <div className="absolute inset-0 bg-gradient-to-b from-[rgba(4,10,8,0.86)] via-[rgba(4,10,8,0.9)] to-bg" />
       <div className="grain absolute inset-0" />
@@ -81,26 +107,24 @@ export function ImmersivePlayer() {
           </button>
           <div className="min-w-0">
             <div className="label flex items-center gap-2">
-              {playing ? <Equalizer bars={3} className="text-jade" /> : <Icon name="waveform" size={11} />}
+              {playing ? (
+                <Equalizer bars={3} className="text-jade" />
+              ) : (
+                <Icon name="waveform" size={11} />
+              )}
               now playing · {context.label}
             </div>
-            <div className="truncate text-[13px] font-semibold text-text">{track.title}</div>
+            <div className="truncate text-[13px] font-semibold text-text">
+              {track.title}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="hidden items-center gap-2 sm:flex">
-            <SpaceMenu compact />
-            <button
-              onClick={() => setDuff(!duff)}
-              className={clsx("btn btn-ghost !px-3 !py-1.5", !duff && "!border-jade/40 !text-jade")}
-              aria-pressed={duff}
-              title="Vocals only / with duff"
-            >
-              <Icon name="drum" size={14} />
-              {duff ? "Duff on" : "Vocals only"}
-            </button>
+          <div className="hidden sm:block">
+            <VolumeControl />
           </div>
           <LikeButton trackId={track.id} size={16} />
+          <TrackMenu track={track} />
         </div>
       </header>
 
@@ -109,109 +133,180 @@ export function ImmersivePlayer() {
         {/* left: artwork + transport */}
         <div className="scroll-slim flex min-h-0 flex-col items-center justify-center gap-5 sm:overflow-y-auto lg:pr-2">
           <div className="relative w-full max-w-[min(78vw,430px)]">
-            <div className="absolute -inset-[9%]">
-              <RadialSpectrum />
-            </div>
             <div className="relative aspect-square overflow-hidden rounded-2xl border border-line2 shadow-[0_50px_120px_-40px_rgba(0,0,0,1)]">
-              <PatternArt seed={track.seed} accent={track.accent} intensity={1} />
+              <CoverArt
+                path={track.artworkPath}
+                title={track.title}
+                className="h-full w-full"
+                rounded="md"
+              />
               <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-[rgba(3,9,7,0.92)] to-transparent p-4">
                 <div className="min-w-0">
-                  <div className="label mb-1">{MOTIF_LABEL[plan.motif]}</div>
-                  <div className="truncate font-display text-lg text-text">{track.title}</div>
-                  {track.titleAr ? (
-                    <div className="arabic truncate text-[13px] text-goldsoft/85" dir="rtl">
-                      {track.titleAr}
-                    </div>
-                  ) : null}
+                  <div className="label mb-1">{track.status === "live" ? "recording" : "taken down"}</div>
+                  <div className="truncate font-display text-lg text-text">
+                    {track.title}
+                  </div>
                 </div>
-                <span className="shrink-0 rounded-md border border-line2 bg-[rgba(4,12,9,0.6)] px-2 py-1 text-[10.5px] font-bold uppercase tracking-wider text-text2 backdrop-blur">
-                  {maqamLabel(track.maqam)}
-                </span>
+                {track.titleAr ? (
+                  <div
+                    className="arabic shrink-0 text-[15px] text-goldsoft/80"
+                    dir="rtl"
+                  >
+                    {track.titleAr}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
 
-          <div className="w-full max-w-[520px]">
-            <div className="flex items-center justify-center">
+          <div className="w-full max-w-[min(78vw,430px)] space-y-3">
+            <div className="flex items-center justify-center gap-4">
               <TransportButtons size={42} />
             </div>
-            <div className="mt-2">
-              <TimeRow />
-            </div>
-            <div className="mt-2 flex items-center justify-center gap-3">
-              <VolumeControl />
-              <div className="hidden items-center gap-1 text-[11px] text-muted sm:flex">
-                <Icon name="info" size={12} />
-                <span>
-                  {song.notes.length} sung notes · {song.duff.length} drum hits · {song.bars} bars
+            <TimeRow />
+            {error ? (
+              <button
+                onClick={dismissError}
+                className="mx-auto flex items-center gap-2 text-[12px] text-madder"
+              >
+                <Icon name="info" size={13} /> {error} — dismiss
+              </button>
+            ) : null}
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <Link
+                to={`/a/${artist.id}`}
+                className="group flex min-w-0 items-center gap-2.5"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line2 bg-surface2/60 text-[11px] font-semibold text-text2">
+                  {artist.name.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-[12.5px] font-semibold text-text group-hover:text-jadesoft">
+                    {artist.name}
+                  </span>
+                  <span className="block truncate text-[11px] text-muted">
+                    {artist.role}
+                  </span>
+                </span>
+              </Link>
+              <div className="flex shrink-0 items-center gap-3 text-[11px] text-muted">
+                {stats.plays ? (
+                  <span className="flex items-center gap-1 tabular-nums">
+                    <Icon name="waveform" size={11} />{" "}
+                    {formatCount(stats.plays)}
+                  </span>
+                ) : null}
+                <span className="flex items-center gap-1 tabular-nums">
+                  <Icon name="star" size={11} /> {formatCount(stats.likes)}
+                </span>
+                <span className="flex items-center gap-1 tabular-nums">
+                  <Icon name="clock" size={11} /> {formatTime(total)}
                 </span>
               </div>
             </div>
-          </div>
-
-          {/* meta chips */}
-          <div className="flex max-w-[560px] flex-wrap items-center justify-center gap-1.5">
-            {[
-              { icon: "mic" as const, label: track.voices },
-              { icon: "waveform" as const, label: `${track.bpm} bpm` },
-              { icon: "compass" as const, label: `${noteName(track.root)} tonic` },
-              { icon: "clock" as const, label: formatTime(durationOf(track)) },
-              { icon: "drum" as const, label: duff && track.duff ? "duff" : "vocals only" },
-              { icon: "user" as const, label: artist.name },
-            ].map((c) => (
-              <span key={c.label} className="chip !normal-case !tracking-normal">
-                <Icon name={c.icon} size={11} />
-                {c.label}
-              </span>
-            ))}
           </div>
         </div>
 
-        {/* right: lyrics / queue / details */}
-        <div className="panel relative flex min-h-[60vh] flex-col overflow-hidden rounded-2xl p-4 sm:min-h-0 sm:p-5">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-1 rounded-full border border-line bg-surface2/50 p-0.5">
-              {(
-                [
-                  { id: "lyrics", label: "Lyrics", icon: "lyrics" },
-                  { id: "queue", label: "Queue", icon: "queue" },
-                  { id: "details", label: "Details", icon: "info" },
-                ] as { id: Tab; label: string; icon: "lyrics" | "queue" | "info" }[]
-              ).map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setTab(t.id)}
-                  className={clsx(
-                    "btn px-3 py-1.5 !text-[11.5px]",
-                    tab === t.id ? "bg-jade/15 text-jadesoft" : "text-muted hover:text-text2",
-                  )}
-                  aria-pressed={tab === t.id}
-                >
-                  <Icon name={t.icon} size={13} />
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <Link to={`/t/${track.id}`} className="btn-icon flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11px] text-muted hover:text-text2">
-              Track page <Icon name="arrowUpRight" size={13} />
-            </Link>
+        {/* right: tabs */}
+        <div className="flex min-h-0 flex-col lg:pl-2">
+          <div className="mb-4 flex shrink-0 items-center gap-1 rounded-full border border-line bg-surface2/50 p-0.5">
+            {(
+              [
+                { id: "lyrics", label: "Lyrics", icon: "lyrics" },
+                { id: "queue", label: "Queue", icon: "queue" },
+                { id: "details", label: "Details", icon: "info" },
+              ] as const
+            ).map((entry) => (
+              <button
+                key={entry.id}
+                onClick={() => setTab(entry.id)}
+                className={clsx(
+                  "btn flex-1 gap-1.5 !py-2 !text-[12px]",
+                  tab === entry.id
+                    ? "bg-jade/15 text-jadesoft"
+                    : "text-muted hover:text-text2",
+                )}
+                aria-pressed={tab === entry.id}
+              >
+                <Icon name={entry.icon} size={14} />
+                {entry.label}
+              </button>
+            ))}
           </div>
 
           <div className="min-h-0 flex-1">
             {tab === "lyrics" ? (
-              <Lyrics song={song} variant="immersive" />
+              <Lyrics song={track} variant="immersive" />
             ) : tab === "queue" ? (
               <QueuePanel compact />
             ) : (
-              <DetailsPanel
-                track={track}
-                song={song}
-                reason={whyThis(track, likes, history)}
-                liked={liked}
-                stats={stats}
-                duff={duff}
-                sets={sets.map((s) => ({ id: s.id, title: s.title }))}
-              />
+              <div className="scroll-slim h-full space-y-4 overflow-y-auto pr-1">
+                {track.note ? (
+                  <div className="rounded-xl border border-line bg-surface2/40 p-3.5">
+                    <div className="label mb-1.5">about this recording</div>
+                    <p className="text-[13px] leading-relaxed text-text2">
+                      {track.note}
+                    </p>
+                  </div>
+                ) : null}
+
+                <dl className="grid grid-cols-2 gap-3">
+                  <Detail label="Publisher" value={artist.name} />
+                  <Detail
+                    label="Published"
+                    value={relativeTime(track.publishedAt)}
+                  />
+                  <Detail label="Length" value={formatTime(total)} />
+                  <Detail label="Plays" value={formatCount(stats.plays)} />
+                  <Detail label="Loves" value={formatCount(stats.likes)} />
+                  <Detail label="Notes" value={formatCount(stats.comments)} />
+                  <Detail label="Lines" value={String(track.lines.length)} />
+                </dl>
+
+                {track.tags.length ? (
+                  <div>
+                    <div className="label mb-2">tags</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {track.tags.map((tag) => (
+                        <Link
+                          key={tag}
+                          to={`/search?tag=${encodeURIComponent(tag)}`}
+                          className="chip"
+                        >
+                          {tag}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {sets.length ? (
+                  <div>
+                    <div className="label mb-2">appears in</div>
+                    <div className="space-y-1.5">
+                      {sets.map((set) => (
+                        <Link
+                          key={set.id}
+                          to={`/c/${set.id}`}
+                          className="flex items-center gap-2 text-[12.5px] text-muted hover:text-text2"
+                        >
+                          <Icon name="rows" size={13} /> {set.title}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="flex items-center gap-2 pt-1">
+                  <LikeButton trackId={track.id} size={16} />
+                  <Link
+                    to={`/t/${track.id}`}
+                    className="btn btn-ghost px-3 py-2 !text-[12px]"
+                  >
+                    <Icon name="arrowUpRight" size={13} /> Open the page
+                  </Link>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -221,216 +316,11 @@ export function ImmersivePlayer() {
   );
 }
 
-function DetailsPanel({
-  track,
-  song,
-  reason,
-  liked,
-  stats,
-  duff,
-  sets,
-}: {
-  track: Track;
-  song: Song;
-  reason: string;
-  liked: boolean;
-  stats: { plays: number; likes: number; reposts: number; comments: number };
-  duff: boolean;
-  sets: { id: string; title: string }[];
-}) {
-  const artist = artistOf(track);
-  const maqam = MAQAMAT[track.maqam];
-  const quarter = hasQuarterTones(track.maqam);
-
+function Detail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="scroll-slim h-full min-h-0 space-y-5 overflow-y-auto pr-1.5 pb-4">
-      <section>
-        <div className="label mb-2">Why this is playing</div>
-        <p className="rounded-xl border border-jade/25 bg-jade/[0.07] px-3.5 py-3 text-[13px] leading-relaxed text-text2">
-          <span className="mr-1.5 inline-flex align-middle text-jade">
-            <Icon name="sparkle" size={14} />
-          </span>
-          {reason}
-        </p>
-      </section>
-
-      <section>
-        <div className="label mb-2">About</div>
-        <p className="text-[13.5px] leading-relaxed text-text2">{track.blurb}</p>
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {track.tags.map((t) => (
-            <span key={t} className="chip !normal-case !tracking-normal">
-              {t}
-            </span>
-          ))}
-        </div>
-      </section>
-
-      <section className="grid grid-cols-2 gap-3">
-        <div className="rounded-xl border border-line bg-surface2/40 p-3">
-          <div className="label mb-1.5">Maqām</div>
-          <div className="flex items-baseline gap-2">
-            <span className="font-display text-xl text-text">{maqam.name}</span>
-            <span className="arabic text-sm text-goldsoft/80" dir="rtl">
-              {maqam.ar}
-            </span>
-          </div>
-          <p className="mt-1 text-[11.5px] text-muted">{maqam.mood}</p>
-          <div className="mt-3">
-            <div className="relative h-8">
-              <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-line2" />
-              {Array.from({ length: 13 }).map((_, i) => (
-                <span key={i} className="absolute top-1/2 h-1.5 w-px -translate-y-1/2 bg-line2" style={{ left: `${(i / 12) * 100}%` }} />
-              ))}
-              {maqam.steps.map((s, i) => {
-                const isQuarter = Math.abs(s - Math.round(s)) > 0.01;
-                return (
-                  <span
-                    key={i}
-                    className={clsx("absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full", isQuarter ? "h-2.5 w-2.5 bg-gold" : "h-2 w-2 bg-jade")}
-                    style={{ left: `${(s / 12) * 100}%`, boxShadow: isQuarter ? "0 0 10px rgba(var(--c-glow-2),0.7)" : undefined }}
-                    title={`${s} semitones`}
-                  />
-                );
-              })}
-            </div>
-            <div className="mt-1 flex items-center gap-2 text-[10.5px] text-muted">
-              <span className="flex items-center gap-1">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-jade" /> whole & half tones
-              </span>
-              {quarter ? (
-                <span className="flex items-center gap-1">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-gold" /> quarter tone
-                </span>
-              ) : null}
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-line bg-surface2/40 p-3">
-          <div className="label mb-1.5">Voicing</div>
-          <div className="font-display text-xl capitalize text-text">{track.voices}</div>
-          <p className="mt-1 text-[11.5px] text-muted">
-            {track.voices === "solo"
-              ? "one voice, no harmony"
-              : track.voices === "duet"
-                ? "lead plus a third below"
-                : "lead, thirds above and below, hum drone"}
-          </p>
-          <div className="mt-3 space-y-1.5 text-[11.5px] text-muted">
-            <Row k="Tempo" v={`${track.bpm} bpm · ${song.bars} bars`} />
-            <Row k="Tonic" v={`${noteName(track.root)} (${track.root})`} />
-            <Row k="Year" v={String(track.year)} />
-            <Row k="Plays" v={`${formatCount(stats.plays)} · ${formatCount(stats.likes)} loved`} />
-          </div>
-          {liked ? (
-            <div className="mt-2 flex items-center gap-1.5 text-[11px] font-semibold text-gold">
-              <Icon name="starFill" size={12} /> in your loved list
-            </div>
-          ) : null}
-        </div>
-      </section>
-
-      {track.duff ? (
-        <section>
-          <div className="label mb-2">Frame drum pattern {duff ? "" : "(muted)"}</div>
-          <div className="flex items-center gap-1.5 rounded-xl border border-line bg-surface2/40 p-3">
-            {track.duff.split("").map((ch, i) => (
-              <span
-                key={i}
-                className={clsx(
-                  "grid h-8 flex-1 place-items-center rounded-md text-[11px] font-bold transition-colors",
-                  ch === "D"
-                    ? "bg-gold/25 text-goldsoft"
-                    : ch === "d"
-                      ? "bg-gold/12 text-gold/80"
-                      : ch === "T"
-                        ? "bg-jade/22 text-jadesoft"
-                        : ch === "t"
-                          ? "bg-jade/10 text-jade/70"
-                          : "bg-surface3/60 text-muted/50",
-                )}
-                title={ch === "." ? "rest" : ch.toUpperCase() === "D" ? "dum (low)" : "tak (high)"}
-              >
-                {ch === "." ? "" : ch.toUpperCase() === "D" ? "D" : "T"}
-              </span>
-            ))}
-          </div>
-          <p className="mt-1.5 text-[11px] text-muted">One bar of 16 sixteenth notes: D = dum (palm, low), T = tak (fingertips, high).</p>
-        </section>
-      ) : (
-        <section className="rounded-xl border border-line bg-surface2/40 p-3 text-[12.5px] leading-relaxed text-text2">
-          <span className="mr-1.5 text-jade">
-            <Icon name="mic" size={13} />
-          </span>
-          Vocals only. No duff was used in this arrangement — toggle the drum in the header if you want one anyway;
-          the pattern is generated from the maqām's rhythm family.
-        </section>
-      )}
-
-      <section>
-        <div className="label mb-2">Sources</div>
-        <ul className="space-y-1.5">
-          {song.lines
-            .filter((l) => l.line.note)
-            .map((l, i) => (
-              <li key={i} className="flex items-start gap-2 text-[12.5px] text-text2">
-                <span className="mt-[5px] h-1 w-1 shrink-0 rounded-full bg-gold" />
-                <span>
-                  <span className="font-semibold text-text">{l.line.note}</span>
-                  {l.line.tr || l.line.en ? <span className="text-muted"> — {l.line.tr ?? l.line.en}</span> : null}
-                </span>
-              </li>
-            ))}
-          {!song.lines.some((l) => l.line.note) ? (
-            <li className="text-[12.5px] text-muted">Words written for this app; nothing here is sampled from anyone's recording.</li>
-          ) : null}
-        </ul>
-      </section>
-
-      <section>
-        <div className="label mb-2">The voice</div>
-        <p className="text-[12.5px] leading-relaxed text-muted">
-          You are hearing a synthesised performance, not a recording: three detuned sawtooth oscillators per note, pushed through
-          three formant band-passes tuned to the vowel of each syllable ({Array.from(new Set(song.notes.filter((n) => n.role === "lead").map((n) => n.vowel))).join(" · ")}),
-          with delayed vibrato, portamento between some notes, and a procedural convolution reverb. The duff is filtered noise plus a
-          pitch-dropping sine. Everything is scheduled from the same timeline the lyrics follow.
-        </p>
-      </section>
-
-      <section>
-        <div className="label mb-2">More from</div>
-        <Link to={`/a/${artist.id}`} className="flex items-center gap-3 rounded-xl border border-line bg-surface2/40 p-3 transition-colors hover:border-line2">
-          <div className="h-11 w-11 shrink-0 overflow-hidden rounded-lg border border-line">
-            <PatternArt seed={artist.seed} accent={artist.accent} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[13px] font-semibold text-text">{artist.name}</div>
-            <div className="truncate text-[11.5px] text-muted">
-              {artist.role} · {artist.origin}
-            </div>
-          </div>
-          <Icon name="chevronRight" size={16} className="text-muted" />
-        </Link>
-        {sets.length ? (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {sets.map((set) => (
-              <Link key={set.id} to={`/c/${set.id}`} className="chip !normal-case !tracking-normal hover:border-line2 hover:text-text">
-                <Icon name="rows" size={11} /> {set.title}
-              </Link>
-            ))}
-          </div>
-        ) : null}
-      </section>
-    </div>
-  );
-}
-
-function Row({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <span className="text-muted">{k}</span>
-      <span className="truncate font-medium text-text2">{v}</span>
+    <div className="rounded-xl border border-line bg-surface2/30 px-3 py-2.5">
+      <dt className="label mb-0.5">{label}</dt>
+      <dd className="truncate text-[13px] text-text2 tabular-nums">{value}</dd>
     </div>
   );
 }

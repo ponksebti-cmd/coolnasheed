@@ -1,11 +1,10 @@
 import { clsx } from "clsx";
 import { Link } from "react-router-dom";
 import { Icon } from "../ui/Icons";
-import { PatternArt } from "../art/PatternArt";
+import { CoverArt } from "../art/CoverArt";
 import { Reveal } from "../ui/Primitives";
 import { Equalizer, LikeButton, PlayCount, PlayFab, TrackMenu, ArtThumb } from "./TrackBits";
 import { artistOf, durationOf, formatCount, statsFor } from "../../data/catalog";
-import { maqamLabel } from "../../lib/theory";
 import { formatTime } from "../../lib/format";
 import { usePlayer } from "../../store/player";
 import type { Track } from "../../data/types";
@@ -110,7 +109,6 @@ export function TrackRow({
 
       {/* mode / tags */}
       <div className="hidden min-w-0 items-center gap-2 lg:flex">
-        <span className="chip !px-2 !py-[3px] !text-[9.5px] shrink-0">{maqamLabel(track.maqam)}</span>
         <span className="truncate text-[11.5px] text-muted">
           {track.tags.slice(0, 3).join(" · ")}
         </span>
@@ -177,7 +175,7 @@ export function TrackList({
           <span className="text-center">#</span>
           <span className="w-[42px]" />
           <span>Title</span>
-          <span className="hidden lg:block">Mode</span>
+          <span className="hidden lg:block">Year</span>
           <span className="hidden w-20 justify-end lg:flex">Plays</span>
           <span className="w-[92px] text-right">Time</span>
         </div>
@@ -227,7 +225,7 @@ export function TrackCard({
         <Link to={`/t/${track.id}`} className="block">
           <div className={clsx("relative overflow-hidden", variant === "wide" ? "aspect-[16/9]" : "aspect-square")}>
             <div className="absolute inset-0 transition-transform duration-[900ms] ease-out group-hover:scale-[1.06]">
-              <PatternArt seed={track.seed} accent={track.accent} />
+              <CoverArt path={track.artworkPath} title={track.title} className="h-full w-full" rounded="sm" />
             </div>
             <div className="absolute inset-0 bg-gradient-to-t from-[rgba(3,10,8,0.86)] via-[rgba(3,10,8,0.12)] to-transparent" />
             <div className="absolute left-3 top-3 flex items-center gap-2">

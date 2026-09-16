@@ -2,20 +2,22 @@
  * Rows in, models out.
  *
  * PostgREST hands back exactly what is in the table: snake_case columns, ISO
- * timestamps, storage paths. The app speaks camelCase, epoch milliseconds and
- * absolute URLs. Every conversion lives here, in one place, so a component never has
- * to know whether it is looking at a database row or a nasheed.
+ * timestamps, storage paths. The app speaks camelCase, epoch milliseconds and absolute
+ * URLs. Every conversion lives here, so a component never has to know whether it is
+ * looking at a database row or at a nasheed.
  *
- * The Edge Functions and the Postgres functions already return camelCase (they build
- * JSON themselves), so their payloads pass through these mappers untouched — the
- * mappers accept both spellings where that is cheap to do.
+ * This file also holds the browser's copy of the publish validator. A project with the
+ * database set up but no Edge Functions deployed still publishes — the browser builds
+ * the row PostgREST will accept, and Row Level Security plus the check constraints
+ * decide whether it lands. `supabase/functions/_shared/validate.ts` is the server's
+ * copy, and `shared/fixtures/publish-cases.json` holds the two of them to the same
+ * answers so they cannot drift apart (`npm run contract:test`).
  */
 
 import { artworkUrl, audioUrl } from "./supabase";
 import { ApiError } from "./errors";
-import { MAQAM_NAMES, MAX_AUDIO_BYTES } from "../../shared/types";
+import { MAX_AUDIO_BYTES, type Accent, type LyricLine, type SongInput } from "../../shared/types";
 import type {
-  Accent,
   ArtistCard,
   CatalogCollection,
   Comment,
@@ -23,13 +25,10 @@ import type {
   DailyPoint,
   DailyPointDb,
   HistoryRow,
-  LyricLine,
-  MaqamName,
   Playlist,
   PlaylistRow,
   Report,
   Song,
-  SongInput,
   SongStatus,
   TrendingDbRow,
   TrendingRow,
@@ -39,6 +38,8 @@ import type {
 } from "../../shared/types";
 
 export type { CommentRow, PlaylistRow };
+
+export type Listener = { id: string | null; amened: Set<string> };
 
 /** ISO string or epoch millis → epoch millis. */
 export function epochMs(value: string | number | null | undefined, fallback = 0): number {
@@ -62,22 +63,11 @@ export type SongRow = {
   title: string;
   title_ar: string | null;
   note: string | null;
-  maqam: MaqamName;
-  root: number;
-  bpm: number;
-  voices: "solo" | "duet" | "choir";
-  duff: string | null;
-  duff_enter: "intro" | "verse" | null;
-  passes: number | null;
-  accent: Accent;
-  year: number | null;
   tags: string[] | null;
   lines: LyricLine[] | null;
-  motif_bank: number[] | null;
   audio_path: string | null;
   audio_mime: string | null;
-  /** only read back when an edit needs to preserve it; the model does not carry it */
-  audio_bytes?: number | null;
+  audio_bytes: number | null;
   duration_ms: number | null;
   artwork_path: string | null;
   status: SongStatus;
@@ -88,34 +78,36 @@ export type SongRow = {
   notes: number;
   /** filled by the caller when it knows who published it */
   ownerHandle?: string | null;
+  ownerName?: string | null;
 };
 
 /** Every column a song read needs. */
 export const SONG_COLUMNS =
-  "id, owner_id, title, title_ar, note, maqam, root, bpm, voices, duff, duff_enter, passes, accent, year, tags, lines, motif_bank, audio_path, audio_mime, audio_bytes, duration_ms, artwork_path, status, published_at, created_at, plays, likes, notes";
+  "id, owner_id, title, title_ar, note, tags, lines, audio_path, audio_mime, audio_bytes, duration_ms, artwork_path, status, published_at, created_at, plays, likes, notes";
+
+/**
+ * A row that has no recording is not a nasheed this app can play, so it is skipped
+ * rather than rendered as a dead entry. The database refuses to make one live, which
+ * makes this a belt-and-braces check on old rows.
+ */
+export function playableRow(row: SongRow): boolean {
+  return typeof row.audio_path === "string" && row.audio_path.length > 0;
+}
 
 export function songFromRow(row: SongRow): Song {
   return {
     id: row.id,
     ownerId: row.owner_id,
     ownerHandle: row.ownerHandle ?? null,
+    ownerName: row.ownerName ?? null,
     title: row.title,
     titleAr: row.title_ar,
     note: row.note ?? "",
-    maqam: row.maqam,
-    root: Number(row.root),
-    bpm: Number(row.bpm),
-    voices: row.voices,
-    duff: row.duff,
-    duffEnter: row.duff_enter ?? "verse",
-    passes: Number(row.passes ?? 2),
-    accent: row.accent ?? "jade",
-    year: row.year === null || row.year === undefined ? null : Number(row.year),
     tags: Array.isArray(row.tags) ? row.tags : [],
     lines: Array.isArray(row.lines) ? row.lines : [],
-    motifBank: Array.isArray(row.motif_bank) ? row.motif_bank : null,
-    audioPath: row.audio_path,
+    audioPath: row.audio_path!,
     audioMime: row.audio_mime ?? null,
+    audioBytes: row.audio_bytes === null || row.audio_bytes === undefined ? null : Number(row.audio_bytes),
     durationMs: row.duration_ms === null || row.duration_ms === undefined ? null : Number(row.duration_ms),
     artworkPath: row.artwork_path,
     status: row.status ?? "live",
@@ -124,6 +116,10 @@ export function songFromRow(row: SongRow): Song {
     likes: Number(row.likes ?? 0),
     notes: Number(row.notes ?? 0),
   };
+}
+
+export function songsFromRows(rows: SongRow[] | null | undefined): Song[] {
+  return (rows ?? []).filter(playableRow).map(songFromRow);
 }
 
 /** Storage paths are stored; URLs are derived. The player and the artwork want URLs. */
@@ -140,7 +136,6 @@ export type ProfileRow = {
   tagline: string | null;
   bio: string | null;
   city: string | null;
-  seed: string | null;
   accent: Accent | null;
   role: UserRole;
   kind: UserKind;
@@ -149,7 +144,7 @@ export type ProfileRow = {
 };
 
 export const PROFILE_COLUMNS =
-  "id, handle, name, name_ar, tagline, bio, city, seed, accent, role, kind, verified, created_at";
+  "id, handle, name, name_ar, tagline, bio, city, accent, role, kind, verified, created_at";
 
 /** The public id of a person is their handle; the uuid travels beside it. */
 export function userFromRow(row: ProfileRow, email?: string | null): User {
@@ -162,7 +157,6 @@ export function userFromRow(row: ProfileRow, email?: string | null): User {
     tagline: row.tagline ?? "",
     bio: row.bio ?? "",
     city: row.city ?? "",
-    seed: row.seed || `listener-${row.handle}`,
     accent: row.accent ?? "jade",
     role: row.role ?? "listener",
     kind: row.kind ?? "listener",
@@ -175,17 +169,13 @@ export function userFromRow(row: ProfileRow, email?: string | null): User {
 /* ----------------------------------------------------------------- comments */
 
 export const COMMENT_COLUMNS =
-  "id, song_id, author_id, text, at_line, edited_at, amens, reports, removed, created_at";
+  "id, song_id, author_id, text, at_line, edited_at, amens, reports, removed, created_at, author:profiles(id, handle, name, accent, verified)";
 
 /**
- * A note plus who wrote it. `viewerId` and `amenedIds` come from the caller so the
- * list arrives ready to render: no second round trip to find out which notes this
- * account has already said amin to.
+ * A note plus who wrote it. `viewer` comes from the caller so the list arrives ready to
+ * render: no second round trip to find out which notes this account already amened.
  */
-export function commentFromRow(
-  row: CommentRow,
-  viewer: { id: string | null; amened: Set<string> },
-): Comment {
+export function commentFromRow(row: CommentRow, viewer: Listener): Comment {
   const author = row.author ?? null;
   return {
     id: row.id,
@@ -193,7 +183,6 @@ export function commentFromRow(
     authorId: author?.handle ?? row.author_id,
     authorName: author?.name ?? "Somebody",
     authorHandle: author?.handle ?? "",
-    authorSeed: author?.seed || `listener-${author?.handle ?? row.author_id}`,
     authorAccent: author?.accent ?? "jade",
     authorVerified: Boolean(author?.verified),
     text: row.text,
@@ -210,7 +199,7 @@ export function commentFromRow(
 
 /* ---------------------------------------------------------------- playlists */
 
-export const PLAYLIST_COLUMNS = "id, owner_id, name, blurb, seed, accent, song_ids, created_at";
+export const PLAYLIST_COLUMNS = "id, owner_id, name, blurb, accent, song_ids, created_at";
 
 export function playlistFromRow(row: PlaylistRow): Playlist {
   return {
@@ -218,7 +207,6 @@ export function playlistFromRow(row: PlaylistRow): Playlist {
     ownerId: row.owner_id,
     name: row.name,
     blurb: row.blurb ?? "",
-    seed: row.seed || `playlist-${row.id}`,
     accent: row.accent ?? "jade",
     songIds: Array.isArray(row.song_ids) ? row.song_ids : [],
     createdAt: epochMs(row.created_at, Date.now()),
@@ -235,7 +223,6 @@ export type ArtistRow = {
   tagline: string | null;
   bio: string | null;
   city: string | null;
-  seed: string | null;
   accent: Accent | null;
   verified: boolean;
   kind: UserKind;
@@ -251,7 +238,6 @@ export function artistFromRow(row: ArtistRow, songs = 0, followers = 0): ArtistC
     role: row.tagline || "Publisher",
     origin: row.city || "—",
     bio: row.bio ?? "",
-    seed: row.seed || `artist-${row.handle}`,
     accent: row.accent ?? "jade",
     verified: Boolean(row.verified),
     kind: row.kind ?? "artist",
@@ -267,7 +253,6 @@ export type CollectionRow = {
   title_ar: string | null;
   curator: string | null;
   blurb: string | null;
-  seed: string | null;
   accent: Accent | null;
   tags: string[] | null;
   year: number | null;
@@ -282,7 +267,6 @@ export function collectionFromRow(row: CollectionRow): CatalogCollection {
     titleAr: row.title_ar,
     curator: row.curator || "CoolNasheed",
     blurb: row.blurb ?? "",
-    seed: row.seed || `collection-${row.id}`,
     accent: row.accent ?? "jade",
     tags: Array.isArray(row.tags) ? row.tags : [],
     year: Number(row.year ?? new Date().getFullYear()),
@@ -295,8 +279,6 @@ export function collectionFromRow(row: CollectionRow): CatalogCollection {
 export const trendingFromRow = (row: TrendingDbRow): TrendingRow => ({
   songId: row.song_id,
   title: row.title,
-  accent: row.accent,
-  maqam: row.maqam,
   ownerName: row.owner_name,
   plays: Number(row.plays ?? 0),
   listeners: Number(row.listeners ?? 0),
@@ -316,7 +298,6 @@ export function historyFromRow(row: Partial<HistoryRow>): HistoryRow {
   return {
     songId: String(row.songId ?? ""),
     title: String(row.title ?? ""),
-    accent: (row.accent ?? "jade") as Accent,
     ownerName: row.ownerName ?? null,
     plays: Number(row.plays ?? 0),
     seconds: Number(row.seconds ?? 0),
@@ -352,44 +333,37 @@ export function reportFromRow(row: ReportRow): Report {
   };
 }
 
-/* ------------------------------------------- writing a nasheed from the browser */
+/* ------------------------------------------- writing a nasheed from the browser
 
-/**
- * The row `publish` would have written, built here instead.
- *
- * The Edge Function is a validator with good error messages, not the authority: Row
- * Level Security decides whether an insert lands, and the same check constraints run
- * either way. So a project with the database set up but no functions deployed can
- * still publish — the browser builds the identical row and PostgREST carries it.
- *
- * That is why this mirror keeps the same rules, the same order and the same wording
- * as `supabase/functions/_shared/validate.ts`. When one changes, change both.
- */
+   The row `publish` would have written, built here instead. The order of the checks,
+   the wording of each refusal and the shape of the result are the same as
+   `supabase/functions/_shared/validate.ts`; the fixture in `shared/fixtures` proves it.
+*/
+
 export type SongInsertRow = {
   title: string;
   title_ar: string | null;
   note: string;
-  maqam: MaqamName;
-  root: number;
-  bpm: number;
-  voices: Song["voices"];
-  duff: string | null;
-  duff_enter: Song["duffEnter"];
-  passes: number;
-  accent: Accent;
-  year: number | null;
   tags: string[];
   lines: LyricLine[];
-  motif_bank: number[] | null;
-  audio_path: string | null;
+  audio_path: string;
   audio_mime: string | null;
   audio_bytes: number | null;
   duration_ms: number | null;
   artwork_path: string | null;
 };
 
-const ACCENT_NAMES: Accent[] = ["jade", "gold", "turq", "madder", "cobalt"];
-const VOICE_NAMES: Song["voices"][] = ["solo", "duet", "choir"];
+const PUBLISH_KEYS = [
+  "title", "titleAr", "note", "tags", "lines",
+  "audioPath", "audioMime", "audioBytes", "durationMs", "artworkPath",
+] as const;
+
+function rejectUnknown(input: Record<string, unknown>, allowed: readonly string[], where: string): void {
+  const extra = Object.keys(input).filter((key) => !allowed.includes(key));
+  if (extra.length) {
+    throw new ApiError(`${where} does not accept: ${extra.slice(0, 5).join(", ")}.`, 400, extra[0]);
+  }
+}
 
 function text(value: unknown, field: string, min: number, max: number, optional = false): string | null {
   if (value === null || value === undefined || value === "") {
@@ -404,11 +378,7 @@ function text(value: unknown, field: string, min: number, max: number, optional 
   return trimmed;
 }
 
-function whole(value: unknown, field: string, min: number, max: number, fallback?: number): number {
-  if (value === null || value === undefined || value === "") {
-    if (fallback !== undefined) return fallback;
-    throw new ApiError(`${field} is required.`, 400, field);
-  }
+function whole(value: unknown, field: string, min: number, max: number): number {
   const n = typeof value === "string" ? Number(value) : value;
   if (typeof n !== "number" || !Number.isFinite(n)) throw new ApiError(`${field} must be a number.`, 400, field);
   const rounded = Math.round(n);
@@ -416,25 +386,39 @@ function whole(value: unknown, field: string, min: number, max: number, fallback
   return rounded;
 }
 
-function oneOf<T extends string>(value: unknown, allowed: readonly T[], field: string, fallback?: T): T {
+/**
+ * A storage path has to live under the uploader's own folder — the same rule the bucket
+ * policy enforces, checked before anything is written. `..` is refused rather than
+ * normalised, because a path that is trying to climb out is not a typo.
+ */
+export function ownedPath(value: unknown, ownerId: string, field: string, required = false): string | null {
   if (value === null || value === undefined || value === "") {
-    if (fallback !== undefined) return fallback;
-    throw new ApiError(`${field} is required.`, 400, field);
+    if (required) throw new ApiError(`${field} is required.`, 400, field);
+    return null;
   }
-  if (typeof value !== "string" || !allowed.includes(value as T)) {
-    throw new ApiError(`${field} must be one of: ${allowed.join(", ")}.`, 400, field);
-  }
-  return value as T;
-}
-
-/** A storage path must live under the uploader's own folder — the bucket policy's rule, checked early. */
-function ownedPath(value: unknown, ownerId: string, field: string): string | null {
-  if (value === null || value === undefined || value === "") return null;
   if (typeof value !== "string") throw new ApiError(`${field} must be text.`, 400, field);
   const path = value.replace(/^\/+/, "");
-  if (path.includes("..") || path.includes("//")) throw new ApiError(`${field} is not a valid storage path.`, 400, field);
+  if (path.includes("..") || path.includes("//") || /[\\\u0000-\u001f]/.test(path)) {
+    throw new ApiError(`${field} is not a valid storage path.`, 400, field);
+  }
   if (path.length > 512) throw new ApiError(`${field} is too long.`, 400, field);
-  if (path.split("/")[0] !== ownerId) throw new ApiError(`${field} must be inside your own folder.`, 403, field);
+  if (path.split("/")[0] !== ownerId) {
+    throw new ApiError(`${field} must be inside your own folder.`, 403, field);
+  }
+  return path;
+}
+
+function audioPath(value: unknown, ownerId: string): string {
+  const path = ownedPath(value, ownerId, "audioPath", true)!;
+  if (!/\.mp3$/i.test(path)) throw new ApiError("The recording must be an .mp3 file.", 400, "audioPath");
+  return path;
+}
+
+function artworkPath(value: unknown, ownerId: string): string | null {
+  const path = ownedPath(value, ownerId, "artworkPath");
+  if (path && !/\.(png|jpe?g|webp|avif)$/i.test(path)) {
+    throw new ApiError("Cover art must be a png, jpg, webp or avif image.", 400, "artworkPath");
+  }
   return path;
 }
 
@@ -444,7 +428,15 @@ function cleanTags(value: unknown): string[] {
   const out: string[] = [];
   for (const raw of value.slice(0, 8)) {
     if (typeof raw !== "string") continue;
-    const tag = raw.trim().toLowerCase().replace(/[^a-z0-9\- ]/g, "").replace(/\s+/g, "-");
+    /* transliteration folds to plain letters first: "Ṣalawāt" is a tag people type,
+       and "salawt" is not what they meant */
+    const tag = raw
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9\- ]/g, "")
+      .replace(/\s+/g, "-");
     if (tag && tag.length <= 24 && !out.includes(tag)) out.push(tag);
   }
   return out;
@@ -461,86 +453,74 @@ function cleanLines(value: unknown): LyricLine[] {
     const row = raw as Record<string, unknown>;
     const line: LyricLine = {};
     for (const key of ["tr", "ar", "en", "note"] as const) {
-      const v = row[key];
-      if (typeof v === "string" && v.trim()) line[key] = v.trim().slice(0, 240);
+      const item = row[key];
+      if (typeof item === "string" && item.trim()) line[key] = item.trim().slice(0, 240);
     }
-    if (typeof row.t === "number" && Number.isFinite(row.t) && row.t >= 0) line.t = Math.round(row.t * 1000) / 1000;
+    if (typeof row.t === "number" && Number.isFinite(row.t) && row.t >= 0 && row.t <= 86400) {
+      line.t = Math.round(row.t * 1000) / 1000;
+    }
     if (line.tr || line.ar || line.en) lines.push(line);
   }
   return lines;
 }
 
-function cleanMotifs(value: unknown): number[] | null {
-  if (!Array.isArray(value)) return null;
-  const out = value
-    .filter((n): n is number => typeof n === "number" && Number.isFinite(n))
-    .map((n) => Math.round(n))
-    .slice(0, 24);
-  return out.length ? out : null;
-}
-
 /** Validate a full publish payload and shape it for an insert. */
 export function songRowFromInput(input: SongInput, ownerId: string): SongInsertRow {
   if (!input || typeof input !== "object") throw new ApiError("That was not a nasheed.", 400);
+  const payload = input as unknown as Record<string, unknown>;
+  rejectUnknown(payload, PUBLISH_KEYS, "Publishing");
 
-  const title = text(input.title, "title", 2, 120);
+  const title = text(payload.title, "title", 2, 120);
   if (!title) throw new ApiError("A title is required.", 400, "title");
 
-  const maqam = oneOf(input.maqam, MAQAM_NAMES, "maqam");
-  const duff = typeof input.duff === "string" && input.duff.trim() ? input.duff.trim() : null;
-  if (duff && !/^[DT.]{16}$/.test(duff)) throw new ApiError("A drum pattern is 16 steps of D, T or .", 400, "duff");
+  const bytes = payload.audioBytes;
+  const mime = payload.audioMime;
 
   return {
     title,
-    title_ar: text(input.titleAr, "titleAr", 1, 120, true),
-    note: text(input.note ?? "", "note", 0, 480, true) ?? "",
-    maqam,
-    root: whole(input.root, "root", 24, 96),
-    bpm: whole(input.bpm, "bpm", 30, 240),
-    voices: oneOf(input.voices, VOICE_NAMES, "voices"),
-    duff,
-    duff_enter: oneOf(input.duffEnter, ["intro", "verse"] as const, "duffEnter", "verse"),
-    passes: whole(input.passes, "passes", 1, 6, 2),
-    accent: oneOf(input.accent, ACCENT_NAMES, "accent", "jade"),
-    year: input.year === null || input.year === undefined ? null : whole(input.year, "year", 600, 2200),
-    tags: cleanTags(input.tags),
-    lines: cleanLines(input.lines),
-    motif_bank: cleanMotifs(input.motifBank),
-    audio_path: ownedPath(input.audioPath, ownerId, "audioPath"),
-    audio_mime:
-      typeof input.audioMime === "string" && input.audioMime.startsWith("audio/") ? input.audioMime.slice(0, 80) : null,
+    title_ar: text(payload.titleAr, "titleAr", 1, 120, true),
+    note: text(payload.note ?? "", "note", 0, 480, true) ?? "",
+    tags: cleanTags(payload.tags),
+    lines: cleanLines(payload.lines),
+    audio_path: audioPath(payload.audioPath, ownerId),
+    audio_mime: mime === null || mime === undefined ? "audio/mpeg" : text(mime, "audioMime", 4, 60),
     audio_bytes:
-      typeof input.audioBytes === "number" && input.audioBytes > 0
-        ? Math.min(Math.round(input.audioBytes), MAX_AUDIO_BYTES)
+      typeof bytes === "number" && Number.isFinite(bytes) && bytes > 0
+        ? Math.min(Math.round(bytes), MAX_AUDIO_BYTES)
         : null,
     duration_ms:
-      input.durationMs === null || input.durationMs === undefined ? null : whole(input.durationMs, "durationMs", 1000, 86400000),
-    artwork_path: ownedPath(input.artworkPath, ownerId, "artworkPath"),
+      payload.durationMs === null || payload.durationMs === undefined || payload.durationMs === ""
+        ? null
+        : whole(payload.durationMs, "durationMs", 1000, 21600000),
+    artwork_path: artworkPath(payload.artworkPath, ownerId),
   };
 }
 
-/** A stored row turned back into the shape `songRowFromInput` accepts, for merging an edit. */
-export function songInputFromRow(row: SongRow): SongInput {
-  return {
-    title: row.title,
-    titleAr: row.title_ar,
-    note: row.note,
-    maqam: row.maqam,
-    root: Number(row.root),
-    bpm: Number(row.bpm),
-    voices: row.voices,
-    duff: row.duff,
-    duffEnter: row.duff_enter ?? "verse",
-    passes: Number(row.passes ?? 2),
-    accent: row.accent,
-    year: row.year === null || row.year === undefined ? null : Number(row.year),
-    tags: row.tags ?? [],
-    lines: row.lines ?? [],
-    motifBank: row.motif_bank,
-    durationMs: row.duration_ms === null || row.duration_ms === undefined ? null : Number(row.duration_ms),
-    audioPath: row.audio_path,
-    audioMime: row.audio_mime,
-    audioBytes: Number(row.audio_bytes ?? 0) || null,
-    artworkPath: row.artwork_path,
-  };
+export type SongPatchRow = Partial<SongInsertRow>;
+
+/** Validate an edit. Only the keys present are touched, and audio cannot be cleared. */
+export function songPatchFromInput(input: unknown, ownerId: string): SongPatchRow {
+  if (!input || typeof input !== "object") throw new ApiError("That was not an edit.", 400);
+  const payload = input as Record<string, unknown>;
+  rejectUnknown(payload, [...PUBLISH_KEYS, "status"] as const, "An edit");
+
+  const patch: SongPatchRow = {};
+  if ("title" in payload) patch.title = text(payload.title, "title", 2, 120)!;
+  if ("titleAr" in payload) patch.title_ar = text(payload.titleAr, "titleAr", 1, 120, true);
+  if ("note" in payload) patch.note = text(payload.note ?? "", "note", 0, 480, true) ?? "";
+  if ("tags" in payload) patch.tags = cleanTags(payload.tags);
+  if ("lines" in payload) patch.lines = cleanLines(payload.lines);
+  if ("audioPath" in payload) patch.audio_path = audioPath(payload.audioPath, ownerId);
+  if ("audioMime" in payload) patch.audio_mime = text(payload.audioMime, "audioMime", 4, 60);
+  if ("audioBytes" in payload) {
+    patch.audio_bytes = typeof payload.audioBytes === "number" ? Math.round(payload.audioBytes) : null;
+  }
+  if ("durationMs" in payload) {
+    patch.duration_ms =
+      payload.durationMs === null || payload.durationMs === ""
+        ? null
+        : whole(payload.durationMs, "durationMs", 1000, 21600000);
+  }
+  if ("artworkPath" in payload) patch.artwork_path = artworkPath(payload.artworkPath, ownerId);
+  return patch;
 }

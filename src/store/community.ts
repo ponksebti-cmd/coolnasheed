@@ -6,18 +6,14 @@
  * actually happened. Moderation is real too — a note can be reported, and staff can hide
  * it, which leaves a gap in the thread rather than quietly rewriting history.
  *
- * When the API cannot be reached the thread falls back to generated notes (the same
- * stable per-track set the catalogue ships with), clearly marked as generated, so an
- * offline visit still looks like a room with people in it rather than an empty box.
+ * There is no offline fallback and no generated conversation: if the thread cannot be
+ * read, the thread says so. An empty thread is an honest answer.
  */
 
 import { create } from "zustand";
-import { api, ApiError, errorMessage } from "../lib/api";
-import { isDemoError } from "../lib/errors";
-import { notesFor } from "../lib/comments";
-import { getTrack } from "../data/catalog";
+import { api, errorMessage } from "../lib/api";
 import { currentUser } from "./session";
-import type { Comment } from "../../shared/types";
+import type { Accent, Comment } from "../../shared/types";
 
 export type UserComment = {
   id: string;
@@ -26,7 +22,7 @@ export type UserComment = {
   /** snapshot, so a deleted account's notes do not become anonymous mid-thread */
   authorName: string;
   authorHandle: string;
-  authorSeed: string;
+  authorAccent: Accent;
   at: number;
   text: string;
   /** optional "on line N" — the thread can jump the voice there */
@@ -36,8 +32,6 @@ export type UserComment = {
   reports: number;
   /** hidden by moderation; kept as a gap so the thread does not silently renumber */
   removed: boolean;
-  /** generated locally because the server was unreachable */
-  generated?: boolean;
 };
 
 export type CommentDraft = { trackId: string; text: string; atLine?: number };
@@ -61,7 +55,7 @@ function fromServer(comment: Comment): UserComment {
     authorId: comment.authorId,
     authorName: comment.authorName,
     authorHandle: comment.authorHandle,
-    authorSeed: comment.authorSeed,
+    authorAccent: comment.authorAccent,
     at: comment.createdAt,
     text: comment.text,
     atLine: comment.atLine ?? undefined,
@@ -70,28 +64,6 @@ function fromServer(comment: Comment): UserComment {
     reports: comment.reports,
     removed: comment.removed === true,
   };
-}
-
-/** The offline fallback: the same generated notes the catalogue has always shipped. */
-function generatedFor(trackId: string): UserComment[] {
-  const track = getTrack(trackId);
-  if (!track) return [];
-  const now = Date.now();
-  return notesFor(track, 6).map((note, i) => ({
-    id: `gen-${note.id}`,
-    trackId,
-    authorId: `gen-${note.handle}`,
-    authorName: note.handle,
-    authorHandle: note.handle,
-    authorSeed: note.handle,
-    at: now - note.daysAgo * 86_400_000 - i * 3_600_000,
-    text: note.text,
-    atLine: note.atLine,
-    amens: note.likes,
-    reports: 0,
-    removed: false,
-    generated: true,
-  }));
 }
 
 type CommunityState = {
@@ -170,23 +142,26 @@ export const useCommunity = create<CommunityState>()((set, get) => ({
     if (existing && (existing.loaded || existing.loading) && !force) return;
     set((s) => ({ threads: patchThread(s, trackId, { loading: true, error: null }) }));
     try {
-      const page = await api.comments(trackId, { order: "desc", limit: 60 });
-      const items = page.items.map(fromServer);
+      const rows = await api.comments(trackId, { order: "desc", limit: 60 });
+      const items = rows.map(fromServer);
       const amened: Record<string, boolean> = {};
-      for (const row of page.items) if (row.amened) amened[row.id] = true;
+      for (const row of rows) if (row.amened) amened[row.id] = true;
       set((s) => ({
-        threads: patchThread(s, trackId, { items, total: page.total, loaded: true, loading: false, error: null }),
+        threads: patchThread(s, trackId, {
+          items,
+          total: rows.filter((row) => !row.removed).length,
+          loaded: true,
+          loading: false,
+          error: null,
+        }),
         amened: { ...s.amened, ...amened },
       }));
     } catch (err) {
-      const offline = isDemoError(err) || (err instanceof ApiError && err.status === 0);
       set((s) => ({
         threads: patchThread(s, trackId, {
-          items: offline ? generatedFor(trackId) : s.threads[trackId]?.items ?? [],
-          total: offline ? generatedFor(trackId).length : s.threads[trackId]?.total ?? 0,
-          loaded: offline,
+          items: s.threads[trackId]?.items ?? [],
           loading: false,
-          error: offline ? null : errorMessage(err, "Could not load the notes."),
+          error: errorMessage(err, "Could not load the notes."),
         }),
       }));
     }

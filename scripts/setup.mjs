@@ -2,17 +2,18 @@
 /**
  * One command between an empty Supabase project and a working CoolNasheed.
  *
- *   npm run setup                       schema + catalogue, using whatever it can find
- *   npm run setup -- --no-seed          schema only; publish your own nasheeds into it
+ *   npm run setup                       the whole schema, using whatever it can find
+ *   npm run setup -- --no-seed          the same, minus the (empty) seed file
  *   npm run setup -- --functions        set the secret, deploy the six Edge Functions, call them back
  *   npm run setup -- --dry-run          say what it would do, touch nothing
  *
  * It needs one of two ways in, and will tell you which one it is missing:
  *
  *   SUPABASE_DB_URL        the connection string from Project Settings → Database.
- *                          Everything happens over one Postgres connection: the four
- *                          migrations, the seed, and the verification queries. This is
- *                          the route to use if you have the database password.
+ *                          Everything happens over one Postgres connection: every
+ *                          migration in supabase/migrations/, the seed, and the
+ *                          verification queries. This is the route to use if you have
+ *                          the database password.
  *
  *   SUPABASE_ACCESS_TOKEN  a personal access token (sbp_…) from Account → Access Tokens.
  *                          The SQL goes to Supabase's Management API instead, and the
@@ -27,12 +28,20 @@
  * give it one, plus the file to paste into Studio if you would rather not.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 
 const ROOT = process.cwd();
-const MIGRATIONS = ["20260914120000_core.sql", "20260914120100_functions.sql", "20260914120300_rls.sql", "20260914120400_storage.sql"]
+
+/* Read the folder, never a remembered list. A hard-coded list of the migrations that
+   existed when this script was written is how a project ends up with an old schema and a
+   command that says it succeeded: migration 5 was added, this array was not, and `npm run
+   setup` — which is what the app tells people to run — applied four of the five. The
+   directory is the source of truth, in name order, which is timestamp order. */
+const MIGRATIONS = readdirSync(join(ROOT, "supabase/migrations"))
+  .filter((name) => name.endsWith(".sql"))
+  .sort()
   .map((name) => join(ROOT, "supabase/migrations", name));
 const SEED = join(ROOT, "supabase/seed.sql");
 
@@ -173,7 +182,7 @@ async function askTheFunctions() {
   const health = await callFunction("health");
   if (health.status === 200 && health.body?.checks) {
     const c = health.body.checks;
-    const marks = ["database", "storage", "auth", "seed"]
+    const marks = ["database", "storage", "auth"]
       .map((k) => `${k} ${c[k] ? green("✓") : red("✗")}`)
       .join(" · ");
     ok("health answers", `${health.body.counts?.songs ?? 0} nasheeds · ${marks}`);
@@ -187,7 +196,7 @@ async function askTheFunctions() {
 
   const catalog = await callFunction("catalog");
   if (catalog.status === 200 && Array.isArray(catalog.body?.songs)) {
-    ok("catalog answers", `${catalog.body.songs.length} nasheeds · ${catalog.body.artists?.length ?? 0} publishers · ${catalog.body.collections?.length ?? 0} collections${catalog.body.seeded ? "" : " · not the seeded catalogue yet"}`);
+    ok("catalog answers", `${catalog.body.songs.length} nasheeds · ${catalog.body.artists?.length ?? 0} publishers · ${catalog.body.collections?.length ?? 0} collections${catalog.body.songs.length ? "" : " · an empty catalogue, which is what a new project has"}`);
   } else if (catalog.status === 401 || catalog.status === 403) {
     warn("catalog refused the publishable key", `${catalog.status}:
 
@@ -279,9 +288,9 @@ async function openManagement(token) {
 /** The paste-it-yourself alternative, described with the file's real size. */
 function bundleHint() {
   const path = join(ROOT, "supabase/setup.sql");
-  if (!existsSync(path)) return "supabase/setup.sql (run `npm run sql:bundle` first — migrations and seed in one file)";
+  if (!existsSync(path)) return "supabase/setup.sql (run `npm run sql:bundle` first — every migration in one file)";
   const kb = Math.round(readFileSync(path, "utf8").length / 1024);
-  return `supabase/setup.sql (${kb} KB — the four migrations and the seed in one file)`;
+  return `supabase/setup.sql (${kb} KB — all ${MIGRATIONS.length} migrations in one file, safe to run twice)`;
 }
 
 /* ------------------------------------------------------------------------ main */
@@ -398,7 +407,11 @@ async function main() {
         await runner.run(readFileSync(SEED, "utf8"));
         const songs = await runner.value("select count(*)::int from public.songs");
         const publishers = await runner.value("select count(*)::int from public.profiles where kind = 'artist'");
-        ok("supabase/seed.sql", `${songs} nasheeds · ${publishers} publishers · every insert is on-conflict-do-nothing, so seeding twice changes nothing`);
+        /* The seed is a file with a notice in it: the catalogue is what people upload, and
+           a fresh project having nothing in it is the correct state, not a gap. */
+        ok("supabase/seed.sql", songs || publishers
+          ? `${songs} nasheeds · ${publishers} publishers`
+          : "nothing to seed — the catalogue is what people upload");
       } catch (err) {
         no("supabase/seed.sql", String(err?.hint ?? err?.message ?? err).split("\n")[0]);
         failed = true;
@@ -438,7 +451,7 @@ async function main() {
       try {
         const buckets = await runner.value("select count(*)::int from storage.buckets where id like 'nasheed-%'");
         const policies = await runner.value("select count(*)::int from pg_policies where schemaname = 'public'");
-        ok(`${buckets} storage buckets, ${policies} RLS policies`, "nasheed-audio ≤ 60 MB · nasheed-artwork ≤ 8 MB");
+        ok(`${buckets} storage buckets, ${policies} RLS policies`, "nasheed-audio ≤ 5 MB · nasheed-artwork ≤ 2 MB");
       } catch (err) {
         warn("could not read the storage buckets", String(err?.message ?? err).split("\n")[0]);
       }

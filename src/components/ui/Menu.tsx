@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { clsx } from "clsx";
 import { Icon, type IconName } from "./Icons";
 
@@ -61,7 +67,10 @@ export function DropdownMenu({
         renderTrigger({ onClick: () => setOpen((v) => !v), open })
       ) : (
         <button
-          className={clsx("btn-icon grid place-items-center rounded-full p-2", buttonClass)}
+          className={clsx(
+            "btn-icon grid place-items-center rounded-full p-2",
+            buttonClass,
+          )}
           onClick={() => setOpen((v) => !v)}
           aria-label={label}
           aria-expanded={open}
@@ -73,7 +82,7 @@ export function DropdownMenu({
         <div
           ref={panel}
           className={clsx(
-            "absolute z-[80] min-w-[210px] overflow-hidden rounded-xl border border-line2 bg-elev/97 p-1.5 shadow-[0_28px_70px_-24px_rgba(0,0,0,0.95)] backdrop-blur-xl toast-enter",
+            "glass pop-in absolute z-[80] min-w-[210px] overflow-hidden rounded-xl p-1.5",
             align === "right" ? "right-0" : "left-0",
             flip ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]",
           )}
@@ -101,10 +110,20 @@ export function DropdownMenu({
                       : "text-text2 hover:bg-surface3 hover:text-text",
                 )}
               >
-                {item.icon ? <Icon name={item.icon} size={15} className="shrink-0 opacity-80" /> : null}
+                {item.icon ? (
+                  <Icon
+                    name={item.icon}
+                    size={15}
+                    className="shrink-0 opacity-80"
+                  />
+                ) : null}
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                {item.checked ? <Icon name="check" size={14} className="text-jade" /> : null}
-                {item.hint ? <span className="text-[10px] text-muted">{item.hint}</span> : null}
+                {item.checked ? (
+                  <Icon name="check" size={14} className="text-jade" />
+                ) : null}
+                {item.hint ? (
+                  <span className="text-[10px] text-muted">{item.hint}</span>
+                ) : null}
               </Comp>
             );
           })}

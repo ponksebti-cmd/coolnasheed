@@ -1,53 +1,43 @@
 /**
  * Payload validation for the publish function.
  *
- * Postgres already enforces every one of these rules with a check constraint, so this
- * file is not the last line of defence — it is the first, and its job is to turn
- * `23514 value for domain ... violates check constraint` into "A title is between 2
- * and 120 characters." The database stays correct without it; people stay informed
- * because of it.
+ * Postgres enforces every one of these rules with a check constraint, so this file is
+ * not the last line of defence — it is the first, and its job is to turn
+ * `23514 value for domain ... violates check constraint` into "A title is between 2 and
+ * 120 characters." The database stays correct without it; people stay informed because
+ * of it.
+ *
+ * The mirror of this file lives in `src/lib/wire.ts` (`songRowFromInput`), because a
+ * project with the database but no functions deployed still publishes straight through
+ * PostgREST. `shared/fixtures/publish-cases.json` holds both of them to the same
+ * answers, and `npm run contract:test` fails when they drift.
  */
 
-import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   AUDIO_BUCKET,
-  ARTWORK_BUCKET,
-  MAQAM_NAMES,
   MAX_ARTWORK_BYTES,
   MAX_AUDIO_BYTES,
-  type Accent,
   type LyricLine,
-  type MaqamName,
   type SongInput,
-  type StorageBucket,
+  type SongPatch,
 } from "../../../shared/types.ts";
 import { HttpError } from "./json.ts";
 
-const ACCENTS: Accent[] = ["jade", "gold", "turq", "madder", "cobalt"];
-const VOICES = ["solo", "duet", "choir"] as const;
-
+/** The row shape an insert needs — no composition columns, audio is mandatory. */
 export type SongRow = {
   title: string;
   title_ar: string | null;
   note: string;
-  maqam: MaqamName;
-  root: number;
-  bpm: number;
-  voices: "solo" | "duet" | "choir";
-  duff: string | null;
-  duff_enter: "intro" | "verse";
-  passes: number;
-  accent: Accent;
-  year: number | null;
   tags: string[];
   lines: LyricLine[];
-  motif_bank: number[] | null;
-  audio_path: string | null;
+  audio_path: string;
   audio_mime: string | null;
   audio_bytes: number | null;
   duration_ms: number | null;
   artwork_path: string | null;
 };
+
+export type SongPatchRow = Partial<SongRow>;
 
 function text(value: unknown, field: string, min: number, max: number, optional = false): string | null {
   if (value === null || value === undefined || value === "") {
@@ -68,13 +58,9 @@ function whole(value: unknown, field: string, min: number, max: number, fallback
     throw new HttpError(`${field} is required.`, 400, field);
   }
   const n = typeof value === "string" ? Number(value) : value;
-  if (typeof n !== "number" || !Number.isFinite(n)) {
-    throw new HttpError(`${field} must be a number.`, 400, field);
-  }
+  if (typeof n !== "number" || !Number.isFinite(n)) throw new HttpError(`${field} must be a number.`, 400, field);
   const rounded = Math.round(n);
-  if (rounded < min || rounded > max) {
-    throw new HttpError(`${field} is between ${min} and ${max}.`, 400, field);
-  }
+  if (rounded < min || rounded > max) throw new HttpError(`${field} is between ${min} and ${max}.`, 400, field);
   return rounded;
 }
 
@@ -90,21 +76,40 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[], field: s
 }
 
 /**
- * A storage path must live under the uploader's own folder — the same rule the bucket
- * policies enforce, checked again here so the error arrives before the insert rather
- * than as a policy violation.
+ * A storage path has to live under the uploader's own folder — the same rule the
+ * bucket policy enforces, checked before anything is written. `..` is refused rather
+ * than normalised, because a path that is trying to climb out is not a typo.
  */
-export function ownedPath(value: unknown, ownerId: string, field: string): string | null {
-  if (value === null || value === undefined || value === "") return null;
+export function ownedPath(value: unknown, ownerId: string, field: string, required = false): string | null {
+  if (value === null || value === undefined || value === "") {
+    if (required) throw new HttpError(`${field} is required.`, 400, field);
+    return null;
+  }
   if (typeof value !== "string") throw new HttpError(`${field} must be text.`, 400, field);
-
   const path = value.replace(/^\/+/, "");
-  if (path.includes("..") || path.includes("//") || path.startsWith("/")) {
+  if (path.includes("..") || path.includes("//") || /[\\\u0000-\u001f]/.test(path)) {
     throw new HttpError(`${field} is not a valid storage path.`, 400, field);
   }
   if (path.length > 512) throw new HttpError(`${field} is too long.`, 400, field);
   if (path.split("/")[0] !== ownerId) {
     throw new HttpError(`${field} must be inside your own folder.`, 403, field);
+  }
+  return path;
+}
+
+/** An mp3 in the audio bucket, or a clear refusal. */
+export function audioPath(value: unknown, ownerId: string): string {
+  const path = ownedPath(value, ownerId, "audioPath", true)!;
+  if (!/\.mp3$/i.test(path)) {
+    throw new HttpError("The recording must be an .mp3 file.", 400, "audioPath");
+  }
+  return path;
+}
+
+function artworkPath(value: unknown, ownerId: string): string | null {
+  const path = ownedPath(value, ownerId, "artworkPath");
+  if (path && !/\.(png|jpe?g|webp|avif)$/i.test(path)) {
+    throw new HttpError("Cover art must be a png, jpg, webp or avif image.", 400, "artworkPath");
   }
   return path;
 }
@@ -115,12 +120,21 @@ function cleanTags(value: unknown): string[] {
   const out: string[] = [];
   for (const raw of value.slice(0, 8)) {
     if (typeof raw !== "string") continue;
-    const tag = raw.trim().toLowerCase().replace(/[^a-z0-9\- ]/g, "").replace(/\s+/g, "-");
+    /* transliteration folds to plain letters first: "Ṣalawāt" is a tag people type,
+       and "salawt" is not what they meant */
+    const tag = raw
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9\- ]/g, "")
+      .replace(/\s+/g, "-");
     if (tag && tag.length <= 24 && !out.includes(tag)) out.push(tag);
   }
   return out;
 }
 
+/** Lines, plus whatever timings the publisher actually supplied. Nothing is invented. */
 function cleanLines(value: unknown): LyricLine[] {
   if (value === null || value === undefined) return [];
   if (!Array.isArray(value)) throw new HttpError("Lyrics must be a list of lines.", 400, "lines");
@@ -132,10 +146,10 @@ function cleanLines(value: unknown): LyricLine[] {
     const row = raw as Record<string, unknown>;
     const line: LyricLine = {};
     for (const key of ["tr", "ar", "en", "note"] as const) {
-      const v = row[key];
-      if (typeof v === "string" && v.trim()) line[key] = v.trim().slice(0, 240);
+      const item = row[key];
+      if (typeof item === "string" && item.trim()) line[key] = item.trim().slice(0, 240);
     }
-    if (typeof row.t === "number" && Number.isFinite(row.t) && row.t >= 0) {
+    if (typeof row.t === "number" && Number.isFinite(row.t) && row.t >= 0 && row.t <= 86400) {
       line.t = Math.round(row.t * 1000) / 1000;
     }
     if (line.tr || line.ar || line.en) lines.push(line);
@@ -143,102 +157,77 @@ function cleanLines(value: unknown): LyricLine[] {
   return lines;
 }
 
-function cleanMotifs(value: unknown): number[] | null {
-  if (!Array.isArray(value)) return null;
-  const out = value
-    .filter((n): n is number => typeof n === "number" && Number.isFinite(n))
-    .map((n) => Math.round(n))
-    .slice(0, 24);
-  return out.length ? out : null;
+/** Unknown keys are refused rather than ignored: a typo should not look like it worked. */
+export function rejectUnknown(input: Record<string, unknown>, allowed: readonly string[], where: string): void {
+  const extra = Object.keys(input).filter((key) => !allowed.includes(key));
+  if (extra.length) {
+    throw new HttpError(`${where} does not accept: ${extra.slice(0, 5).join(", ")}.`, 400, extra[0]);
+  }
 }
 
-/** Validate a full publish payload and shape it for an insert. */
-export function songRowFrom(input: SongInput, ownerId: string): SongRow {
-  if (!input || typeof input !== "object") throw new HttpError("That was not a nasheed.", 400);
+const PUBLISH_KEYS = [
+  "title", "titleAr", "note", "tags", "lines",
+  "audioPath", "audioMime", "audioBytes", "durationMs", "artworkPath",
+] as const;
 
-  const title = text(input.title, "title", 2, 120);
+/** Validate a full publish payload and shape it for an insert. */
+export function songRowFromInput(input: unknown, ownerId: string): SongRow {
+  if (!input || typeof input !== "object") throw new HttpError("That was not a nasheed.", 400);
+  const payload = input as Record<string, unknown>;
+  rejectUnknown(payload, PUBLISH_KEYS, "Publishing");
+
+  const title = text(payload.title, "title", 2, 120);
   if (!title) throw new HttpError("A title is required.", 400, "title");
 
-  const maqam = oneOf(input.maqam, MAQAM_NAMES, "maqam");
-  const duff = typeof input.duff === "string" && input.duff.trim() ? input.duff.trim() : null;
-  if (duff && !/^[DT.]{16}$/.test(duff)) {
-    throw new HttpError("A drum pattern is 16 steps of D, T or .", 400, "duff");
-  }
-
-  const audioPath = ownedPath(input.audioPath, ownerId, "audioPath");
-  const artworkPath = ownedPath(input.artworkPath, ownerId, "artworkPath");
+  const bytes = payload.audioBytes;
+  const mime = payload.audioMime;
 
   return {
     title,
-    title_ar: text(input.titleAr, "titleAr", 1, 120, true),
-    note: text(input.note ?? "", "note", 0, 480, true) ?? "",
-    maqam,
-    root: whole(input.root, "root", 24, 96),
-    bpm: whole(input.bpm, "bpm", 30, 240),
-    voices: oneOf(input.voices, VOICES, "voices"),
-    duff,
-    duff_enter: oneOf(input.duffEnter, ["intro", "verse"] as const, "duffEnter", "verse"),
-    passes: whole(input.passes, "passes", 1, 6, 2),
-    accent: oneOf(input.accent, ACCENTS, "accent", "jade"),
-    year:
-      input.year === null || input.year === undefined
-        ? null
-        : whole(input.year, "year", 600, 2200),
-    tags: cleanTags(input.tags),
-    lines: cleanLines(input.lines),
-    motif_bank: cleanMotifs(input.motifBank),
-    audio_path: audioPath,
-    audio_mime:
-      typeof input.audioMime === "string" && input.audioMime.startsWith("audio/")
-        ? input.audioMime.slice(0, 80)
-        : null,
+    title_ar: text(payload.titleAr, "titleAr", 1, 120, true),
+    note: text(payload.note ?? "", "note", 0, 480, true) ?? "",
+    tags: cleanTags(payload.tags),
+    lines: cleanLines(payload.lines),
+    audio_path: audioPath(payload.audioPath, ownerId),
+    audio_mime: mime === null || mime === undefined ? "audio/mpeg" : text(mime, "audioMime", 4, 60),
     audio_bytes:
-      typeof input.audioBytes === "number" && input.audioBytes > 0
-        ? Math.min(Math.round(input.audioBytes), MAX_AUDIO_BYTES)
+      typeof bytes === "number" && Number.isFinite(bytes) && bytes > 0
+        ? Math.min(Math.round(bytes), MAX_AUDIO_BYTES)
         : null,
     duration_ms:
-      input.durationMs === null || input.durationMs === undefined
+      payload.durationMs === null || payload.durationMs === undefined || payload.durationMs === ""
         ? null
-        : whole(input.durationMs, "durationMs", 1000, 86400000),
-    artwork_path: artworkPath,
+        : whole(payload.durationMs, "durationMs", 1000, 21600000),
+    artwork_path: artworkPath(payload.artworkPath, ownerId),
   };
 }
 
-/**
- * Confirm an uploaded object is really there, really yours, and really within the
- * bucket's size limit. Returns its size and mime so the row can carry them.
- *
- * The caller's own client is enough: the storage policies let you list your own
- * folder, so a path that belongs to somebody else simply comes back empty.
- */
-export async function verifyUpload(
-  client: SupabaseClient,
-  bucket: StorageBucket,
-  path: string,
-  ownerId: string,
-): Promise<{ bytes: number; mime: string }> {
-  const folder = path.split("/")[0];
-  if (folder !== ownerId) throw new HttpError("That file is not in your folder.", 403);
+/** Validate an edit. Only the keys present are touched, and audio cannot be cleared. */
+export function songPatchFromInput(input: unknown, ownerId: string): SongPatchRow {
+  if (!input || typeof input !== "object") throw new HttpError("That was not an edit.", 400);
+  const payload = input as Record<string, unknown>;
+  rejectUnknown(payload, [...PUBLISH_KEYS, "status"] as const, "An edit");
 
-  const search = path.split("/").slice(1).join("/");
-  const { data, error } = await client.storage.from(bucket).list(folder, { search, limit: 5 });
-  if (error) throw new HttpError(`Could not read ${bucket}: ${error.message}`, 400);
-
-  const wanted = search.split("/").pop();
-  const found = (data ?? []).find((file) => file.name === wanted);
-  if (!found) throw new HttpError(`Nothing is stored at ${bucket}/${path}. Upload it first.`, 400);
-
-  const metadata = (found.metadata ?? {}) as { size?: number; mimetype?: string };
-  const bytes = Number(metadata.size ?? 0);
-  const mime = String(metadata.mimetype ?? "");
-  const limit = bucket === AUDIO_BUCKET ? MAX_AUDIO_BYTES : MAX_ARTWORK_BYTES;
-  if (bytes > limit) {
-    throw new HttpError(
-      `That file is ${(bytes / 1048576).toFixed(1)} MB; the limit here is ${(limit / 1048576).toFixed(0)} MB.`,
-      413,
-    );
+  const patch: SongPatchRow = {};
+  if ("title" in payload) patch.title = text(payload.title, "title", 2, 120)!;
+  if ("titleAr" in payload) patch.title_ar = text(payload.titleAr, "titleAr", 1, 120, true);
+  if ("note" in payload) patch.note = text(payload.note ?? "", "note", 0, 480, true) ?? "";
+  if ("tags" in payload) patch.tags = cleanTags(payload.tags);
+  if ("lines" in payload) patch.lines = cleanLines(payload.lines);
+  if ("audioPath" in payload) patch.audio_path = audioPath(payload.audioPath, ownerId);
+  if ("audioMime" in payload) patch.audio_mime = text(payload.audioMime, "audioMime", 4, 60);
+  if ("audioBytes" in payload) {
+    patch.audio_bytes = typeof payload.audioBytes === "number" ? Math.round(payload.audioBytes) : null;
   }
-  return { bytes, mime };
+  if ("durationMs" in payload) {
+    patch.duration_ms =
+      payload.durationMs === null || payload.durationMs === ""
+        ? null
+        : whole(payload.durationMs, "durationMs", 1000, 21600000);
+  }
+  if ("artworkPath" in payload) patch.artwork_path = artworkPath(payload.artworkPath, ownerId);
+  return patch;
 }
 
-export { ARTWORK_BUCKET, AUDIO_BUCKET };
+export const LIMITS = { audio: MAX_AUDIO_BYTES, artwork: MAX_ARTWORK_BYTES, bucket: AUDIO_BUCKET };
+export type { SongInput, SongPatch };

@@ -5,12 +5,21 @@ import { DropdownMenu } from "./ui/Menu";
 import { DHIKR, useLibrary } from "../store/library";
 
 /**
- * A pocket tasbīḥ counter. Because every nasheed app should have one,
- * and because it lives in the sidebar where your hand already is.
+ * A pocket tasbīḥ counter.
+ *
+ * The count belongs to the account, not to this browser: it is a row in
+ * `dhikr_counts`, so it survives a cleared cache and follows you to the next device.
+ * Signed out it still counts, in memory, and is written the moment there is an
+ * account to write it to.
  */
 export function Tasbih({ className }: { className?: string }) {
-  const { tasbih, tasbihTick, tasbihReset, tasbihSet } = useLibrary();
-  const phrase = DHIKR.find((d) => d.id === tasbih.id) ?? DHIKR[0]!;
+  const active = useLibrary((s) => s.dhikrActive);
+  const counts = useLibrary((s) => s.dhikr);
+  const tasbihTick = useLibrary((s) => s.dhikrTick);
+  const tasbihReset = useLibrary((s) => s.dhikrReset);
+  const tasbihSet = useLibrary((s) => s.dhikrSelect);
+  const phrase = DHIKR.find((d) => d.id === active) ?? DHIKR[0]!;
+  const tasbih = counts[phrase.id] ?? { count: 0, target: phrase.target };
   const [pulse, setPulse] = useState(0);
   const holdTimer = useRef<number | null>(null);
 
@@ -39,10 +48,10 @@ export function Tasbih({ className }: { className?: string }) {
             ...DHIKR.map((d) => ({
               label: d.tr,
               hint: String(d.target),
-              checked: d.id === tasbih.id,
+              checked: d.id === phrase.id,
               onClick: () => tasbihSet(d.id),
             })),
-            { label: "Reset count", icon: "trash" as const, danger: true, onClick: tasbihReset },
+            { label: "Reset count", icon: "trash" as const, danger: true, onClick: () => tasbihReset() },
           ]}
         />
       </div>
@@ -114,7 +123,7 @@ export function Tasbih({ className }: { className?: string }) {
         <span className="flex items-center gap-2">
           {progress >= 1 ? <span className="font-semibold text-jade">complete</span> : <span>hold to reset</span>}
           <button
-            onClick={tasbihReset}
+            onClick={() => tasbihReset()}
             className="btn-icon rounded-full p-0.5"
             aria-label="Reset tasbīḥ"
             title="Reset to zero"

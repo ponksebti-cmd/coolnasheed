@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -14,7 +15,7 @@ import { createPortal } from "react-dom";
 import { clsx } from "clsx";
 import { Icon, type IconName } from "./Icons";
 import { formatTime } from "../../lib/format";
-import { clamp } from "../../lib/prng";
+import { clamp } from "../../lib/math";
 
 /* ------------------------------------------------------------------ Reveal */
 
@@ -86,7 +87,12 @@ export function Chip({
     <Comp
       onClick={onClick}
       data-active={active ?? undefined}
-      className={clsx("chip", onClick && "cursor-pointer hover:border-line2 hover:text-text", className)}
+      className={clsx(
+        "chip",
+        onClick &&
+          "pressable cursor-pointer hover:border-line2 hover:text-text",
+        className,
+      )}
       type={onClick ? "button" : undefined}
     >
       {icon ? <Icon name={icon} size={12} /> : null}
@@ -111,11 +117,17 @@ export function SectionHeader({
   className?: string;
 }) {
   return (
-    <div className={clsx("mb-4 flex items-end justify-between gap-4", className)}>
+    <div
+      className={clsx("mb-4 flex items-end justify-between gap-4", className)}
+    >
       <div className="min-w-0">
         {label ? <div className="label mb-1.5">{label}</div> : null}
-        <h2 className="truncate text-[1.4rem] leading-tight text-text md:text-[1.65rem]">{title}</h2>
-        {subtitle ? <p className="mt-1 truncate text-sm text-muted">{subtitle}</p> : null}
+        <h2 className="truncate text-[1.4rem] leading-tight text-text md:text-[1.65rem]">
+          {title}
+        </h2>
+        {subtitle ? (
+          <p className="mt-1 truncate text-sm text-muted">{subtitle}</p>
+        ) : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>
@@ -143,26 +155,47 @@ export function Modal({
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
+  /* `onClose` is usually an inline arrow, so it is a new function on every render of the
+     parent — and a dialog re-renders on every keystroke in its own fields. Holding the
+     latest one in a ref means the effect below runs once, when the dialog opens, instead
+     of re-running forty milliseconds after every character typed. That re-run was the
+     bug: it moved the caret out of whatever field you were using. */
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        closeRef.current();
       }
     };
     window.addEventListener("keydown", onKey);
+
     const t = window.setTimeout(() => {
-      const focusable = ref.current?.querySelector<HTMLElement>(
-        "input, textarea, button:not([data-noautofocus]), [tabindex]:not([tabindex='-1'])",
-      );
+      const box = ref.current;
+      if (!box) return;
+      // never pull focus out of a field somebody is already typing in
+      if (box.contains(document.activeElement)) return;
+      /* The first thing worth focusing is the first *field*. `querySelector` answers in
+         document order no matter how the selector list is written, so a bare list that
+         includes `button` can land on a close button in the header — which sits above
+         the fields. Asking for fields first, explicitly, is the difference. */
+      const focusable =
+        box.querySelector<HTMLElement>("[data-autofocus]") ??
+        box.querySelector<HTMLElement>(
+          "input:not([type='hidden']):not([disabled]), textarea:not([disabled]), select:not([disabled])",
+        ) ??
+        box.querySelector<HTMLElement>("button:not([data-noautofocus]):not([disabled]), [tabindex]:not([tabindex='-1'])");
       focusable?.focus();
     }, 40);
+
     return () => {
       window.removeEventListener("keydown", onKey);
       window.clearTimeout(t);
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
@@ -170,23 +203,26 @@ export function Modal({
     <div
       className={clsx(
         "fixed inset-0 z-[90] flex justify-center veil-enter",
-        align === "center" ? "items-center p-3 sm:p-4" : "items-end p-0 sm:items-center sm:p-4",
+        align === "center"
+          ? "items-center p-3 sm:p-4"
+          : "items-end p-0 sm:items-center sm:p-4",
       )}
       role="dialog"
       aria-modal="true"
     >
       <div
-        className="absolute inset-0 bg-[rgba(3,9,7,0.72)] backdrop-blur-md"
+        className="absolute inset-0 bg-[rgba(3,9,7,0.66)] backdrop-blur-xl"
         onClick={onClose}
         aria-hidden
       />
       <div
         ref={ref}
         className={clsx(
-          "relative z-10 max-h-[90dvh] w-full overflow-hidden rounded-2xl border border-line2 bg-elev shadow-[0_40px_120px_-40px_rgba(0,0,0,0.95)]",
-          "toast-enter scroll-slim overflow-y-auto overscroll-contain",
+          "glass materialize relative z-10 max-h-[90dvh] w-full overflow-hidden rounded-2xl",
+          "scroll-slim overflow-y-auto overscroll-contain",
           /* on a phone a bottom sheet is full-bleed: no side gaps, no bottom corners */
-          align === "bottom" && "safe-bottom rounded-b-none border-b-0 sm:rounded-b-2xl sm:border-b sm:pb-0",
+          align === "bottom" &&
+            "safe-bottom rounded-b-none border-b-0 sm:rounded-b-2xl sm:border-b sm:pb-0",
           wide ? "max-w-3xl" : "max-w-md",
         )}
       >
@@ -199,9 +235,15 @@ export function Modal({
           <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
             <div className="min-w-0">
               <h3 className="truncate text-lg text-text">{title}</h3>
-              {subtitle ? <p className="mt-0.5 text-xs text-muted">{subtitle}</p> : null}
+              {subtitle ? (
+                <p className="mt-0.5 text-xs text-muted">{subtitle}</p>
+              ) : null}
             </div>
-            <button className="btn-icon p-1.5" onClick={onClose} aria-label="Close">
+            <button
+              className="btn-icon p-1.5"
+              onClick={onClose}
+              aria-label="Close"
+            >
               <Icon name="close" size={18} />
             </button>
           </div>
@@ -224,13 +266,47 @@ export function Modal({
 
 /* ------------------------------------------------------------------ Toasts */
 
-export type Toast = { id: number; title: string; msg?: string; kind?: "ok" | "info" | "warn"; action?: { label: string; run: () => void } };
+export type Toast = {
+  id: number;
+  title: string;
+  msg?: string;
+  kind?: "ok" | "info" | "warn";
+  action?: { label: string; run: () => void };
+};
 
 type ToastCtx = { push: (t: Omit<Toast, "id">) => void };
 const ToastContext = createContext<ToastCtx>({ push: () => {} });
 export const useToast = () => useContext(ToastContext);
 
 let toastSeq = 1;
+
+/**
+ * Put an error where people are already looking.
+ *
+ * A failure that renders as a banner at the top of a page is a failure you never see:
+ * you are at the bottom of the studio, or halfway down a form, and the message is
+ * somewhere above the fold. The toast stack sits at the bottom of the viewport, is
+ * announced to screen readers (`role="status"`), and stacks — so it is the same place
+ * every time, for every error, from any page or none.
+ *
+ * Repeat failures still show: the error clears to null between attempts (every action
+ * in the stores does that before it runs), which re-arms the message.
+ */
+export function useErrorToast(error: { message: string } | string | null | undefined): void {
+  const toast = useToast();
+  const last = useRef<string | null>(null);
+
+  useEffect(() => {
+    const message = (typeof error === "string" ? error : error?.message ?? "").trim();
+    if (!message) {
+      last.current = null;
+      return;
+    }
+    if (last.current === message) return;
+    last.current = message;
+    toast.push({ title: message, kind: "warn" });
+  }, [error, toast]);
+}
 
 export function ToastHost({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -250,7 +326,10 @@ export function ToastHost({ children }: { children: ReactNode }) {
     [dismiss],
   );
 
-  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
+  useEffect(
+    () => () => timers.current.forEach((t) => window.clearTimeout(t)),
+    [],
+  );
 
   const value = useMemo(() => ({ push }), [push]);
 
@@ -265,19 +344,38 @@ export function ToastHost({ children }: { children: ReactNode }) {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className="toast-enter pointer-events-auto flex items-start gap-3 rounded-xl border border-line2 bg-elev/95 px-4 py-3 shadow-[0_24px_60px_-24px_rgba(0,0,0,0.9)] backdrop-blur-xl"
+            className="glass toast-enter pointer-events-auto flex items-start gap-3 rounded-xl px-4 py-3"
           >
             <span
               className={clsx(
                 "mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full",
-                t.kind === "warn" ? "bg-madder/20 text-madder" : t.kind === "info" ? "bg-turq/20 text-turq" : "bg-jade/20 text-jade",
+                t.kind === "warn"
+                  ? "bg-madder/20 text-madder"
+                  : t.kind === "info"
+                    ? "bg-turq/20 text-turq"
+                    : "bg-jade/20 text-jade",
               )}
             >
-              <Icon name={t.kind === "warn" ? "info" : t.kind === "info" ? "sparkle" : "check"} size={13} />
+              <Icon
+                name={
+                  t.kind === "warn"
+                    ? "info"
+                    : t.kind === "info"
+                      ? "sparkle"
+                      : "check"
+                }
+                size={13}
+              />
             </span>
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-semibold text-text">{t.title}</div>
-              {t.msg ? <div className="mt-0.5 text-xs leading-relaxed text-muted">{t.msg}</div> : null}
+              <div className="text-[13px] font-semibold text-text">
+                {t.title}
+              </div>
+              {t.msg ? (
+                <div className="mt-0.5 text-xs leading-relaxed text-muted">
+                  {t.msg}
+                </div>
+              ) : null}
               {t.action ? (
                 <button
                   className="mt-1.5 text-xs font-semibold text-jade underline-offset-4 hover:underline"
@@ -290,7 +388,11 @@ export function ToastHost({ children }: { children: ReactNode }) {
                 </button>
               ) : null}
             </div>
-            <button className="btn-icon -mr-1 -mt-1 p-1" onClick={() => dismiss(t.id)} aria-label="Dismiss">
+            <button
+              className="btn-icon -mr-1 -mt-1 p-1"
+              onClick={() => dismiss(t.id)}
+              aria-label="Dismiss"
+            >
               <Icon name="close" size={14} />
             </button>
           </div>
@@ -386,7 +488,11 @@ export function SeekBar({
     >
       <div className={clsx("seek-track", compact && "h-[3px]")}>
         {peaks && peaks.length ? (
-          <svg viewBox={`0 0 ${peaks.length} 100`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
+          <svg
+            viewBox={`0 0 ${peaks.length} 100`}
+            preserveAspectRatio="none"
+            className="absolute inset-0 h-full w-full"
+          >
             {peaks.map((p, i) => (
               <rect
                 key={i}
@@ -403,7 +509,15 @@ export function SeekBar({
               const x = i / peaks.length;
               if (x > ratio) return null;
               return (
-                <rect key={`f${i}`} x={i} y={(100 - p * 100) / 2} width={0.62} height={p * 100} rx={0.3} fill={`url(#seek-${uid})`} />
+                <rect
+                  key={`f${i}`}
+                  x={i}
+                  y={(100 - p * 100) / 2}
+                  width={0.62}
+                  height={p * 100}
+                  rx={0.3}
+                  fill={`url(#seek-${uid})`}
+                />
               );
             })}
             <defs>
@@ -418,7 +532,10 @@ export function SeekBar({
           <div className="seek-fill" style={{ width: `${ratio * 100}%` }} />
         )}
         {hover !== null ? (
-          <div className="absolute inset-y-0 w-px bg-goldsoft/70" style={{ left: `${hoverRatio * 100}%` }} />
+          <div
+            className="absolute inset-y-0 w-px bg-goldsoft/70"
+            style={{ left: `${hoverRatio * 100}%` }}
+          />
         ) : null}
       </div>
       {hover !== null && max > 0 ? (
@@ -446,19 +563,58 @@ export function Tabs<T extends string>({
   onChange: (id: T) => void;
   className?: string;
 }) {
+  const groupRef = useRef<HTMLDivElement>(null);
+  const [thumb, setThumb] = useState<{ x: number; w: number } | null>(null);
+
+  /* The selected segment is one pill that travels, measured off the real button so
+     tabs of different widths (one has an icon, one does not) still land exactly. */
+  useLayoutEffect(() => {
+    const group = groupRef.current;
+    if (!group) return;
+    const measure = () => {
+      const button = group.querySelector<HTMLElement>(`[data-tab="${value}"]`);
+      setThumb(button ? { x: button.offsetLeft, w: button.offsetWidth } : null);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(group);
+    return () => observer.disconnect();
+  }, [value, tabs]);
+
   return (
-    <div className={clsx("flex items-center gap-1 rounded-full border border-line bg-surface2/60 p-1", className)}>
+    <div
+      ref={groupRef}
+      className={clsx(
+        "relative flex items-center gap-1 rounded-full border border-line bg-surface2/60 p-1",
+        className,
+      )}
+    >
+      {thumb ? (
+        <span
+          className="seg-thumb"
+          style={{ transform: `translateX(${thumb.x}px)`, width: thumb.w }}
+          aria-hidden
+        />
+      ) : null}
       {tabs.map((t) => (
         <button
           key={t.id}
+          data-tab={t.id}
           onClick={() => onChange(t.id)}
           className={clsx(
-            "btn px-3 py-1.5 text-xs",
-            value === t.id ? "bg-jade/15 text-jadesoft shadow-[inset_0_0_0_1px_var(--c-line-2)]" : "text-muted hover:text-text2",
+            "pressable relative px-3 py-1.5 text-xs font-semibold",
+            value === t.id ? "text-jadesoft" : "text-muted hover:text-text2",
           )}
           aria-pressed={value === t.id}
         >
-          {t.icon ? <Icon name={t.icon} size={13} /> : null}
+          {t.icon ? (
+            <Icon
+              name={t.icon}
+              size={13}
+              className="mr-1 inline align-[-2px]"
+            />
+          ) : null}
           {t.label}
         </button>
       ))}
@@ -481,10 +637,15 @@ export function Toggle({
 }) {
   const id = useId();
   return (
-    <label htmlFor={id} className="flex cursor-pointer items-center justify-between gap-6 py-2">
+    <label
+      htmlFor={id}
+      className="flex cursor-pointer items-center justify-between gap-6 py-2"
+    >
       <span className="min-w-0">
         <span className="block text-sm font-medium text-text">{label}</span>
-        {hint ? <span className="mt-0.5 block text-xs text-muted">{hint}</span> : null}
+        {hint ? (
+          <span className="mt-0.5 block text-xs text-muted">{hint}</span>
+        ) : null}
       </span>
       <button
         id={id}
@@ -501,7 +662,9 @@ export function Toggle({
             "absolute top-[2px] h-[16px] w-[16px] rounded-full bg-bg transition-all duration-300",
             checked ? "left-[21px]" : "left-[2px]",
           )}
-          style={{ background: checked ? "var(--c-jade-ink)" : "var(--c-text-2)" }}
+          style={{
+            background: checked ? "var(--c-jade-ink)" : "var(--c-text-2)",
+          }}
         />
       </button>
     </label>
@@ -527,7 +690,9 @@ export function EmptyState({
         <Icon name={icon} size={20} />
       </span>
       <h3 className="text-lg text-text">{title}</h3>
-      {msg ? <p className="max-w-sm text-sm leading-relaxed text-muted">{msg}</p> : null}
+      {msg ? (
+        <p className="max-w-sm text-sm leading-relaxed text-muted">{msg}</p>
+      ) : null}
       {action}
     </div>
   );

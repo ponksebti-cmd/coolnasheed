@@ -59,12 +59,11 @@ create table if not exists public.reserved_handles (
   handle text primary key
 );
 
+-- The five names the project reserves for itself, so nobody can sign up as the app.
+-- Nothing here belongs to an account: an empty list of rows is the whole seed this
+-- project has.
 insert into public.reserved_handles (handle) values
-  ('coolnasheed'),('nur'),('admin'),('root'),('staff'),('system'),
-  ('umm_sumayya'),('fajr_walker'),('ibn_al_bahr'),('quiet_minaret'),
-  ('sabr_and_coffee'),('muhajir_1998'),('layla.k'),('abu_yusuf'),('zaytuna_22'),
-  ('night_of_qadr'),('halabi_in_exile'),('dust_and_light'),('rawda_listener'),
-  ('third_of_the_night'),('sokoto_sings'),('madrassa_dad')
+  ('coolnasheed'), ('admin'), ('root'), ('staff'), ('system')
 on conflict do nothing;
 
 /* --------------------------------------------------------------------- songs */
