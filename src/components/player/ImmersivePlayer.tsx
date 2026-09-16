@@ -15,6 +15,7 @@ import { CoverArt } from "../art/CoverArt";
 import { TimeRow, TransportButtons, VolumeControl } from "./Transport";
 import { QueuePanel } from "./QueuePanel";
 import { Lyrics } from "./Lyrics";
+import { LyricStage } from "./LyricStage";
 import { Equalizer, LikeButton, TrackMenu } from "../track/TrackBits";
 import {
   artistOf,
@@ -40,11 +41,14 @@ export function ImmersivePlayer() {
   const dismissError = usePlayer((s) => s.dismissError);
   const setImmersive = usePlayer((s) => s.setImmersive);
   const [tab, setTab] = useState<Tab>("lyrics");
+  /* the words over the cover: the stage takes the sheet's place rather than sitting in it */
+  const [stage, setStage] = useState(false);
 
   useBodyScrollLock(open);
   useKeyboard(
     {
-      escape: () => setImmersive(false),
+      /* one step at a time: from the stage, Escape gives the player back */
+      escape: () => (stage ? setStage(false) : setImmersive(false)),
       l: () => setTab("lyrics"),
       q: () => setTab("queue"),
     },
@@ -56,6 +60,11 @@ export function ImmersivePlayer() {
   useEffect(() => {
     if (open) setTab("lyrics");
   }, [open, trackId]);
+
+  /* a new recording starts with the sheet, not with the stage */
+  useEffect(() => {
+    setStage(false);
+  }, [trackId]);
 
   if (!open || !track) return null;
 
@@ -98,6 +107,8 @@ export function ImmersivePlayer() {
       <div className="absolute inset-0 bg-gradient-to-b from-[rgba(4,10,8,0.86)] via-[rgba(4,10,8,0.9)] to-[rgba(6,14,11,1)]" />
       <div className="grain absolute inset-0" />
 
+      {stage ? <LyricStage song={track} onClose={() => setStage(false)} /> : null}
+
       {/* header */}
       <header className="relative z-10 flex items-center justify-between gap-4 px-4 py-3 sm:px-7">
         <div className="flex min-w-0 items-center gap-3">
@@ -123,6 +134,17 @@ export function ImmersivePlayer() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {track.lines.length ? (
+            <button
+              onClick={() => setStage(true)}
+              className="btn-icon flex items-center gap-1.5 rounded-full border border-line2 px-2.5 py-1.5 text-[11px] text-text2 hover:text-text"
+              aria-label="Show the lyrics over the cover"
+              title="Words over the cover"
+            >
+              <Icon name="expand" size={14} />
+              <span className="hidden sm:inline">Over the cover</span>
+            </button>
+          ) : null}
           <div className="hidden sm:block">
             <VolumeControl />
           </div>
@@ -136,7 +158,21 @@ export function ImmersivePlayer() {
         {/* left: artwork + transport */}
         <div className="scroll-slim flex min-h-0 flex-col items-center justify-center gap-5 sm:overflow-y-auto lg:pr-2">
           <div className="relative w-full max-w-[min(78vw,430px)]">
-            <div className="over-art shadow-art relative aspect-square overflow-hidden rounded-2xl border border-line2">
+            {/* tapping the cover is the other way into the stage, which is how people
+                already expect a now-playing cover to behave */}
+            <button
+              onClick={() => (track.lines.length ? setStage(true) : undefined)}
+              className={clsx(
+                "over-art shadow-art group relative block aspect-square w-full overflow-hidden rounded-2xl border border-line2 text-left",
+                track.lines.length ? "cursor-pointer" : "cursor-default",
+              )}
+              aria-label={track.lines.length ? "Show the lyrics over the cover" : track.title}
+            >
+              <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                <span className="flex items-center gap-1.5 rounded-full bg-[rgba(3,9,7,0.7)] px-3 py-1.5 text-[11px] font-semibold text-text backdrop-blur-md">
+                  <Icon name="expand" size={13} /> words over the cover
+                </span>
+              </span>
               <CoverArt
                 path={track.artworkPath}
                 title={track.title}
@@ -159,7 +195,7 @@ export function ImmersivePlayer() {
                   </div>
                 ) : null}
               </div>
-            </div>
+            </button>
           </div>
 
           <div className="w-full max-w-[min(78vw,430px)] space-y-3">

@@ -830,6 +830,107 @@ async function main() {
   });
   host.remove();
 
+  /* ---------------------------------------------------- words over the cover */
+
+  /* The lyric stage: the artwork turned into light with the line being sung in the
+     middle of it. It is the one screen that is dark in both themes, so it carries
+     `over-art`; and it is a viewer for the same timings the sheet uses. */
+  section("The words over the cover");
+
+  const { LyricStage } = await import("../src/components/player/LyricStage");
+  /* the stage is a viewer onto the audio element, so there has to be one playing */
+  act(() => usePlayer.getState().playTrack(catalog.TRACKS[0]!.id, { kind: "home", label: "Stage" }));
+  await sleep(30);
+  const stageHost = w.document.createElement("div");
+  w.document.body.appendChild(stageHost);
+  const stageRoot = createRoot(stageHost);
+  let leftStage = 0;
+  await act(async () => {
+    stageRoot.render(
+      createElement(LyricStage, {
+        song: catalog.TRACKS[0]! as never,
+        onClose: () => {
+          leftStage += 1;
+        },
+      }),
+    );
+  });
+  await sleep(60);
+  const stageText = stageHost.textContent ?? "";
+  assert(
+    "the stage shows the words of the recording",
+    stageText.includes("ṭalaʿa al-badru") && stageText.includes("min thaniyyāti"),
+    stageText.slice(0, 120),
+  );
+  assert(
+    "it is a room of its own, dark in both themes",
+    stageHost.querySelector("section.over-art") !== null,
+    String(stageHost.firstElementChild?.className ?? ""),
+  );
+  assert(
+    "and the controls travel with it",
+    stageText.includes("Transliteration") === false &&
+      stageHost.querySelector("footer") !== null,
+    "footer present",
+  );
+
+  /* a line you tap is a line the recording goes to */
+  const lineButtons = Array.from(stageHost.querySelectorAll("button")).filter(
+    (b) => (b.textContent ?? "").includes("min thaniyyāti"),
+  );
+  await act(async () => {
+    lineButtons[0]?.click();
+  });
+  await sleep(20);
+  assert(
+    "tapping a line takes the recording there",
+    Math.abs(audioElements[0]!.currentTime - 6) < 0.01,
+    `${audioElements[0]!.currentTime}s`,
+  );
+
+  /* a tap on the room clears the chrome, and the tap that seeks does not */
+  const words = stageHost.querySelector("section.over-art > div.relative.z-10") as HTMLElement | null;
+  await act(async () => {
+    words?.click();
+  });
+  await sleep(20);
+  assert(
+    "tapping the room hides the controls",
+    stageHost.querySelector("footer")?.className.includes("opacity-0") === true,
+    String(stageHost.querySelector("footer")?.className ?? ""),
+  );
+  await act(async () => {
+    words?.click();
+  });
+  await sleep(20);
+  assert(
+    "and tapping it again brings them back",
+    stageHost.querySelector("footer")?.className.includes("opacity-100") === true,
+  );
+
+  /* Escape is one step back, not two */
+  await act(async () => {
+    w.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  });
+  assert("Escape leaves the stage", leftStage === 1, `${leftStage} closes`);
+
+  await act(async () => {
+    stageRoot.unmount();
+  });
+  stageHost.remove();
+
+  /* and the player offers the way in — from the header and from the cover itself */
+  const immersiveSource = readFileSync(
+    join(process.cwd(), "src/components/player/ImmersivePlayer.tsx"),
+    "utf8",
+  );
+  assert(
+    "the full-screen player mounts the stage and offers it twice over",
+    immersiveSource.includes("<LyricStage") &&
+      immersiveSource.includes("Show the lyrics over the cover") &&
+      immersiveSource.includes("words over the cover"),
+  );
+
   /* ------------------------------------------------------------- schema probe */
 
   section("Asking the database which version it is");
@@ -1979,6 +2080,7 @@ async function main() {
     "src/components/track/TrackViews.tsx",
     "src/components/player/PlayerBar.tsx",
     "src/components/player/ImmersivePlayer.tsx",
+    "src/components/player/LyricStage.tsx",
   ];
   const missingOverArt = overArtFiles.filter(
     (file) => !readFileSync(join(process.cwd(), file), "utf8").includes("over-art"),

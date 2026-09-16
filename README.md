@@ -32,7 +32,7 @@ npm run verify            # typecheck + contract + database + bundles + build + 
 | **Accounts** | Supabase Auth (email + password). Listening, searching and reading never need one; loving, noting, following, publishing and moderating do |
 | **Lyrics** | per-word karaoke fill, three scripts (transliteration / العربية / English), a line rail, translations, and source notes for Qurʾān and public-domain lines |
 | **Studio** | five steps: the recording, the words, the details, the cover, publish. Timings are optional — publishing has never required previewing or marking |
-| **Player** | one reused `<audio>` element, an honest error when a file will not decode, three retries with backoff when the network drops, a transport, a queue, and an immersive view |
+| **Player** | one reused `<audio>` element, an honest error when a file will not decode, three retries with backoff when the network drops, a transport, a queue, an immersive view, and the words over the cover |
 | **Library** | loved nasheeds, your sets, play history, listening totals — rows in Postgres, so they follow you to the next device |
 | **Analytics** | play beacons → per-day rollups → charts. Per-nasheed listeners and completion, per-account history, a staff dashboard at `/admin` |
 | **Moderation** | report a note, three reports hide it automatically, staff resolve it — the row stays, so a thread never silently renumbers |
@@ -405,10 +405,12 @@ probe behind a stubbed `fetch`, error translation (`apiErrorFromDb`) against the
 Postgres returns, draft saving that succeeds, fails, and is flushed while a tab goes away,
 the copyable repair SQL (including that every migration in it is guarded, since it is pasted
 onto databases that are part-way through), the lyric view, the player's retry and error paths,
-the account gates, the keyboard staying out of the way while you type, the focus landing on the
+the words over the cover — the stage that lays the lines over the artwork, seeks when a line is
+tapped, keeps its own dark ground in either theme, and steps back one place on `Escape` — the
+account gates, the keyboard staying out of the way while you type, the focus landing on the
 first field of a dialog rather than its Close button, toasts, upload fitting, and every route
 rendering.
-Current run: **151 checks.**
+Current run: **172 checks.**
 
 `npm run functions:bundle` bundles all six Edge Functions with the esbuild that is already a
 dependency, which proves every file parses and every import resolves on a machine with no Deno
