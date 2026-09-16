@@ -2068,6 +2068,49 @@ async function main() {
     /--shadow-art:/.test(css) &&
       /\.shadow-art \{\s*box-shadow: var\(--shadow-art\)/.test(css),
   );
+  /* The lift under glass, cards and the nav pill used to be a hard-coded black bloom,
+     which in daylight is exactly the "why does this look like night mode" complaint. */
+  assert(
+    "the light book lifts with its own colour too",
+    /:root\[data-theme="night"\] \{[^}]*--shadow-lift: rgba\(0, 0, 0/s.test(css) &&
+      /:root\[data-theme="dawn"\] \{[^}]*--shadow-lift: rgba\(20, 44, 34/s.test(css),
+  );
+  assert(
+    "and no rule outside the night book still blooms black",
+    css
+      .split(':root[data-theme="dawn"]')[1]
+      .replace("--shadow-lift: rgba(20, 44, 34, 0.34);", "")
+      .includes("rgba(0, 0, 0, 0.95)") === false,
+  );
+  assert(
+    "the dimmer behind a dialog is a token as well",
+    /:root\[data-theme="night"\] \{[^}]*--scrim: rgba\(3, 9, 7/s.test(css) &&
+      /:root\[data-theme="dawn"\] \{[^}]*--scrim: rgba\(18, 36, 29/s.test(css) &&
+      /\.scrim \{\s*background: var\(--scrim\)/.test(css),
+  );
+  const scrimFiles = [
+    "src/components/CommandPalette.tsx",
+    "src/components/ui/Primitives.tsx",
+  ];
+  const scrimCold = scrimFiles.filter((file) =>
+    /bg-\[rgba\(3,\s*9,\s*7/.test(readFileSync(join(process.cwd(), file), "utf8")),
+  );
+  assert(
+    "and every dialog dims through the class, not a night-black veil",
+    scrimCold.length === 0 &&
+      scrimFiles.every((file) =>
+        readFileSync(join(process.cwd(), file), "utf8").includes("scrim absolute inset-0"),
+      ),
+    scrimCold.join(", "),
+  );
+
+  /* Your own profile is the one page that promises to list everything you published,
+     so it asks the server every time instead of trusting a cached page. */
+  const profileSrc = readFileSync(join(process.cwd(), "src/pages/ProfilePage.tsx"), "utf8");
+  assert(
+    "the profile always refetches what you published",
+    /void loadEntries\(true\)/.test(profileSrc) && /void loadNotes\(true\)/.test(profileSrc),
+  );
 
   const overArtFiles = [
     "src/pages/Home.tsx",

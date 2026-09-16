@@ -256,7 +256,7 @@ export function CommandPalette() {
       aria-label="Command palette"
     >
       <div
-        className="absolute inset-0 bg-[rgba(3,9,7,0.66)] backdrop-blur-xl"
+        className="scrim absolute inset-0 backdrop-blur-xl"
         onClick={() => setCommand(false)}
         aria-hidden
       />

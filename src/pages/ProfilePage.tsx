@@ -44,8 +44,10 @@ export default function ProfilePage() {
   const library = useLibrary();
 
   useEffect(() => {
-    void loadEntries();
-    void loadNotes();
+    /* always refetch: a nasheed published on another device, or in another tab, is
+       still yours, and this page is the one place that claims to list them all */
+    void loadEntries(true);
+    void loadNotes(true);
   }, [loadEntries, loadNotes]);
 
 

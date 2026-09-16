@@ -307,6 +307,11 @@ because the photograph does not get brighter when the page does. Covers cast `--
 is a black bloom at night and a soft green-tinted one in daylight, rather than a hard black smear
 on cream.
 
+**Elevation is a token too.** Everything that floats — frosted glass, a card on hover, the nav
+pill, the dimmer behind a dialog — takes its shadow and its veil from `--shadow-lift` and `--scrim`.
+At night those are black; in the light book they are the same green the rest of it is drawn in, so
+nothing on a cream page is accidentally wearing the night book's wardrobe.
+
 **Cover art is either uploaded or absent.** When a publisher has not uploaded an image, the
 nasheed gets a plain accent tile with the first letter of its title. Nothing is generated from
 a seed and nothing pretends to be artwork: a nasheed without cover art looks like a nasheed
@@ -410,7 +415,7 @@ tapped, keeps its own dark ground in either theme, and steps back one place on `
 account gates, the keyboard staying out of the way while you type, the focus landing on the
 first field of a dialog rather than its Close button, toasts, upload fitting, and every route
 rendering.
-Current run: **172 checks.**
+Current run: **177 checks.**
 
 `npm run functions:bundle` bundles all six Edge Functions with the esbuild that is already a
 dependency, which proves every file parses and every import resolves on a machine with no Deno

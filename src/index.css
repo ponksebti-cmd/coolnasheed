@@ -51,6 +51,11 @@
   --shadow-art:
     0 50px 110px -44px rgba(0, 0, 0, 0.95),
     0 14px 34px -22px rgba(0, 0, 0, 0.7);
+  /* one colour for every lift in the app — glass, cards, the nav pill. In the night
+     book that is a black bloom; in daylight a black bloom is a bruise, so the light
+     book lifts with the same green the rest of it is drawn in. */
+  --shadow-lift: rgba(0, 0, 0, 0.95);
+  --scrim: rgba(3, 9, 7, 0.66);
   --grain-opacity: 0.16;
   color-scheme: dark;
 }
@@ -93,6 +98,8 @@
   --shadow-art:
     0 34px 70px -40px rgba(20, 44, 34, 0.34),
     0 10px 26px -18px rgba(20, 44, 34, 0.18);
+  --shadow-lift: rgba(20, 44, 34, 0.34);
+  --scrim: rgba(18, 36, 29, 0.44);
   --grain-opacity: 0.07;
   color-scheme: light;
 }
@@ -478,10 +485,16 @@
     box-shadow:
       inset 0 1px 0 var(--glass-sheen),
       inset 0 0 0 0.5px color-mix(in oklab, var(--c-line) 60%, transparent),
-      0 22px 60px -34px rgba(0, 0, 0, 0.95);
+      0 22px 60px -34px var(--shadow-lift);
   }
 
   /* heavier tint for bars that carry text over busy artwork */
+  /* the dimmer behind a dialog or the palette: dark in both books, but the light one
+     is dimmed with its own green rather than a night-black veil */
+  .scrim {
+    background: var(--scrim);
+  }
+
   .glass-bar {
     background: linear-gradient(
       180deg,
@@ -639,7 +652,7 @@
     background: var(--c-surface);
     box-shadow:
       inset 0 1px 0 var(--glass-sheen),
-      0 26px 50px -30px rgba(0, 0, 0, 0.95);
+      0 26px 50px -30px var(--shadow-lift);
   }
   /* a card that lifts on hover also gives on press — the same surface, both ways */
   .card:active {
@@ -721,7 +734,7 @@
     );
     box-shadow:
       inset 0 1px 0 var(--glass-sheen),
-      0 10px 24px -18px rgba(0, 0, 0, 0.95);
+      0 10px 24px -18px var(--shadow-lift);
     pointer-events: none;
     transition:
       transform var(--dur-base) var(--ease-spring),
