@@ -27,7 +27,7 @@ export function PlayerBar() {
 
   if (!track || !artist) {
     return (
-      <footer className="relative z-40 border-t border-line bg-elev/80 backdrop-blur-xl">
+      <footer className="glass-bar relative z-40">
         <div className="flex items-center justify-between gap-4 px-4 py-3.5">
           <div className="flex items-center gap-3 text-muted">
             <span className="grid h-11 w-11 place-items-center rounded-lg border border-dashed border-line2">
@@ -47,7 +47,7 @@ export function PlayerBar() {
   }
 
   return (
-    <footer ref={barRef} className="relative z-40 border-t border-line bg-elev/88 backdrop-blur-2xl">
+    <footer ref={barRef} className="glass-bar relative z-40">
       {/* hairline progress for mobile */}
       <div className="absolute inset-x-0 top-0 h-[2px] bg-transparent sm:hidden">
         <div className="h-full bg-gradient-to-r from-jadedeep via-jade to-gold transition-[width] duration-100" style={{ width: `${progress * 100}%` }} />
@@ -58,7 +58,7 @@ export function PlayerBar() {
         <div className="flex min-w-0 items-center gap-3">
           <button
             onClick={() => setImmersive(!immersive)}
-            className="group relative shrink-0 overflow-hidden rounded-lg border border-line"
+            className="pressable group relative shrink-0 overflow-hidden rounded-lg border border-line"
             style={{ width: 52, height: 52 }}
             aria-label="Open the immersive player"
           >

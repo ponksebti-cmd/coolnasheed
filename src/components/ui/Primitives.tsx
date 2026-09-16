@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -184,7 +185,7 @@ export function Modal({
         ref={ref}
         className={clsx(
           "relative z-10 max-h-[90dvh] w-full overflow-hidden rounded-2xl border border-line2 bg-elev shadow-[0_40px_120px_-40px_rgba(0,0,0,0.95)]",
-          "toast-enter scroll-slim overflow-y-auto overscroll-contain",
+          "materialize scroll-slim overflow-y-auto overscroll-contain",
           /* on a phone a bottom sheet is full-bleed: no side gaps, no bottom corners */
           align === "bottom" && "safe-bottom rounded-b-none border-b-0 sm:rounded-b-2xl sm:border-b sm:pb-0",
           wide ? "max-w-3xl" : "max-w-md",
@@ -446,15 +447,44 @@ export function Tabs<T extends string>({
   onChange: (id: T) => void;
   className?: string;
 }) {
+  const host = useRef<HTMLDivElement>(null);
+  const [thumb, setThumb] = useState<{ left: number; width: number } | null>(null);
+
+  /* the thumb is measured so it can sit under labels of different lengths */
+  useLayoutEffect(() => {
+    const box = host.current;
+    if (!box) return;
+    const measure = () => {
+      const el = box.querySelector<HTMLElement>('[data-active="true"]');
+      setThumb(el ? { left: el.offsetLeft, width: el.offsetWidth } : null);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, [value, tabs]);
+
   return (
-    <div className={clsx("flex items-center gap-1 rounded-full border border-line bg-surface2/60 p-1", className)}>
+    <div ref={host} className={clsx("relative flex items-center gap-1 rounded-full border border-line bg-surface2/60 p-1", className)}>
+      <span
+        className="seg-thumb"
+        aria-hidden
+        style={{
+          left: 0,
+          width: thumb ? thumb.width : 0,
+          transform: `translateX(${thumb ? thumb.left : 0}px)`,
+          opacity: thumb ? 1 : 0,
+        }}
+      />
       {tabs.map((t) => (
         <button
           key={t.id}
           onClick={() => onChange(t.id)}
+          data-active={value === t.id}
           className={clsx(
-            "btn px-3 py-1.5 text-xs",
-            value === t.id ? "bg-jade/15 text-jadesoft shadow-[inset_0_0_0_1px_var(--c-line-2)]" : "text-muted hover:text-text2",
+            "btn relative z-10 px-3 py-1.5 text-xs",
+            value === t.id ? "text-jadesoft" : "text-muted hover:text-text2",
           )}
           aria-pressed={value === t.id}
         >

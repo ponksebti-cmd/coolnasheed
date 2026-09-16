@@ -15,7 +15,19 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
   const setNur = useUi((s) => s.setNur);
   const nurOpen = useUi((s) => s.nurOpen);
   const inputRef = useRef<HTMLInputElement>(null);
+  const barRef = useRef<HTMLElement>(null);
   const [q, setQ] = useState("");
+  /* the hairline and the dissolve under the bar only exist once the page has moved */
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const scroller = barRef.current?.parentElement;
+    if (!scroller) return;
+    const onScroll = () => setScrolled(scroller.scrollTop > 2);
+    onScroll();
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => scroller.removeEventListener("scroll", onScroll);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -37,7 +49,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
   };
 
   return (
-    <header className="sticky top-0 z-30 border-b border-line bg-bg/72 backdrop-blur-xl">
+    <header ref={barRef} className="topbar" data-scrolled={scrolled}>
       <div className="flex items-center gap-2 px-3 py-2.5 sm:gap-3 sm:px-5">
         <button className="btn-icon rounded-full p-2 lg:hidden" onClick={onMenu} aria-label="Open menu">
           <Icon name="rows" size={18} />

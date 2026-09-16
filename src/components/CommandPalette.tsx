@@ -136,7 +136,7 @@ export function CommandPalette() {
   return createPortal(
     <div className="fixed inset-0 z-[110] flex items-start justify-center p-4 pt-[12vh] veil-enter" role="dialog" aria-modal="true" aria-label="Command palette">
       <div className="absolute inset-0 bg-[rgba(3,9,7,0.72)] backdrop-blur-md" onClick={() => setCommand(false)} aria-hidden />
-      <div className="relative z-10 w-full max-w-[560px] overflow-hidden rounded-2xl border border-line2 bg-elev/98 shadow-[0_40px_120px_-30px_rgba(0,0,0,1)] toast-enter">
+      <div className="glass materialize relative z-10 w-full max-w-[560px] overflow-hidden rounded-2xl shadow-[0_40px_120px_-30px_rgba(0,0,0,1)]">
         <div className="flex items-center gap-3 border-b border-line px-4 py-3">
           <Icon name="search" size={17} className="text-muted" />
           <input

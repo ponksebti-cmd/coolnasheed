@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { useLayoutEffect, useRef, useState } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
 import { Icon, type IconName } from "../ui/Icons";
 import { StarMark, PatternArt } from "../art/PatternArt";
@@ -23,6 +23,27 @@ export function Sidebar({ onNavigate, className }: { onNavigate?: () => void; cl
   const toast = useToast();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+
+  /* One pill moves between the nav items instead of each item lighting up on its
+     own. It is measured rather than assumed, so it survives a font or a label
+     changing size. */
+  const navRef = useRef<HTMLElement>(null);
+  const { pathname } = useLocation();
+  const [pill, setPill] = useState<{ top: number; height: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const host = navRef.current;
+    if (!host) return;
+    const measure = () => {
+      const el = host.querySelector<HTMLElement>('[data-active="true"]');
+      setPill(el ? { top: el.offsetTop, height: el.offsetHeight } : null);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, [pathname]);
 
   const playlists = library.playlists;
   const lovedCount = library.liked.length;
@@ -57,7 +78,18 @@ export function Sidebar({ onNavigate, className }: { onNavigate?: () => void; cl
       </div>
 
       {/* nav */}
-      <nav className="px-2.5 pb-3" aria-label="Main">
+      <nav ref={navRef} className="relative px-2.5 pb-3" aria-label="Main">
+        <span
+          className="nav-pill"
+          aria-hidden
+          style={{
+            left: 10,
+            right: 10,
+            height: pill ? pill.height : 0,
+            transform: `translateY(${pill ? pill.top : 0}px)`,
+            opacity: pill ? 1 : 0,
+          }}
+        />
         {NAV.map((item) => (
           <NavLink
             key={item.to}
@@ -72,20 +104,13 @@ export function Sidebar({ onNavigate, className }: { onNavigate?: () => void; cl
             }
           >
             {({ isActive }) => (
-              <>
-                <span
-                  className={clsx(
-                    "absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-gradient-to-b from-jadesoft to-gold transition-opacity",
-                    isActive ? "opacity-100" : "opacity-0",
-                  )}
-                />
-                <span className={clsx("absolute inset-0 rounded-lg transition-colors", isActive ? "bg-surface2" : "bg-transparent group-hover:bg-surface2/50")} />
+              <span className="relative flex w-full items-center gap-3" data-active={isActive}>
                 <Icon name={item.icon} size={17} className={clsx("relative", isActive && "text-jade")} />
                 <span className="relative flex-1">{item.label}</span>
                 {item.to === "/queue" && queueLength > 0 ? (
                   <span className="relative rounded-full bg-surface3 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-text2">{queueLength}</span>
                 ) : null}
-              </>
+              </span>
             )}
           </NavLink>
         ))}

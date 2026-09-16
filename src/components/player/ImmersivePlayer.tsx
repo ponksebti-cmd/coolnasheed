@@ -63,7 +63,7 @@ export function ImmersivePlayer() {
   const timed = timedLines(lyrics);
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex flex-col overflow-hidden bg-bg veil-enter" role="dialog" aria-modal="true" aria-label="Immersive player">
+    <div className="sheet-in fixed inset-0 z-[100] flex flex-col overflow-hidden bg-bg" role="dialog" aria-modal="true" aria-label="Immersive player">
       {/* backdrop */}
       <div className="absolute inset-0 scale-[1.6] opacity-[0.55] blur-[46px]">
         <PatternArt seed={track.seed} intensity={1.1} />

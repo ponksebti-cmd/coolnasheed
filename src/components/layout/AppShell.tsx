@@ -33,6 +33,21 @@ export function AppShell() {
   /* the catalogue, the session and the beacon, once, before anything else needs them */
   const boot = useBoot();
   const [noticeClosed, setNoticeClosed] = useState(false);
+
+  /* The blur you see for the length of a navigation and no longer. It is mounted
+     and then unmounted rather than left in the tree: a backdrop-filter layer that
+     never goes away costs a composited pass on every scroll frame. */
+  const [veil, setVeil] = useState<string | null>(null);
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    setVeil(location.pathname);
+    const t = window.setTimeout(() => setVeil(null), 520);
+    return () => window.clearTimeout(t);
+  }, [location.pathname]);
   useEffect(() => {
     if (!boot) return;
     document.documentElement.dataset.backend = boot.source;
@@ -117,7 +132,7 @@ export function AppShell() {
       {mobileNavOpen ? (
         <div className="fixed inset-0 z-[95] lg:hidden veil-enter">
           <div className="absolute inset-0 bg-[rgba(3,9,7,0.7)] backdrop-blur-sm" onClick={() => setMobileNav(false)} aria-hidden />
-          <div className="absolute inset-y-0 left-0 w-[86vw] max-w-[320px] bg-bg2 shadow-[30px_0_90px_-30px_rgba(0,0,0,1)] toast-enter">
+          <div className="absolute inset-y-0 left-0 w-[86vw] max-w-[320px] bg-bg2 shadow-[30px_0_90px_-30px_rgba(0,0,0,1)] materialize">
             <button
               className="btn-icon absolute right-2 top-3 z-10 rounded-full p-2"
               onClick={() => setMobileNav(false)}
@@ -131,41 +146,45 @@ export function AppShell() {
       ) : null}
 
       {/* main */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div ref={scroller} className="scroll-slim relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-          <TopBar onMenu={() => setMobileNav(true)} />
+      <div className="relative flex min-w-0 flex-1 flex-col">
+        {veil ? <div key={veil} className="route-veil" aria-hidden /> : null}
+        {/* the dissolve that keeps content from stopping dead at the player bar */}
+        <div className="scroll-edge flex min-h-0 flex-1 flex-col">
+          <div ref={scroller} className="scroll-slim relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+            <TopBar onMenu={() => setMobileNav(true)} />
 
-          {/* The backend answering badly is worth one line on the page. The pages
-              themselves stay usable, so this is a notice, not a wall. */}
-          {boot?.error && !noticeClosed ? (
-            <div
-              role="status"
-              className="mx-4 mt-3 flex items-start gap-2.5 rounded-xl border border-line bg-surface2/60 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-muted sm:mx-6 lg:mx-8"
-            >
-              <Icon name="server" size={14} className="mt-0.5 shrink-0 text-gold" />
-              <div className="min-w-0 flex-1">
-                <p className="text-text/90">{boot.error}</p>
-                {boot.needsSetup ? (
-                  <p className="mt-1">
-                    One command fixes it: <code className="rounded bg-bg/70 px-1.5 py-0.5 font-mono text-[11.5px] text-goldsoft">npm run setup</code>{" "}
-                    — or paste <code className="rounded bg-bg/70 px-1.5 py-0.5 font-mono text-[11.5px]">supabase/setup.sql</code> into Studio&apos;s SQL
-                    editor. Until then there is nothing to play.
-                  </p>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                onClick={() => setNoticeClosed(true)}
-                className="btn-icon -mr-1 -mt-1 shrink-0 rounded-full p-1.5"
-                aria-label="Dismiss"
+            {/* The backend answering badly is worth one line on the page. The pages
+                themselves stay usable, so this is a notice, not a wall. */}
+            {boot?.error && !noticeClosed ? (
+              <div
+                role="status"
+                className="mx-4 mt-3 flex items-start gap-2.5 rounded-xl border border-line bg-surface2/60 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-muted sm:mx-6 lg:mx-8"
               >
-                <Icon name="close" size={13} />
-              </button>
-            </div>
-          ) : null}
-          <main key={location.pathname} className={clsx("page-enter mx-auto w-full max-w-[1400px] px-4 pb-10 pt-5 sm:px-6 lg:px-8")}>
-            <Outlet />
-          </main>
+                <Icon name="server" size={14} className="mt-0.5 shrink-0 text-gold" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-text/90">{boot.error}</p>
+                  {boot.needsSetup ? (
+                    <p className="mt-1">
+                      One command fixes it: <code className="rounded bg-bg/70 px-1.5 py-0.5 font-mono text-[11.5px] text-goldsoft">npm run setup</code>{" "}
+                      — or paste <code className="rounded bg-bg/70 px-1.5 py-0.5 font-mono text-[11.5px]">supabase/setup.sql</code> into Studio&apos;s SQL
+                      editor. Until then there is nothing to play.
+                    </p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNoticeClosed(true)}
+                  className="btn-icon -mr-1 -mt-1 shrink-0 rounded-full p-1.5"
+                  aria-label="Dismiss"
+                >
+                  <Icon name="close" size={13} />
+                </button>
+              </div>
+            ) : null}
+            <main key={location.pathname} className={clsx("page-enter mx-auto w-full max-w-[1400px] px-4 pb-10 pt-5 sm:px-6 lg:px-8")}>
+              <Outlet />
+            </main>
+          </div>
         </div>
         <PlayerBar />
         <MobileTabBar />
@@ -178,7 +197,7 @@ export function AppShell() {
       <AuthModal />
 
       {/* tiny footer note, always available */}
-      <div className="pointer-events-none fixed bottom-[92px] left-1/2 z-20 hidden -translate-x-1/2 items-center gap-2 rounded-full border border-line bg-elev/85 px-3 py-1.5 text-[10.5px] text-muted backdrop-blur-md xl:flex">
+      <div className="glass pointer-events-none fixed bottom-[92px] left-1/2 z-20 hidden -translate-x-1/2 items-center gap-2 rounded-full px-3 py-1.5 text-[10.5px] text-muted xl:flex">
         <Icon name="command" size={11} />
         <span>+ K for commands · ? for shortcuts</span>
         {player.trackId ? (

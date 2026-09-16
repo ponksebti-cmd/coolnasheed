@@ -45,6 +45,27 @@
 
   --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 18px 40px -24px rgba(0, 0, 0, 0.9);
   --grain-opacity: 0.16;
+
+  /* ---- the glass material (iOS 26 · Liquid Glass) ----
+     Two traits of Apple's material are not reachable in CSS: it *refracts* the
+     backdrop (displacing pixels at the edge) and it reacts to device motion.
+     backdrop-filter has no displace function, so what follows is a stylised
+     approximation — blur + saturation + tint, a specular top edge, a shaded
+     bottom one, and springs rather than tweens. */
+  --glass-tint: 62%;
+  --glass-blur: 26px;
+  --glass-sat: 168%;
+  --glass-sheen: rgba(255, 255, 255, 0.16);
+  --glass-edge: rgba(255, 255, 255, 0.09);
+  --glass-shade: rgba(0, 0, 0, 0.26);
+  --glass-bar-blur: 30px;
+
+  /* ---- springs: instant on press, a long tail on release ---- */
+  --ease-spring: cubic-bezier(0.32, 1.4, 0.5, 1);
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-press: 120ms;
+  --dur-material: 420ms;
+  --dur-veil: 520ms;
   color-scheme: dark;
 }
 
@@ -82,6 +103,15 @@
 
   --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 14px 30px -22px rgba(20, 40, 32, 0.5);
   --grain-opacity: 0.07;
+
+  /* the same material in daylight: more tint, less saturation, a lighter sheen */
+  --glass-tint: 76%;
+  --glass-blur: 24px;
+  --glass-sat: 150%;
+  --glass-sheen: rgba(255, 255, 255, 0.7);
+  --glass-edge: rgba(255, 255, 255, 0.55);
+  --glass-shade: rgba(20, 40, 32, 0.1);
+  --glass-bar-blur: 26px;
   color-scheme: light;
 }
 
@@ -207,6 +237,71 @@
   }
 }
 
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+
+/* Elements on iOS 26 do not fade in — they *materialize*: they arrive out of focus
+   and resolve. Blur is the part a plain opacity fade is missing. */
+@keyframes materialize {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.965);
+    filter: blur(12px);
+  }
+  55% {
+    opacity: 1;
+    filter: blur(0.6px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+/* The blur that appears when you switch tabs and then goes away. */
+@keyframes veilFlash {
+  0% {
+    opacity: 0;
+    backdrop-filter: blur(0.01px);
+    -webkit-backdrop-filter: blur(0.01px);
+  }
+  38% {
+    opacity: 1;
+    backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px);
+  }
+  100% {
+    opacity: 0;
+    backdrop-filter: blur(0.01px);
+    -webkit-backdrop-filter: blur(0.01px);
+  }
+}
+
+/* A sheet rising over the page, not a panel appearing on it. */
+@keyframes sheetUp {
+  from {
+    opacity: 0;
+    transform: translateY(6%) scale(0.98);
+    filter: blur(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
 @layer base {
   * {
     border-color: var(--c-line);
@@ -292,11 +387,152 @@
     box-shadow: var(--shadow-card);
   }
 
+  /* The material: blur + saturation + tint, adaptive through the tokens, with the
+     specular top edge that is the highest-value CSS part of the look. */
   .glass {
-    background: color-mix(in oklab, var(--c-elev) 72%, transparent);
-    backdrop-filter: blur(22px) saturate(140%);
-    -webkit-backdrop-filter: blur(22px) saturate(140%);
-    border: 1px solid var(--c-line);
+    background: color-mix(in oklab, var(--c-elev) var(--glass-tint), transparent);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+    border: 1px solid var(--glass-edge);
+    box-shadow:
+      inset 0 1px 0 var(--glass-sheen),
+      inset 0 -1px 0 var(--glass-shade),
+      0 18px 50px -28px rgba(0, 0, 0, 0.9);
+  }
+
+  /* The floating bars: a deeper blur, a flat tint, and no side borders — they read
+     as one continuous sheet of glass in front of the page. */
+  .glass-bar {
+    background: color-mix(in oklab, var(--c-elev) 70%, transparent);
+    backdrop-filter: blur(var(--glass-bar-blur)) saturate(180%);
+    -webkit-backdrop-filter: blur(var(--glass-bar-blur)) saturate(180%);
+    box-shadow:
+      inset 0 1px 0 var(--glass-sheen),
+      inset 0 -1px 0 var(--glass-shade);
+  }
+
+  /* Content dissolves into the bar instead of stopping at a border. */
+  .scroll-edge {
+    position: relative;
+  }
+  .scroll-edge::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    height: 72px;
+    z-index: 15;
+    pointer-events: none;
+    background: linear-gradient(
+      to top,
+      var(--c-bg) 0%,
+      color-mix(in oklab, var(--c-bg) 72%, transparent) 42%,
+      transparent 100%
+    );
+  }
+
+  /* The bar: a sheet of glass whose hairline only exists once you have scrolled,
+     so the top of a page has no seam, and whose underside dissolves the content
+     scrolling under it instead of cutting it off. */
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    background: color-mix(in oklab, var(--c-bg) 60%, transparent);
+    backdrop-filter: blur(var(--glass-bar-blur)) saturate(180%);
+    -webkit-backdrop-filter: blur(var(--glass-bar-blur)) saturate(180%);
+    box-shadow: inset 0 1px 0 var(--glass-sheen);
+  }
+  .topbar::before,
+  .topbar::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 240ms var(--ease-out-soft);
+  }
+  .topbar::before {
+    top: 100%;
+    height: 56px;
+    background: linear-gradient(to bottom, color-mix(in oklab, var(--c-bg) 60%, transparent), transparent);
+  }
+  .topbar::after {
+    bottom: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--c-line-2) 12%, var(--c-line-2) 88%, transparent);
+  }
+  .topbar[data-scrolled="true"]::before,
+  .topbar[data-scrolled="true"]::after {
+    opacity: 1;
+  }
+
+  .materialize {
+    animation: materialize var(--dur-material) var(--ease-out-soft) both;
+  }
+
+  .sheet-in {
+    animation: sheetUp 460ms var(--ease-out-soft) both;
+  }
+
+  /* Mounted for one navigation, then unmounted: a permanent backdrop-filter layer
+     costs a composited pass on every scroll. */
+  .route-veil {
+    position: absolute;
+    inset: 0;
+    z-index: 45;
+    pointer-events: none;
+    background: color-mix(in oklab, var(--c-bg) 18%, transparent);
+    animation: veilFlash var(--dur-veil) var(--ease-out-soft) both;
+    will-change: opacity, backdrop-filter;
+  }
+
+  /* One shape travelling between states rather than four separate highlights. */
+  .nav-pill,
+  .tab-lens,
+  .seg-thumb {
+    position: absolute;
+    border-radius: 999px;
+    pointer-events: none;
+    transition:
+      transform 420ms var(--ease-spring),
+      width 420ms var(--ease-spring),
+      height 420ms var(--ease-spring),
+      opacity 220ms ease;
+    will-change: transform;
+  }
+  .nav-pill {
+    top: 0;
+    border-radius: 0.75rem;
+    background: color-mix(in oklab, var(--c-surface-2) 92%, transparent);
+    box-shadow: inset 0 1px 0 var(--glass-sheen);
+  }
+  .tab-lens {
+    height: 3px;
+    border-radius: 999px 999px 0 0;
+    background: linear-gradient(90deg, var(--c-jade-deep), var(--c-jade) 55%, var(--c-gold));
+    box-shadow: 0 0 18px -2px rgba(var(--c-glow), 0.8);
+  }
+  .seg-thumb {
+    height: calc(100% - 0.5rem);
+    top: 0.25rem;
+    background: color-mix(in oklab, var(--c-jade) 18%, transparent);
+    box-shadow:
+      inset 0 1px 0 var(--glass-sheen),
+      inset 0 0 0 1px var(--c-line-2);
+  }
+
+  /* Menus grow out of the control that opened them. */
+  .pop-in {
+    transform-origin: var(--pop-origin, top right);
+    animation: popIn 240ms var(--ease-spring) both;
+  }
+
+  .pressable {
+    transition: transform var(--dur-press) var(--ease-out-soft);
+  }
+  .pressable:active {
+    transform: scale(0.97);
   }
 
   .hairline {
@@ -393,7 +629,14 @@
     border: 1px solid var(--c-line);
     color: var(--c-text-2);
     background: color-mix(in oklab, var(--c-surface-2) 60%, transparent);
-    transition: all 0.18s ease;
+    transition:
+      transform var(--dur-press) var(--ease-out-soft),
+      background-color 0.18s ease,
+      border-color 0.18s ease,
+      color 0.18s ease;
+  }
+  .chip:active {
+    transform: scale(0.94);
   }
   .chip[data-active="true"] {
     color: var(--c-jade-ink);
@@ -417,6 +660,10 @@
     border-color: var(--c-line-2);
     background: var(--c-surface);
     box-shadow: 0 26px 50px -30px rgba(0, 0, 0, 0.95);
+  }
+  .card:active {
+    transform: scale(0.985);
+    transition-duration: var(--dur-press);
   }
 
   /* ---- text ---- */
@@ -666,5 +913,40 @@
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+
+  /* The veil is the one piece here that exists only to be looked at — it is
+     removed rather than shortened, which is also one less composited layer. */
+  .route-veil {
+    display: none;
+  }
+  .materialize,
+  .sheet-in,
+  .pop-in {
+    animation: none !important;
+  }
+  .nav-pill,
+  .tab-lens,
+  .seg-thumb {
+    transition: none !important;
+  }
+}
+
+/* Reduce Transparency: the material becomes a plain opaque surface. Everything
+   keeps its geometry — including the springs — it just stops being see-through. */
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .glass-bar,
+  .topbar,
+  .route-veil {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: var(--c-elev) !important;
+  }
+  .topbar::before {
+    display: none;
+  }
+  .nav-pill {
+    background: var(--c-surface-2);
   }
 }

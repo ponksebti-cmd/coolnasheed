@@ -73,10 +73,11 @@ export function DropdownMenu({
         <div
           ref={panel}
           className={clsx(
-            "absolute z-[80] min-w-[210px] overflow-hidden rounded-xl border border-line2 bg-elev/97 p-1.5 shadow-[0_28px_70px_-24px_rgba(0,0,0,0.95)] backdrop-blur-xl toast-enter",
+            "glass pop-in absolute z-[80] min-w-[210px] overflow-hidden rounded-xl p-1.5 shadow-[0_28px_70px_-24px_rgba(0,0,0,0.95)]",
             align === "right" ? "right-0" : "left-0",
             flip ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]",
           )}
+          style={{ ["--pop-origin" as string]: `${flip ? "bottom" : "top"} ${align === "right" ? "right" : "left"}` }}
           role="menu"
         >
           {items.map((item, i) => {

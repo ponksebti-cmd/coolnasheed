@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { clsx } from "clsx";
 import { Icon } from "../ui/Icons";
 import { PatternArt } from "../art/PatternArt";
@@ -13,16 +13,32 @@ import { useStudio } from "../../store/studio";
  * player bar as a flex sibling rather than floating over content, so nothing is ever
  * hidden behind it, and it clears the home indicator on notched phones.
  */
+/** The five columns, in order — the lens below is positioned by index. */
+const COLUMNS = ["/", "/search", "/studio", "/library", "/me"];
+
 export function MobileTabBar() {
   const account = useAccount();
   const published = useStudio((s) => s.entries.length);
+  const { pathname } = useLocation();
+  const active = COLUMNS.findIndex((to) =>
+    to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(`${to}/`),
+  );
+  /* the Publish column is not a tab — it carries its own raised button */
+  const lensVisible = active >= 0 && active !== 2;
 
   return (
-    <nav
-      className="safe-bottom z-40 border-t border-line bg-elev/94 backdrop-blur-2xl lg:hidden"
-      aria-label="Quick navigation"
-    >
-      <ul className="flex items-stretch">
+    <nav className="glass-bar safe-bottom z-40 lg:hidden" aria-label="Quick navigation">
+      <ul className="relative flex items-stretch">
+        <span
+          className="tab-lens"
+          aria-hidden
+          style={{
+            left: 0,
+            width: `${100 / COLUMNS.length}%`,
+            transform: `translateX(${(lensVisible ? active : 0) * 100}%)`,
+            opacity: lensVisible ? 1 : 0,
+          }}
+        />
         <li className="flex-1">
           <Tab to="/" icon="home" label="Home" end />
         </li>
@@ -107,9 +123,6 @@ function Tab({ to, icon, label, end }: { to: string; icon: Parameters<typeof Ico
     >
       {({ isActive }) => (
         <>
-          {isActive ? (
-            <span className="absolute inset-x-5 top-0 h-[2px] rounded-full bg-jade" aria-hidden />
-          ) : null}
           <Icon name={icon} size={19} strokeWidth={isActive ? 2.2 : 1.8} />
           <span className="text-[9.5px] font-bold uppercase tracking-[0.12em]">{label}</span>
         </>
