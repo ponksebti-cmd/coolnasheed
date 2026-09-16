@@ -46,6 +46,22 @@ export default function Search() {
   const [sort, setSort] = useState<Sort>("relevance");
   const [view, setView] = useState<"rows" | "grid">("rows");
   const inputRef = useRef<HTMLInputElement>(null);
+  /* What is in the field, which is what the page searches with. The address bar
+     follows it a moment later — it never leads it. */
+  const [draft, setDraft] = useState(q);
+  const written = useRef<string | null>(null);
+  const writeTimer = useRef(0);
+
+  useEffect(() => {
+    if (written.current !== null && written.current === q) {
+      written.current = null;
+      return;
+    }
+    written.current = null;
+    setDraft(q);
+  }, [q]);
+
+  useEffect(() => () => window.clearTimeout(writeTimer.current), []);
 
   useEffect(() => {
     const focus = () => inputRef.current?.focus();
@@ -58,6 +74,21 @@ export default function Search() {
     if (value) next.set(key, value);
     else next.delete(key);
     setParams(next, { replace: true });
+  };
+
+  /** Put the query in the address bar. */
+  const writeQuery = (value: string) => {
+    written.current = value;
+    setParam("q", value || null);
+  };
+
+  /* Once the typing pauses, not once per keystroke: writing the URL on every character
+     is what let a space typed at the end of a word be overtaken by the write for the
+     character before it. */
+  const onType = (value: string) => {
+    setDraft(value);
+    window.clearTimeout(writeTimer.current);
+    writeTimer.current = window.setTimeout(() => writeQuery(value), 220);
   };
 
   const tag = tagParam;
@@ -83,7 +114,7 @@ export default function Search() {
   const [searchError, setSearchError] = useState<string | null>(null);
 
   useEffect(() => {
-    const needle = q.trim();
+    const needle = draft.trim();
     if (!needle || !hasSupabase) {
       setRemote(null);
       setSearchError(null);
@@ -110,7 +141,7 @@ export default function Search() {
       live = false;
       clearTimeout(timer);
     };
-  }, [q]);
+  }, [draft]);
 
   const loadMore = async () => {
     if (!remote?.next) return;
@@ -135,11 +166,11 @@ export default function Search() {
   };
 
   const results = useMemo<Track[]>(() => {
-    const fromServer = remote && remote.query === q.trim() ? remote.items : null;
+    const fromServer = remote && remote.query === draft.trim() ? remote.items : null;
     let list = fromServer
       ? fromServer.slice()
-      : q.trim()
-        ? searchTracks(q)
+      : draft.trim()
+        ? searchTracks(draft)
         : TRACKS.slice();
     if (tag) list = list.filter((track) => track.tags.includes(tag));
 
@@ -164,10 +195,13 @@ export default function Search() {
         break;
     }
     return sorted;
-  }, [q, tag, sort, version, remote]);
+  }, [draft, tag, sort, version, remote]);
 
-  const artists = useMemo(() => (q.trim() ? searchArtists(q) : []), [q, version]);
-  const collections = useMemo(() => (q.trim() ? searchCollections(q) : []), [q, version]);
+  const artists = useMemo(() => (draft.trim() ? searchArtists(draft) : []), [draft, version]);
+  const collections = useMemo(
+    () => (draft.trim() ? searchCollections(draft) : []),
+    [draft, version],
+  );
   const filtersOn = !!tag;
 
   return (
@@ -185,14 +219,22 @@ export default function Search() {
             </span>
             <input
               ref={inputRef}
-              value={q}
-              onChange={(e) => setParam("q", e.target.value || null)}
+              value={draft}
+              onChange={(e) => onType(e.target.value)}
               placeholder="A title, a publisher, a tag, or a line of poetry…"
               className="w-full rounded-2xl border border-line2 bg-bg2/70 py-3.5 pl-11 pr-24 text-[15px] text-text outline-none transition-all placeholder:text-muted/80 focus:border-jade/45 focus:shadow-[0_0_0_5px_rgba(var(--c-glow),0.09)]"
               aria-label="Search nasheeds"
             />
-            {q ? (
-              <button className="btn-icon absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-2" onClick={() => setParam("q", null)} aria-label="Clear search">
+            {draft ? (
+              <button
+                className="btn-icon absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-2"
+                onClick={() => {
+                  window.clearTimeout(writeTimer.current);
+                  setDraft("");
+                  writeQuery("");
+                }}
+                aria-label="Clear search"
+              >
                 <Icon name="close" size={16} />
               </button>
             ) : (
@@ -218,7 +260,7 @@ export default function Search() {
 
       {/* artists + sets when searching */}
       {artists.length ? (
-        <Rail2 label="publishers" title={`Publishers matching “${q}”`}>
+        <Rail2 label="publishers" title={`Publishers matching “${draft}”`}>
           {artists.map((a, i) => (
             <div key={a.id} className="w-[168px] shrink-0 sm:w-[190px]">
               <ArtistCard artist={a} index={i} />
@@ -228,7 +270,7 @@ export default function Search() {
       ) : null}
 
       {collections.length ? (
-        <Rail2 label="sets" title={`Sets matching “${q}”`}>
+        <Rail2 label="sets" title={`Sets matching “${draft}”`}>
           {collections.map((c, i) => (
             <div key={c.id} className="w-[240px] shrink-0 sm:w-[268px]">
               <CollectionCard collection={c} index={i} />
@@ -240,8 +282,8 @@ export default function Search() {
       {/* results */}
       <section>
         <SectionHeader
-          label={q ? `${results.length} results` : filtersOn ? `${results.length} tagged ${tag}` : "the catalogue"}
-          title={q ? `Matching “${q}”` : filtersOn ? `Tagged ${tag}` : TRACKS.length ? "Every nasheed here" : "Nothing published yet"}
+          label={draft ? `${results.length} results` : filtersOn ? `${results.length} tagged ${tag}` : "the catalogue"}
+          title={draft ? `Matching “${draft}”` : filtersOn ? `Tagged ${tag}` : TRACKS.length ? "Every nasheed here" : "Nothing published yet"}
           action={
             <div className="flex items-center gap-2">
               <div className="hidden items-center gap-1 sm:flex">
@@ -313,7 +355,15 @@ export default function Search() {
               suggestions.length ? (
                 <div className="mt-1 flex flex-wrap justify-center gap-1.5">
                   {suggestions.map((s) => (
-                    <button key={s} className="chip hover:border-line2 hover:text-text" onClick={() => setParam("q", s)}>
+                    <button
+                      key={s}
+                      className="chip hover:border-line2 hover:text-text"
+                      onClick={() => {
+                        window.clearTimeout(writeTimer.current);
+                        setDraft(s);
+                        writeQuery(s);
+                      }}
+                    >
                       {s}
                     </button>
                   ))}
@@ -323,14 +373,14 @@ export default function Search() {
           />
         ) : view === "rows" ? (
           <div className="panel rounded-2xl p-2 sm:p-3">
-            <TrackList tracks={results} showHeader context={{ kind: "search", label: q ? `Search · ${q}` : tag ? `Tag · ${tag}` : "Catalogue" }} />
+            <TrackList tracks={results} showHeader context={{ kind: "search", label: draft ? `Search · ${draft}` : tag ? `Tag · ${tag}` : "Catalogue" }} />
           </div>
         ) : (
-          <TrackCardGrid tracks={results} context={{ kind: "search", label: q ? `Search · ${q}` : "Catalogue" }} />
+          <TrackCardGrid tracks={results} context={{ kind: "search", label: draft ? `Search · ${draft}` : "Catalogue" }} />
         )}
       </section>
 
-      {!q && !filtersOn && COLLECTIONS.length ? (
+      {!draft && !filtersOn && COLLECTIONS.length ? (
         <section>
           <SectionHeader label="or start here" title="Sets, if you would rather not choose" />
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">

@@ -90,12 +90,62 @@ export function useNow(intervalMs = 60_000): Date {
   return now;
 }
 
+/**
+ * Is this the kind of element the browser already knows how to press?
+ *
+ * A `<button>`, a link, a summary, or anything carrying a control role or a tab stop:
+ * pressing space on it activates it. The app-wide shortcuts have to know that, or one
+ * press does two things — the control fires *and* the shortcut fires.
+ */
+export function isInteractiveTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.tagName !== "string") return false;
+  const tag = el.tagName;
+  if (tag === "BUTTON" || tag === "A" || tag === "SUMMARY") return true;
+  if (typeof el.closest !== "function") return false;
+  return (
+    el.closest(
+      'button, a[href], summary, [role="button"], [role="link"], [role="menuitem"], ' +
+        '[role="menuitemcheckbox"], [role="tab"], [role="switch"], [role="checkbox"], ' +
+        '[role="radio"], [role="option"], [tabindex]:not([tabindex="-1"])',
+    ) !== null
+  );
+}
+
+/**
+ * One tap, one effect.
+ *
+ * Menus dismiss on `pointerdown`, which is what makes them feel immediate — but the
+ * browser still sends the `click` that ends that gesture, and by then the panel is
+ * gone, so the click lands on whatever the panel was covering and presses it. The tap
+ * that closed something must not also press the button underneath it.
+ */
+export function swallowNextClick(ms = 450): void {
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    window.clearTimeout(timer);
+    window.removeEventListener("click", onClick, true);
+  };
+  const onClick = (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    finish();
+  };
+  const timer = window.setTimeout(finish, ms);
+  window.addEventListener("click", onClick, true);
+}
+
 export function useOnClickAway<T extends HTMLElement>(onAway: () => void, active = true) {
   const ref = useRef<T | null>(null);
   useEffect(() => {
     if (!active) return;
     const handler = (e: PointerEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onAway();
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onAway();
+        swallowNextClick();
+      }
     };
     window.addEventListener("pointerdown", handler);
     return () => window.removeEventListener("pointerdown", handler);
@@ -140,6 +190,13 @@ export function useKeyboard(map: Record<string, (e: KeyboardEvent) => void>, act
          while someone is typing their name, not the shortcuts sheet. Modified
          combinations still go through, and Escape still closes what is open. */
       if (typing && !mod && key !== "Escape") return;
+
+      /* And a space or an Enter pressed while a *control* has focus belongs to that
+         control. Without this, pressing space on a focused button did both things: the
+         browser pressed the button, and the app-wide space toggled playback — one press
+         registering twice, which is what made a dismissed sheet feel like it kept
+         pressing the thing underneath it. */
+      if (!mod && (key === " " || key === "Enter") && isInteractiveTarget(e.target)) return;
 
       const combo = `${mod ? "mod+" : ""}${e.shiftKey && key.length > 1 ? "shift+" : ""}${key.toLowerCase()}`;
       const fn = saved.current[combo] ?? saved.current[key];

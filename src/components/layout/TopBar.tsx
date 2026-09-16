@@ -13,11 +13,29 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
   const setSetting = useLibrary((s) => s.setSetting);
   const inputRef = useRef<HTMLInputElement>(null);
   const [q, setQ] = useState("");
+  /* What this field has already handed to the address bar. */
+  const written = useRef<string | null>(null);
+  const writeTimer = useRef(0);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-    setQ(params.get("q") ?? "");
+    const url = params.get("q") ?? "";
+    /* The field leads and the address bar follows.
+     *
+     * The write lags the keystrokes by a moment, so the URL arriving back is old news:
+     * letting it set the field is how a space typed at the end of a word got overtaken
+     * by the write for the character before it, and the whole line of text jumped back
+     * a character. A URL that arrived from anywhere else — a link, back, a tag — still
+     * fills the field. */
+    if (written.current !== null && written.current === url) {
+      written.current = null;
+      return;
+    }
+    written.current = null;
+    setQ(url);
   }, [location.search]);
+
+  useEffect(() => () => window.clearTimeout(writeTimer.current), []);
 
   useEffect(() => {
     const focus = () => {
@@ -29,8 +47,17 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
   }, []);
 
   const onSearch = (value: string) => {
+    written.current = value;
     const next = value ? `/search?q=${encodeURIComponent(value)}` : "/search";
     navigate(next, { replace: location.pathname === "/search" });
+  };
+
+  /* Once the typing pauses, not once per keystroke: a navigation per character makes
+     the field and the URL fight over the same text. */
+  const onType = (value: string) => {
+    setQ(value);
+    window.clearTimeout(writeTimer.current);
+    writeTimer.current = window.setTimeout(() => onSearch(value), 220);
   };
 
   return (
@@ -59,6 +86,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
           )}
           onSubmit={(e) => {
             e.preventDefault();
+            window.clearTimeout(writeTimer.current);
             onSearch(q);
           }}
           role="search"
@@ -69,10 +97,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
           <input
             ref={inputRef}
             value={q}
-            onChange={(e) => {
-              setQ(e.target.value);
-              onSearch(e.target.value);
-            }}
+            onChange={(e) => onType(e.target.value)}
             placeholder="Search nasheeds, publishers, a line of poetry…"
             aria-label="Search CoolNasheed"
             className="w-full rounded-full border border-line bg-surface2/60 py-2 pl-9 pr-16 text-[13px] text-text outline-none transition-all placeholder:text-muted/80 focus:border-jade/45 focus:bg-surface2 focus:shadow-[0_0_0_4px_rgba(var(--c-glow),0.08)]"

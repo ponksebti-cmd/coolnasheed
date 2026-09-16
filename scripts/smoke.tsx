@@ -1619,6 +1619,35 @@ async function main() {
     fired.join(","),
   );
 
+  /* A focused control owns its own space: the browser presses the button, and the
+     app-wide play/pause must not fire as well. Two effects from one press is what made
+     dismissing a sheet feel like it kept pressing what was underneath it. */
+  const { isInteractiveTarget, swallowNextClick } = await import("../src/lib/hooks");
+  const control = w.document.createElement("button");
+  const roleControl = w.document.createElement("span");
+  roleControl.setAttribute("role", "button");
+  control.appendChild(roleControl);
+  w.document.body.appendChild(control);
+  assert(
+    "a button is something the browser presses",
+    isInteractiveTarget(control) === true && isInteractiveTarget(roleControl) === true,
+  );
+  fired.length = 0;
+  press(control, " ");
+  assert(
+    "so a space on a button is the button's, and does not also play/pause",
+    fired.length === 0,
+    fired.join(","),
+  );
+  press(control, "Enter");
+  assert("and so is Enter", fired.length === 0, fired.join(","));
+  press(control, " ", { metaKey: true });
+  assert(
+    "while a modified combination is still the app's",
+    fired.includes("space"),
+    fired.join(","),
+  );
+
   fired.length = 0;
   press(w.document.body, " ");
   press(w.document.body, "?");
@@ -1628,6 +1657,26 @@ async function main() {
     fired.join(",") === "space,question,n",
     fired.join(","),
   );
+  control.remove();
+
+  /* One tap, one effect: the tap that dismisses a menu must not also press what the
+     menu was covering. */
+  const under = w.document.createElement("button");
+  let pressed = 0;
+  under.addEventListener("click", () => {
+    pressed += 1;
+  });
+  w.document.body.appendChild(under);
+  swallowNextClick();
+  under.dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true }));
+  assert(
+    "the tap that closed something does not press what it covered",
+    pressed === 0,
+    `pressed ${pressed} time(s)`,
+  );
+  under.dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true }));
+  assert("and the next tap presses normally", pressed === 1, `pressed ${pressed} time(s)`);
+  under.remove();
   await act(async () => {
     probeRoot.unmount();
   });
@@ -2333,6 +2382,15 @@ async function main() {
       /:root\[data-theme="dawn"\] \{[^}]*--shadow-lift: rgba\(20, 44, 34/s.test(css),
   );
   assert(
+    "a menu that dismisses itself swallows the tap that dismissed it",
+    /swallowNextClick\(\);/.test(
+      readFileSync(join(process.cwd(), "src/components/ui/Menu.tsx"), "utf8"),
+    ) &&
+      /export function swallowNextClick/.test(
+        readFileSync(join(process.cwd(), "src/lib/hooks.ts"), "utf8"),
+      ),
+  );
+  assert(
     "gold ink is a token too, because gold is bright at night and dark in daylight",
     /:root\[data-theme="night"\] \{[^}]*--c-gold-ink: #241a06/s.test(css) &&
       /:root\[data-theme="dawn"\] \{[^}]*--c-gold-ink: #fdf8ec/s.test(css) &&
@@ -2475,7 +2533,25 @@ async function main() {
     "search asks the database instead of only looking at what booted",
     /api\.songs\(\{\s*q: needle/.test(searchSrc) &&
       /offset: remote\.next/.test(searchSrc) &&
-      /searchTracks\(q\)/.test(searchSrc),
+      /searchTracks\(draft\)/.test(searchSrc),
+  );
+  /* The field is the source of truth while somebody is typing: the address bar is
+     written once the typing pauses, and a URL arriving back from that write is not
+     allowed to overwrite the text — which is how a space at the end of a word used to
+     be swallowed by the write for the character before it. */
+  const topbarSrc = readFileSync(join(process.cwd(), "src/components/layout/TopBar.tsx"), "utf8");
+  assert(
+    "the search field keeps what is being typed, and the address bar follows it",
+    /onChange=\{\(e\) => onType\(e\.target\.value\)\}/.test(topbarSrc) &&
+      /window\.setTimeout\(\(\) => onSearch\(value\), 220\)/.test(topbarSrc) &&
+      /written\.current === url/.test(topbarSrc),
+  );
+  assert(
+    "and the search page does the same, so a space is never overtaken",
+    /value=\{draft\}/.test(searchSrc) &&
+      /window\.setTimeout\(\(\) => writeQuery\(value\), 220\)/.test(searchSrc) &&
+      /written\.current === q\b/.test(searchSrc) &&
+      /const needle = draft\.trim\(\)/.test(searchSrc),
   );
   assert(
     "and it says so while it waits, and keeps a way to ask for more",

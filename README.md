@@ -44,7 +44,9 @@ npm run verify            # typecheck + contract + database + bundles + build + 
 
 Keyboard: `Space` play/pause · `N`/`B` next/previous · `←`/`→` seek · `I` immersive ·
 `L` love · `M` mute · `⌘K` palette · `/` search · `?` every shortcut. Shortcuts are ignored
-while you are typing in a field, and nothing opens while an input has focus.
+while you are typing in a field, and nothing opens while an input has focus. Outside a field
+a space belongs to whatever control has focus, so one press never does two things — and the
+tap that dismisses a menu is swallowed, so it cannot also press what the menu covered.
 
 ---
 
@@ -459,7 +461,7 @@ tapped, keeps its own dark ground in either theme, and steps back one place on `
 account gates, the keyboard staying out of the way while you type, the focus landing on the
 first field of a dialog rather than its Close button, toasts, upload fitting, and every route
 rendering.
-Current run: **208 checks.**
+Current run: **217 checks.**
 
 `npm run functions:bundle` bundles all six Edge Functions with the esbuild that is already a
 dependency, which proves every file parses and every import resolves on a machine with no Deno

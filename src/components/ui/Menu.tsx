@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { clsx } from "clsx";
+import { swallowNextClick } from "../../lib/hooks";
 import { Icon, type IconName } from "./Icons";
 
 export type MenuItem = {
@@ -42,7 +43,10 @@ export function DropdownMenu({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (!root.current?.contains(e.target as Node)) setOpen(false);
+      if (root.current?.contains(e.target as Node)) return;
+      setOpen(false);
+      /* the tap that dismissed the menu must not also press what it covered */
+      swallowNextClick();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
