@@ -144,11 +144,29 @@ catalogue. Nothing is hidden: the same rows are public and three things reach pa
 | --- | --- |
 | a search | `songs?q=` — `ilike` over the title, the transliteration, the Arabic and the note, through a trigram index, 60 rows at a time with a "More results" tail |
 | a loved nasheed older than the window | `ensureSongs(ids)` in `src/lib/boot.ts`, which folds the answer into the registry (`adoptSongs`) |
-| a reciter's back catalogue | `ensureArtistSongs(handle)`, the same way |
+| a reciter's back catalogue | `ensureArtist(handle)` — one call to `publisher_profile` brings the person *and* everything they published, so a reciter who is off-window is not mistaken for a handle that never existed |
 
 The window is the newest rows, which is the order the home page reads them in, and `npm run sql:test`
 proves that against a database holding 320 nasheeds: 300 travel, the newest ones travel, and
 everything left out is still in the table and still findable.
+
+### What "production ready" means here
+
+The app is finished as an app: it builds in four seconds, the suites are green, nothing fake is
+left anywhere in it, and every request that can fail explains itself in a sentence. What stands
+between the checkout and a public launch is not code.
+
+| Already true | Still on you |
+| --- | --- |
+| one paste builds the schema from nothing, and a second paste is a no-op | paste `public/setup.sql` into a single new SQL editor tab and run it — the file is idempotent by design |
+| three storage buckets, their limits and their policies arrive with the schema | deploy the six Edge Functions, and set the one secret they need |
+| RLS fences every table; uploads are the publisher's own folder or they are refused | turn email confirmation on for anything public, and point Auth's Site URL at wherever the client lives |
+| the bundle carries only the publishable key, and the smoke run fails if a secret ever appears in the client | nothing in the repo deploys itself: there is no CI, and no runner is needed |
+| the suites never touch a live project: `sql:test` builds a real Postgres in-process | — |
+
+Two things are deliberately not there yet, and neither is required to launch: the app is not an
+installable PWA, and there is no "forgot password" mail flow — a signed-in listener can change a
+password, and one who has forgotten it needs an admin to help.
 
 ### What the database does for itself
 
@@ -461,7 +479,7 @@ tapped, keeps its own dark ground in either theme, and steps back one place on `
 account gates, the keyboard staying out of the way while you type, the focus landing on the
 first field of a dialog rather than its Close button, toasts, upload fitting, and every route
 rendering.
-Current run: **217 checks.**
+Current run: **222 checks.**
 
 `npm run functions:bundle` bundles all six Edge Functions with the esbuild that is already a
 dependency, which proves every file parses and every import resolves on a machine with no Deno

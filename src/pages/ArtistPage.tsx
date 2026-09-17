@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { clsx } from "clsx";
 import { Icon } from "../components/ui/Icons";
@@ -8,7 +8,7 @@ import { ArtistCard, CollectionCard, Rail, RailItem } from "../components/collec
 import { TrackList } from "../components/track/TrackViews";
 import { ARTISTS, COLLECTIONS, durationOf, formatCount, getArtist, statsFor, tracksByArtist, tracksOf } from "../data/catalog";
 import { formatTotal, plural } from "../lib/format";
-import { ensureArtistSongs } from "../lib/boot";
+import { ensureArtist } from "../lib/boot";
 import { useCatalogVersion } from "../lib/hooks";
 import { seededShuffle } from "../lib/math";
 import { usePlayer } from "../store/player";
@@ -21,18 +21,48 @@ export default function ArtistPage() {
   const followed = useLibrary((s) => (id ? s.followedArtists.includes(id) : false));
   const toggleArtist = useLibrary((s) => s.toggleArtist);
 
-  /* A reciter's back catalogue may reach past the catalogue window; ask the server for
-     all of it before drawing the page's lists. */
+  /* A reciter may be off-window entirely — profile and catalogue both — so the page asks
+     the server for the person and everything they published before it decides they do not
+     exist. `ensureArtist` adopts both, and the registry bump redraws the page. */
   const version = useCatalogVersion();
+  const [looking, setLooking] = useState(true);
   useEffect(() => {
-    if (id) void ensureArtistSongs(id);
-  }, [id]);
+    if (!id) {
+      setLooking(false);
+      return;
+    }
+    let live = true;
+    setLooking(true);
+    void ensureArtist(id).finally(() => {
+      if (live) setLooking(false);
+    });
+    return () => {
+      live = false;
+    };
+  }, [id, version]);
 
   const tracks = useMemo(
     () => (id ? tracksByArtist(id) : []),
     [id, version],
   );
   const ids = tracks.map((t) => t.id);
+
+  /* Still asking: a reciter whose profile the catalogue window left out has not been
+     proved absent yet, and saying so would be a lie for as long as the request is in
+     the air. */
+  if (!artist && looking) {
+    return (
+      <div className="space-y-6" aria-busy="true">
+        <div className="skeleton h-40 rounded-3xl" />
+        <div className="skeleton h-6 w-52 rounded-full" />
+        <div className="space-y-2">
+          {[0, 1, 2, 3].map((n) => (
+            <div key={n} className="skeleton h-12 rounded-xl" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   if (!artist) {
     return (

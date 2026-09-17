@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 import {
   TRACKS,
+  adoptArtists,
   adoptSongs,
   catalogSyncedAt,
   getTrack,
@@ -174,15 +175,57 @@ export async function ensureSongs(ids: string[]): Promise<number> {
   }
 }
 
-/** Everything a reciter published, for their page, including what the window missed. */
-export async function ensureArtistSongs(handle: string): Promise<number> {
+/**
+ * A reciter's page, fetched whole.
+ *
+ * Their *profile* can be off-window too, and that is the part that used to break: the page
+ * looked the handle up in the registry, did not find it, and said "no such reciter" about
+ * somebody whose nasheeds were playing a moment earlier. `publisher_profile` answers with
+ * the person and everything they published in one call, so one request fills in both.
+ */
+export async function ensureArtist(handle: string): Promise<number> {
   if (!hasSupabase || !handle) return 0;
   try {
-    const page = await api.songs({ owner: handle, limit: 200 });
-    return adoptSongs(page.items);
+    const profile = await api.publisher(handle);
+    const user = profile.user;
+    if (!user?.handle) return 0;
+    adoptArtists([
+      {
+        id: user.handle,
+        profileId: user.profileId,
+        handle: user.handle,
+        name: user.name,
+        nameAr: user.nameAr,
+        role: user.tagline || "Publisher",
+        origin: user.city || "\u2014",
+        bio: user.bio ?? "",
+        accent: user.accent,
+        verified: Boolean(user.verified),
+        kind: user.kind,
+        avatarPath: user.avatarPath ?? null,
+        songs: profile.songs.length,
+        followers: profile.followers,
+      },
+    ]);
+    /* The RPC hands back rows in the client's own shape; only the two list columns
+       need the same guard `songFromRow` gives them, since the payload is JSON. */
+    return adoptSongs(
+      profile.songs
+        .filter((song) => song && song.id && song.audioPath)
+        .map((song) => ({
+          ...song,
+          tags: Array.isArray(song.tags) ? song.tags : [],
+          lines: Array.isArray(song.lines) ? song.lines : [],
+        })),
+    );
   } catch {
     return 0;
   }
+}
+
+/** Everything a reciter published, including what the window missed. */
+export async function ensureArtistSongs(handle: string): Promise<number> {
+  return ensureArtist(handle);
 }
 
 /** Re-read the catalogue after publishing, so the new nasheed is everywhere at once. */

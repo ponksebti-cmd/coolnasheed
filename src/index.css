@@ -536,6 +536,23 @@
      where a light source would be, a saturated backdrop blur, a hairline that is
      brighter along the top edge than the bottom (the specular rim), and a soft
      drop shadow so it floats instead of sticking. */
+  /* A placeholder that breathes rather than spins: the shape of what is coming, in the
+     page's own surface colours. Used where a page is waiting on one small request and
+     saying nothing would otherwise be read as an answer. */
+  .skeleton {
+    background:
+      linear-gradient(
+          100deg,
+          transparent 18%,
+          color-mix(in oklab, var(--c-surface-3) 80%, transparent) 42%,
+          transparent 66%
+        )
+        var(--c-surface-2);
+    background-size: 240% 100%;
+    border: 1px solid var(--c-line);
+    animation: var(--animate-shimmer);
+  }
+
   .glass {
     background: linear-gradient(
       180deg,

@@ -282,7 +282,7 @@ export function MiniTrack({
   index,
   queue,
   context,
-  /** a tighter row, for a chart that should not own the page */
+  /** a one-line row, for a chart that should not own the page */
   dense = false,
 }: {
   track: Track;
@@ -297,8 +297,10 @@ export function MiniTrack({
   return (
     <div
       className={clsx(
-        "group flex items-center gap-3 rounded-xl border transition-colors",
-        dense ? "px-2 py-1" : "px-2.5 py-2",
+        "group flex items-center rounded-xl border transition-colors",
+        /* a chart row is one line tall: the whole strip of six is shorter than three
+           ordinary rows used to be */
+        dense ? "gap-2 px-2 py-0.5" : "gap-3 px-2.5 py-2",
         isCurrent
           ? "border-jade/25 bg-jade/[0.07]"
           : "border-transparent hover:border-line hover:bg-surface2/50",
@@ -306,7 +308,8 @@ export function MiniTrack({
     >
       <span
         className={clsx(
-          "w-4 shrink-0 text-center text-[11px] tabular-nums",
+          "shrink-0 text-center tabular-nums",
+          dense ? "w-3.5 text-[10.5px]" : "w-4 text-[11px]",
           isCurrent ? "text-jade" : "text-muted",
         )}
       >
@@ -315,7 +318,7 @@ export function MiniTrack({
       <div
         className={clsx(
           "relative shrink-0 overflow-hidden rounded-lg ring-1 ring-line",
-          dense ? "h-8 w-8" : "h-10 w-10",
+          dense ? "h-7 w-7" : "h-10 w-10",
         )}
       >
         <CoverArt
@@ -340,22 +343,38 @@ export function MiniTrack({
         </button>
       </div>
       <div className="min-w-0 flex-1">
-        <div
-          className={clsx(
-            "truncate font-semibold",
-            dense ? "text-[12.5px]" : "text-[13px]",
-            isCurrent ? "text-jadesoft" : "text-text",
-          )}
-        >
-          {track.title}
-        </div>
-        <div className="truncate text-[11px] text-muted">{artist.name}</div>
+        {dense ? (
+          /* one line: the title, then who recites it */
+          <div className="flex items-baseline gap-1.5">
+            <span
+              className={clsx(
+                "truncate text-[12.5px] font-semibold",
+                isCurrent ? "text-jadesoft" : "text-text",
+              )}
+            >
+              {track.title}
+            </span>
+            <span className="truncate text-[11px] text-muted">{artist.name}</span>
+          </div>
+        ) : (
+          <>
+            <div
+              className={clsx(
+                "truncate text-[13px] font-semibold",
+                isCurrent ? "text-jadesoft" : "text-text",
+              )}
+            >
+              {track.title}
+            </div>
+            <div className="truncate text-[11px] text-muted">{artist.name}</div>
+          </>
+        )}
       </div>
       <span className="hidden shrink-0 items-center gap-1 text-[10.5px] tabular-nums text-muted sm:flex">
         <Icon name="waveform" size={11} />
         {formatCount(statsFor(track).plays)}
       </span>
-      <span className="hidden w-12 shrink-0 text-right text-[11px] tabular-nums text-muted md:block">
+      <span className="hidden w-12 shrink-0 text-right text-[11px] tabular-nums text-muted lg:block">
         {formatTime(durationOf(track))}
       </span>
     </div>

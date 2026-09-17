@@ -263,7 +263,12 @@ export default function Home() {
         <SectionHeader
           label="this week"
           title="Most played"
-          subtitle={trending.length ? "Counted from real plays in the last seven days." : "No plays recorded in the last seven days yet."}
+          subtitle={
+            trending.length
+              ? "Real plays, last seven days."
+              : "No plays recorded in the last seven days yet."
+          }
+          className="mb-2.5"
           action={
             <Link to="/search" className="btn btn-ghost !px-3 !py-1.5">
               Everything <Icon name="chevronRight" size={13} />
@@ -271,7 +276,8 @@ export default function Home() {
           }
         />
         {popular.length ? (
-          <div className="panel grid gap-1 rounded-2xl p-2 sm:grid-cols-2 sm:p-3">
+          /* three columns from lg: the chart is a strip, not a section */
+          <div className="panel grid gap-0.5 rounded-2xl p-1.5 sm:grid-cols-2 sm:p-2 lg:grid-cols-3">
             {popular.map((t, i) => (
               <MiniTrack
                 key={t.id}

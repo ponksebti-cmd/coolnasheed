@@ -2557,6 +2557,27 @@ async function main() {
     "and it says so while it waits, and keeps a way to ask for more",
     /Searching every nasheed/.test(searchSrc) && /More results/.test(searchSrc),
   );
+  /* The chart is a strip. Six rows was not the problem — three rows of two-line rows
+     under a full-weight header was: it read as a section of the page rather than as a
+     glance at what is being played. Now a row is one line tall, three to a row on a
+     wide screen, so the whole thing is two lines of a page. */
+  const cardsSrcForChart = readFileSync(
+    join(process.cwd(), "src/components/collection/Cards.tsx"),
+    "utf8",
+  );
+  const homeSrcForChart = readFileSync(join(process.cwd(), "src/pages/Home.tsx"), "utf8");
+  assert(
+    "the chart is a strip: one-line rows, three to a row",
+    /dense \? "gap-2 px-2 py-0\.5"/.test(cardsSrcForChart) &&
+      /lg:grid-cols-3/.test(homeSrcForChart) &&
+      /trending\.slice\(0, 6\)/.test(homeSrcForChart),
+  );
+  assert(
+    "and a chart row stays one line tall whatever the title is",
+    /dense \? \(\s*\/\* one line/.test(cardsSrcForChart) &&
+      /dense \? "h-7 w-7" : "h-10 w-10"/.test(cardsSrcForChart),
+  );
+
   const bootSrc = readFileSync(join(process.cwd(), "src/lib/boot.ts"), "utf8");
   assert(
     "a page that needs a song outside the window can fetch it",
@@ -2570,11 +2591,32 @@ async function main() {
     /export function adoptSongs/.test(catalogSrc),
   );
   assert(
+    "a reciter whose profile is off-window is fetched whole, not called absent",
+    /export async function ensureArtist\(/.test(bootSrc) &&
+      /api\.publisher\(handle\)/.test(bootSrc) &&
+      /adoptArtists\(\[/.test(bootSrc) &&
+      /profile\.songs\s*\.filter\(\(song\) => song && song\.id && song\.audioPath\)/.test(bootSrc),
+  );
+  const artistPageSrc = readFileSync(join(process.cwd(), "src/pages/ArtistPage.tsx"), "utf8");
+  assert(
+    "and the page waits for that answer before saying no such reciter",
+    /ensureArtist\(id\)/.test(artistPageSrc) &&
+      /if \(!artist && looking\)/.test(artistPageSrc) &&
+      /aria-busy="true"/.test(artistPageSrc) &&
+      /setLooking\(true\)/.test(artistPageSrc),
+  );
+  assert(
+    "a waiting page shows a placeholder, and the placeholder respects reduced motion",
+    /\.skeleton \{/.test(css) &&
+      /animation: var\(--animate-shimmer\)/.test(css) &&
+      /prefers-reduced-motion: reduce/.test(css),
+  );
+  assert(
     "the loved list and a reciter's page ask for what the window left out",
     /ensureSongs\(library\.liked\)/.test(
       readFileSync(join(process.cwd(), "src/pages/LibraryPage.tsx"), "utf8"),
     ) &&
-      /ensureArtistSongs\(id\)/.test(
+      /ensureArtist\(id\)/.test(
         readFileSync(join(process.cwd(), "src/pages/ArtistPage.tsx"), "utf8"),
       ),
   );
